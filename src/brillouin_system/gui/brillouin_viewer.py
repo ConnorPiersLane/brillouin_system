@@ -578,20 +578,19 @@ class BrillouinViewer(QWidget):
 
     def display_result(self, fitting: FittingResults):
         frame = fitting.frame
-        spectrum = fitting.sline
-        interpeak = fitting.inter_peak_distance_px
-        fit = fitting.fitted_spectrum
+        spectrum = fitting.fitted_spectrum.sline
+        interpeak = fitting.fitted_spectrum.inter_peak_distance
         freq_shift_ghz = fitting.freq_shift_ghz
 
-        x_fit_refined = fitting.x_fit_refined
-        y_fit_refined = fitting.y_fit_refined
+        x_fit_refined = fitting.fitted_spectrum.x_fit_refined
+        y_fit_refined = fitting.fitted_spectrum.y_fit_refined
 
         row_idx = np.argmax(frame.sum(axis=1))
         x_px = np.arange(len(spectrum))
 
         # --- Image Plot ---
         self.ax_img.clear()
-        self.ax_img.imshow(frame, cmap="gray", aspect='equal', interpolation='none', origin="lower")
+        self.ax_img.imshow(frame, cmap="gray", aspect='equal', interpolation='none', origin="upper")
         self.ax_img.set_title(f"Camera Frame | Selected Middle Row: {row_idx}")
         self.ax_img.set_xticks(np.arange(0, frame.shape[1], 10))
         self.ax_img.set_yticks(np.arange(0, frame.shape[0], 5))

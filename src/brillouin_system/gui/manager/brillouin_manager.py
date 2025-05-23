@@ -9,11 +9,13 @@ from brillouin_system.devices.cameras.allied.base_mako import BaseMakoCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.measurement_data import MeasurementData
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.my_dataclasses.fitting_results import FittingResults
 from brillouin_system.utils import brillouin_spectrum_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
+from brillouin_system.utils.brillouin_spectrum_fitting import get_sline_from_image
 
 
 def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
@@ -24,43 +26,8 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
     return img.astype(np.uint8)
 
 
-def select_image_row_for_fitting(frame: np.ndarray, window_size: int) -> tuple[np.ndarray, list]:
-    """
-    Select the brightest region in the image for Brillouin fitting.
-    If window_size is even, chooses the brighter neighbor to center the window.
-    Returns the sum of a vertical window of rows centered (or near-centered) on the brightest row.
-    """
-    row_sums = frame.sum(axis=1)
-    center_row = np.argmax(row_sums)
 
-    if window_size % 2 == 1:
-        # Odd window: center cleanly
-        half_window = window_size // 2
-        start = max(center_row - half_window, 0)
-        end = min(center_row + half_window + 1, frame.shape[0])
-    else:
-        # Even window: test both neighbor-centered options
-        upper_start = max(center_row - window_size // 2, 0)
-        lower_start = max(center_row - window_size // 2 + 1, 0)
-
-        upper_end = min(upper_start + window_size, frame.shape[0])
-        lower_end = min(lower_start + window_size, frame.shape[0])
-
-        upper_sum = row_sums[upper_start:upper_end].sum()
-        lower_sum = row_sums[lower_start:lower_end].sum()
-
-        if lower_sum > upper_sum:
-            start, end = lower_start, lower_end
-        else:
-            start, end = upper_start, upper_end
-
-    selected_rows = list(range(start, end))
-    summed_spectrum = frame[start:end, :].sum(axis=0)
-
-    # sline, rows
-    return summed_spectrum, selected_rows
-
-
+# TODO: update this, input should be calibration results
 def compute_frequency_shift(fsr: float, sd: float, interpeak_px: float):
     if interpeak_px is np.nan:
         return None
@@ -81,7 +48,6 @@ class BrillouinManager:
                  zaber: ZaberLinearController | ZaberLinearDummy,
                  mako_camera: BaseMakoCamera,
                  is_sample_illumination_continuous: bool = False,
-                 n_pixel_rows: int = 3,
                  sd : float = 0,
                  fsr: float = 0,
                  ):
@@ -210,27 +176,17 @@ class BrillouinManager:
             frame = self.subtract_background(frame)
 
         # Fit sline
-        sline, rows = select_image_row_for_fitting(frame=frame, window_size=3)
+        sline = get_sline_from_image(frame=frame)
 
-        # Fit the spectrum
-        interpeak_px, fitted_spect, x_pixels, lorentzian_parameters = brillouin_spectrum_fitting.fitSpectrum(
-            np.copy(sline.astype(float)), 1e-4, 1e-4, 50
+
+        fitted_spectrum: FittedSpectrum = brillouin_spectrum_fitting.fitSpectrum(
+            np.copy(sline.astype(float)), is_reference_mode=self.is_reference_mode
         )
 
-        x_fit, y_fit = brillouin_spectrum_fitting.refine_fitted_spectrum(x_pixels, lorentzian_parameters, factor=10)
-
-        freq_shift_ghz = compute_frequency_shift(fsr=self.fsr, sd=self.sd, interpeak_px=interpeak_px)
-
+        freq_shift_ghz = compute_frequency_shift(fsr=self.fsr, sd=self.sd, interpeak_px=fitted_spectrum.inter_peak_distance)
         return FittingResults(
             frame=frame,
-            sline=sline,
-            used_rows=rows,
-            inter_peak_distance_px=interpeak_px,
-            fitted_spectrum=fitted_spect,
-            x_pixels=x_pixels,
-            x_fit_refined = x_fit,
-            y_fit_refined = y_fit,
-            lorentzian_parameters=lorentzian_parameters,
+            fitted_spectrum=fitted_spectrum,
             sd=self.sd,
             fsr=self.fsr,
             freq_shift_ghz=freq_shift_ghz

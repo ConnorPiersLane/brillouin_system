@@ -2,70 +2,133 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGroupBox,
     QPushButton, QApplication
 )
+from brillouin_system.config.fitting_config import (
+    sample_config,
+    reference_config,
+    sline_config,
+    save_find_peaks_config_section,
+    save_selected_rows,
+    find_peaks_config_toml_path,
+)
 
 
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("Camera Configuration")
+        self.setWindowTitle("Peak Detection Settings")
         self.setMinimumSize(500, 400)
+
+        self.sample_inputs = {}
+        self.reference_inputs = {}
+
         layout = QVBoxLayout()
-
-        # --- Spectrum Fitting Group ---
-        spectrum_group = QGroupBox("Spectrum Fitting")
-        spectrum_layout = QVBoxLayout()
-
-        self.window_size_label = QLabel("Fitting Window Size (rows):")
-        self.window_size_input = QLineEdit()
-
-        self.fit_threshold_label = QLabel("Fit Threshold:")
-        self.fit_threshold_input = QLineEdit()
-
-        self.sample_label = QGroupBox("Sample:"
-
-        self.measurement_label = QLabel("Measurement:")
-        self.measurement_input = QLineEdit()
-
-        spectrum_layout.addWidget(self.window_size_label)
-        spectrum_layout.addWidget(self.window_size_input)
-        spectrum_layout.addWidget(self.fit_threshold_label)
-        spectrum_layout.addWidget(self.fit_threshold_input)
-        spectrum_layout.addWidget(self.sample_label)
-        spectrum_layout.addWidget(self.sample_input)
-        spectrum_layout.addWidget(self.measurement_label)
-        spectrum_layout.addWidget(self.measurement_input)
-
-        spectrum_group.setLayout(spectrum_layout)
-        layout.addWidget(spectrum_group)
-
-        # --- Buttons ---
-        self.apply_button = QPushButton("Apply")
-        self.cancel_button = QPushButton("Cancel")
-        self.apply_button.clicked.connect(self.accept)
-        self.cancel_button.clicked.connect(self.reject)
-
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.apply_button)
-        button_row.addWidget(self.cancel_button)
-
-        layout.addLayout(button_row)
+        layout.addWidget(self.create_row_input_block())
+        layout.addWidget(self.create_spectrum_fitting_group())
+        layout.addLayout(self.create_save_button())
         self.setLayout(layout)
 
-    def get_settings(self):
-        return {
-            "spectrum_window_size": self.window_size_input.text(),
-            "spectrum_fit_threshold": self.fit_threshold_input.text(),
-            "sample": self.sample_input.text(),
-            "measurement": self.measurement_input.text()
-        }
+        self.load_initial_values()
+
+    def create_row_input_block(self):
+        row = QHBoxLayout()
+        self.selected_rows_label = QLabel("Selected Pixel Rows (e.g. 4,5,6):")
+        self.selected_rows_input = QLineEdit()
+        self.selected_rows_input.textChanged.connect(self.on_rows_input_changed)
+        row.addWidget(self.selected_rows_label)
+        row.addWidget(self.selected_rows_input)
+        container = QGroupBox("Rows of Pixel to be summed")
+        container.setLayout(row)
+        return container
+
+    def create_spectrum_fitting_group(self):
+        group = QGroupBox("Spectrum Fitting")
+        layout = QVBoxLayout()
+        layout.addWidget(self.create_config_group("Sample", sample_config, self.sample_inputs))
+        layout.addWidget(self.create_config_group("Reference", reference_config, self.reference_inputs))
+        group.setLayout(layout)
+        return group
+
+    def create_config_group(self, title, config_obj, inputs_dict):
+        group = QGroupBox(title)
+        layout = QVBoxLayout()
+        for field in self.field_names():
+            row = QHBoxLayout()
+            label = QLabel(field.replace("_", " ").capitalize() + ":")
+            input_field = QLineEdit()
+            input_field.textChanged.connect(self.make_handler(config_obj, field))
+            inputs_dict[field] = input_field
+            row.addWidget(label)
+            row.addWidget(input_field)
+            layout.addLayout(row)
+        group.setLayout(layout)
+        return group
+
+    def make_handler(self, config_obj, field):
+        def handler(val):
+            parsed = self._parse_value(val, field)
+            config_obj.set(field, parsed)
+        return handler
+
+    def create_save_button(self):
+        self.save_button = QPushButton("Save Values")
+        self.save_button.clicked.connect(self.on_save_values_clicked)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.addStretch()
+        bottom_row.addWidget(self.save_button)
+
+        return bottom_row
+
+    def field_names(self):
+        return [
+            "prominence_fraction",
+            "min_peak_width",
+            "min_peak_height",
+            "rel_height",
+            "wlen_pixels",
+        ]
+
+    def load_initial_values(self):
+        # Load rows
+        self.selected_rows_input.setText(",".join(str(x) for x in sline_config.get().selected_rows))
+
+        # Load sample and reference config values
+        for field in self.field_names():
+            self.sample_inputs[field].setText(str(getattr(sample_config.get(), field)))
+            self.reference_inputs[field].setText(str(getattr(reference_config.get(), field)))
+
+    def on_rows_input_changed(self, text: str):
+        try:
+            rows = [int(x.strip()) for x in text.split(",") if x.strip().isdigit()]
+            sline_config.set("selected_rows", rows)
+        except ValueError:
+            pass  # Optional: display validation feedback
+
+    def on_save_values_clicked(self):
+        try:
+            save_selected_rows(find_peaks_config_toml_path, sline_config)
+            save_find_peaks_config_section(find_peaks_config_toml_path, "sample", sample_config)
+            save_find_peaks_config_section(find_peaks_config_toml_path, "reference", reference_config)
+            print("[ConfigDialog] Saved successfully.")
+        except Exception as e:
+            print(f"[ConfigDialog] Error while saving: {e}")
+
+    def _parse_value(self, value: str, field: str):
+        value = value.strip()
+        if value.lower() == "none":
+            return None
+        try:
+            if "fraction" in field or "rel" in field:
+                return float(value)
+            return int(value)
+        except ValueError:
+            return None
 
 
 if __name__ == "__main__":
     import sys
     app = QApplication(sys.argv)
     dialog = ConfigDialog()
-    if dialog.exec_():
-        print("Settings:", dialog.get_settings())
-    else:
-        print("Dialog cancelled.")
+    dialog.show()
+    sys.exit(app.exec_())

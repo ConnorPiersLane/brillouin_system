@@ -4,22 +4,66 @@ from scipy.signal import find_peaks
 
 import numpy as np
 
-def find_brillouin_peak_locations(sline):
-    PROMINENCE_FRACTION = 0.05
-    MIN_PEAK_WIDTH = 2
-    MIN_PEAK_HEIGHT = 100
-    REL_HEIGHT = 0.5
-    WLEN_PIXELS = 30
+from brillouin_system.config.fitting_config import reference_config, sample_config
+from brillouin_system.config.fitting_config import sline_config
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
+
+def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
+    """
+    Sum the specified vertical rows in the image to produce the Brillouin sline.
+    If the row list is invalid or empty, use the full vertical range.
+
+    Parameters:
+        frame (np.ndarray): 2D image from the camera
+
+    Returns:
+        np.ndarray: Summed 1D spectrum (sline)
+    """
+    rows = list(sline_config.get().selected_rows)
+
+    height = frame.shape[0]
+
+    if not rows or not all(0 <= r < height for r in rows):
+        print("[select_sline_from_image] Warning: Invalid or empty row list — using full image height.")
+        rows = list(range(height))
+
+    sline = frame[rows, :].sum(axis=0)
+    return sline
+
+
+
+def find_brillouin_peak_locations(sline, is_reference_mode: bool):
     pos_sline = np.clip(sline, 0, None)
+
+    if is_reference_mode:
+        find_peak_config = reference_config.get()
+    else:
+        find_peak_config = sample_config.get()
+
+    if find_peak_config.prominence_fraction is None:
+        prominence = None
+    else:
+        prominence = find_peak_config.prominence_fraction * np.max(pos_sline)
+
+    min_peak_width = find_peak_config.min_peak_width
+    min_peak_height = find_peak_config.min_peak_height
+
+    if find_peak_config.rel_height is None:
+        rel_height = 0.5
+    else:
+        rel_height = find_peak_config.rel_height
+
+    wlen_pixels = find_peak_config.wlen_pixels
+
 
     pk_ind, pk_info = find_peaks(
         sline,
-        prominence=PROMINENCE_FRACTION * np.max(pos_sline),
-        width=MIN_PEAK_WIDTH,
-        height=MIN_PEAK_HEIGHT,
-        rel_height=REL_HEIGHT,
-        wlen=WLEN_PIXELS
+        prominence=prominence,
+        width=min_peak_width,
+        height=min_peak_height,
+        rel_height=rel_height,
+        wlen=wlen_pixels
     )
     return pk_ind, pk_info
 
@@ -40,14 +84,22 @@ def select_top_two_peaks(pk_ind, pk_info):
     return selected_pk_ind, selected_pk_info
 
 
-def fitSpectrum(sline, xtol=1e-6, ftol=1e-6, maxfev=500):
-    pk_ind, pk_info = find_brillouin_peak_locations(sline)
+def fitSpectrum(sline, is_reference_mode: bool) -> FittedSpectrum:
+    pk_ind, pk_info = find_brillouin_peak_locations(sline, is_reference_mode=is_reference_mode)
     pix = np.arange(sline.shape[0])
 
     if len(pk_ind) < 1:
-        interPeaksteps = np.nan
-        fittedSpect = np.nan * np.ones_like(sline)
-        return interPeaksteps, fittedSpect, pix, None
+        return FittedSpectrum(
+            sline=sline,
+            x_pixels=pix,
+            fitted_spectrum=np.nan * np.ones_like(sline),
+            x_fit_refined=pix,
+            y_fit_refined=np.nan * np.ones_like(sline),
+            lorentzian_parameters=np.full(7, np.nan),
+            left_peak_pixel=np.nan,
+            right_peak_pixel=np.nan,
+            inter_peak_distance=np.nan
+        )
 
     pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
 
@@ -64,16 +116,39 @@ def fitSpectrum(sline, xtol=1e-6, ftol=1e-6, maxfev=500):
           pk_hts[1], pk_ind[1], pk_wids[1], np.amin(sline)]
 
     try:
-        popt, _ = curve_fit(_2Lorentzian, pix, sline, p0=p0, ftol=ftol, xtol=xtol)
+        popt, _ = curve_fit(_2Lorentzian, pix, sline, p0=p0, ftol=1e-6, xtol=1e-6)
         interPeaksteps = np.abs(popt[4] - popt[1])
         fittedSpect = _2Lorentzian(pix, *popt)
+
+        x_fit, y_fit = refine_fitted_spectrum(pix, popt, factor=10)
+
+        fitted_spectrum = FittedSpectrum(
+            sline=sline,
+            x_pixels=pix,
+            fitted_spectrum=fittedSpect,
+            x_fit_refined=x_fit,
+            y_fit_refined=y_fit,
+            lorentzian_parameters=popt,
+            left_peak_pixel=popt[1],
+            right_peak_pixel=popt[4],
+            inter_peak_distance=interPeaksteps
+        )
+
     except Exception as e:
         print(f"[fitSpectrum] Fitting failed: {e}")
-        popt = np.nan
-        interPeaksteps = np.nan
-        fittedSpect = np.nan * np.ones_like(sline)
+        fitted_spectrum = FittedSpectrum(
+            sline=sline,
+            x_pixels=pix,
+            fitted_spectrum=np.nan * np.ones_like(sline),
+            x_fit_refined=pix,
+            y_fit_refined=np.nan * np.ones_like(sline),
+            lorentzian_parameters=np.full(7, np.nan),
+            left_peak_pixel=np.nan,
+            right_peak_pixel=np.nan,
+            inter_peak_distance=np.nan
+        )
 
-    return interPeaksteps, fittedSpect, pix, popt
+    return fitted_spectrum
 
 
 def _2Lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offs):
