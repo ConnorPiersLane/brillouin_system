@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from brillouin_system.my_dataclasses.calibration import CalibrationResults
+from brillouin_system.utils.calibration import CalibrationResults
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition

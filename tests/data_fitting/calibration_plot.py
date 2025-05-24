@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from brillouin_system.my_dataclasses.calibration import (
+from brillouin_system.utils.calibration import (
     CalibrationData,
     CalibrationResults,
-    calibrate, calibration_fig,
+    calibrate, get_calibration_fig,
 )
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
@@ -44,13 +44,13 @@ def test_show_calibration_plot():
         data.append(spectra_per_freq)
 
     # Build CalibrationData object
-    cal_data = CalibrationData(n_per_freq=10, freqs=freqs, data=data)
+    cal_data = CalibrationData(n_per_freq=10, freqs=freqs, fitted_spectras=data)
 
     # Run calibration
     results: CalibrationResults = calibrate(cal_data)
 
     # Generate plot for 'distance' mode
-    fig = calibration_fig(cal_data, results, reference="right")
+    fig = get_calibration_fig(results, reference="right")
 
     # Display the plot
     plt.show()

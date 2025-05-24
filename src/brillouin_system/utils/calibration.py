@@ -1,6 +1,10 @@
+import io
 from dataclasses import dataclass
 
 import numpy as np
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel
+from matplotlib.backends.backend_template import FigureCanvas
 
 from brillouin_system.config.config import CalibrationConfig
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
@@ -10,12 +14,12 @@ from matplotlib.figure import Figure
 @dataclass
 class CalibrationData:
     """
-    len(freqs) == len(data)
-    len(data[0]) == n_per_freq
+    len(freqs) == len(fitted_spectras)
+    len(fitted_spectras[0]) == n_per_freq
     """
     n_per_freq: int
     freqs: list[float]
-    data: list[list[FittedSpectrum]]
+    fitted_spectras: list[list[FittedSpectrum]]
 
 
 @dataclass
@@ -52,7 +56,7 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
     all_fits = []
     freqs = []
 
-    for freq, fs_list in zip(data.freqs, data.data):
+    for freq, fs_list in zip(data.freqs, data.fitted_spectras):
         for fs in fs_list:
             if fs.is_success:
                 all_fits.append(fs)
@@ -80,10 +84,11 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
     )
 
 
-def calibration_fig(calibration_data: CalibrationData,
-                    calibration_result: CalibrationResults,
-                    reference: str) -> Figure:
+def get_calibration_fig(calibration_result: CalibrationResults,
+                        reference: str) -> Figure:
     assert reference in ["left", "right", "distance"], "Invalid reference type"
+
+    calibration_data: CalibrationData = calibration_result.data
 
     # Helper functions for extracting reference value
     def extract_left(fs): return fs.left_peak_center_px
@@ -110,7 +115,7 @@ def calibration_fig(calibration_data: CalibrationData,
     grouped_pixels = []
     grouped_freqs = []
 
-    for freq, fs_list in zip(calibration_data.freqs, calibration_data.data):
+    for freq, fs_list in zip(calibration_data.freqs, calibration_data.fitted_spectras):
         valid_pixels = [extract(fs) for fs in fs_list if fs.is_success]
         if valid_pixels:
             grouped_pixels.append(valid_pixels)
@@ -145,3 +150,30 @@ def calibration_fig(calibration_data: CalibrationData,
     ax.legend()
 
     return fig
+
+
+def render_calibration_to_pixmap(calibration_results, reference: str) -> QPixmap:
+    fig = get_calibration_fig(calibration_results, reference)
+
+    # Save figure to buffer
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)  # prevent it from trying to display
+
+    buf.seek(0)
+    image = QImage.fromData(buf.getvalue(), format='PNG')
+    return QPixmap.fromImage(image)
+
+class CalibrationImageDialog(QDialog):
+    def __init__(self, pixmap: QPixmap, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Calibration Plot")
+        self.setMinimumSize(800, 600)
+
+        layout = QVBoxLayout()
+        label = QLabel()
+        label.setPixmap(pixmap)
+        label.setScaledContents(True)
+        layout.addWidget(label)
+
+        self.setLayout(layout)

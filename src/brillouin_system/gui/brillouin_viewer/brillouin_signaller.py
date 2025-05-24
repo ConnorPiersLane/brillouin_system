@@ -1,13 +1,29 @@
-import numpy as np
+from contextlib import contextmanager
+from typing import Callable
+
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication, QThread
 import time
 
-from brillouin_system.config.config import calibration_config, CalibrationConfig
+from brillouin_system.config.config import calibration_config
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
 from brillouin_system.my_dataclasses.background_data import BackgroundData
-from brillouin_system.my_dataclasses.calibration import CalibrationData
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
+
+
+@contextmanager
+def force_reference_mode(manager: BrillouinManager, emit_state: Callable[[bool], None]):
+    was_sample_mode = not manager.is_reference_mode
+    if was_sample_mode:
+        manager.change_to_reference_mode()
+        emit_state(True)
+        time.sleep(0.2)
+    try:
+        yield
+    finally:
+        if was_sample_mode:
+            manager.change_to_sample_mode()
+            emit_state(False)
 
 
 
@@ -35,7 +51,8 @@ class BrillouinSignaller(QObject):
     frame_and_fit_ready = pyqtSignal(object)
     measurement_result_ready = pyqtSignal(list)
     camera_shutter_state_changed = pyqtSignal(bool)
-    calibration_results_ready = pyqtSignal(object)
+    calibration_finished = pyqtSignal()
+    calibration_result_ready = pyqtSignal(object)
 
 
     def __init__(self, manager: BrillouinManager):
@@ -49,6 +66,8 @@ class BrillouinSignaller(QObject):
 
     # ------- State control -------
     # SLOTS
+
+
 
     @pyqtSlot()
     def on_gui_ready(self):
@@ -268,54 +287,31 @@ class BrillouinSignaller(QObject):
                 break
 
     @pyqtSlot()
+    def set_save_images_state(self, do_save_images: bool):
+        self.manager.do_save_images = do_save_images
+
+    @pyqtSlot()
+    def get_calibration_results(self):
+        self.calibration_result_ready.emit(self.manager.calibration_results)
+
+    @pyqtSlot()
     def run_calibration(self):
-        gui_in_sample_mode = False
-        # Ensure reference mode:
-        if not self.manager.is_reference_mode:
-            gui_in_sample_mode = True
-            self.manager.change_to_reference_mode()
-            self.reference_mode_state.emit(True)
-            time.sleep(0.2)
+        config = calibration_config.get()
 
-        # get config
-        config: CalibrationConfig = calibration_config.get()
-        freqs = config.calibration_freqs
-        n_per_freq = config.n_per_freq
+        def emit_display_result(display: DisplayResults):
+            self.frame_and_fit_ready.emit(display)
 
-        data = []
+        try:
+            with force_reference_mode(self.manager, self.reference_mode_state.emit):
+                success = self.manager.perform_calibration(config, on_step=emit_display_result)
 
-        for f in freqs:
-            data_per_f = []
-            for i in range(n_per_freq):
-                try:
-                    self.manager.microwave.set_frequency(f)
-                    fitting = self.manager.snap_and_get_fitting()
-                    data_per_f.append(fitting)
+            if success:
+                self.calibration_finished.emit()
+            else:
+                self.log_message.emit("[Calibration] Calibration failed.")
 
-                    display_results = self.manager.get_display_results_from_fitting(fitting)
-                    self._update_gui(display_results)
-                except Exception as e:
-                    self.log_message.emit(f"[Brillouin Signaller] Failed run {i} at {f:.3f} GHz: {e}")
-                    continue
-            data.append(data_per_f)
-
-        cali_data: CalibrationData = CalibrationData(n_per_freq=n_per_freq, freqs=freqs, data=data)
-
-        self.manager.update_calibration(cali_data)
-        self.calibration_results_ready.emit(self.manager.calibration_results)
-
-        if gui_in_sample_mode:
-            self.manager.change_to_sample_mode()
-            self.reference_mode_state.emit(False)
-
-        return None
-
-
-    @pyqtSlot(bool)
-    def set_save_images_state(self, enabled: bool):
-        self.manager.do_save_images = enabled
-        self.log_message.emit(f"[Manager] Save Images: {enabled}")
-
+        except Exception as e:
+            self.log_message.emit(f"[Calibration] Exception: {e}")
 
     @pyqtSlot(int, str, float,)
     def take_measurements(self, n: int, which_axis: str, step: float):

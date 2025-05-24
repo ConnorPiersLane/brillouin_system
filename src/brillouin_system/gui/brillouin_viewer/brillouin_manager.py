@@ -1,15 +1,16 @@
 import threading
 import time
+from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import calibration_config
+from brillouin_system.config.config import calibration_config, CalibrationConfig
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
-from brillouin_system.my_dataclasses.calibration import CalibrationResults, CalibrationData, calibrate
+from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurement_data import MeasurementData
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
@@ -159,9 +160,7 @@ class BrillouinManager:
 
         return frame
 
-    def update_calibration(self, calibration_data: CalibrationData):
-        self.calibration_results = calibrate(calibration_data)
-        print("[Manager] Calibration updated")
+
 
 
 
@@ -173,6 +172,27 @@ class BrillouinManager:
         )
 
         return fitted_spectrum
+
+    def perform_calibration(self, config: CalibrationConfig, on_step: Callable[[FittedSpectrum], None]) -> bool:
+        try:
+            data = []
+            for freq in config.calibration_freqs:
+                freq_data = []
+                self.microwave.set_frequency(freq)
+                for _ in range(config.n_per_freq):
+                    fs = self.snap_and_get_fitting()
+                    display = self.get_display_results_from_fitting(fs)
+                    on_step(display)
+                    freq_data.append(fs)
+                data.append(freq_data)
+
+            cali_data = CalibrationData(freqs=config.calibration_freqs, n_per_freq=config.n_per_freq, fitted_spectras=data)
+            self.calibration_results = calibrate(cali_data)
+            return True
+        except Exception as e:
+            print(f"[Manager] Calibration failed: {e}")
+            return False
+
 
     def compute_freq_shift(self, fitting: FittedSpectrum) -> float | None:
         if not fitting.is_success or self.calibration_results is None:

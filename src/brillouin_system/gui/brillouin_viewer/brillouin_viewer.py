@@ -12,8 +12,8 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 
+from brillouin_system.config.config import calibration_config
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -21,7 +21,7 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManagerDummy
 from brillouin_system.my_dataclasses.background_data import BackgroundData
-from brillouin_system.my_dataclasses.calibration import CalibrationResults
+from brillouin_system.utils.calibration import CalibrationResults, render_calibration_to_pixmap, CalibrationImageDialog
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.measurement_data import MeasurementData
@@ -67,7 +67,7 @@ brillouin_manager = BrillouinManager(
 
 class BrillouinViewer(QWidget):
 
-    # Signals
+    # Signals Outgoing
     gui_ready = pyqtSignal()
     apply_camera_settings_requested = pyqtSignal(dict)
     toggle_camera_shutter_requested = pyqtSignal()
@@ -86,6 +86,8 @@ class BrillouinViewer(QWidget):
     take_measurement_requested = pyqtSignal(int, str, float)
     toggle_save_images_requested = pyqtSignal(bool)
     shutdown_requested = pyqtSignal()
+    get_calibration_results_requested = pyqtSignal()
+
 
     def __init__(self):
         super().__init__()
@@ -120,9 +122,11 @@ class BrillouinViewer(QWidget):
         self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
         self.toggle_save_images_requested.connect(self.brillouin_signaller.set_save_images_state)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
+        self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
+
 
         # Receiving signals
-        self.brillouin_signaller.calibration_results_ready.connect(self.store_calibration_results)
+        self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
         self.brillouin_signaller.background_subtraction_state.connect(self.update_bg_subtraction)
         self.brillouin_signaller.background_available_state.connect(self.handle_is_bg_available)
         self.brillouin_signaller.illumination_mode_state.connect(self.update_illumination_ui)
@@ -133,7 +137,7 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.measurement_result_ready.connect(self.handle_measurement_results)
         self.brillouin_signaller.zaber_position_updated.connect(self.update_zaber_position)
         self.brillouin_signaller.microwave_frequency_updated.connect(self.update_ref_freq_input)
-
+        self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
 
 
         # Connect signals BEFORE starting the thread
@@ -310,9 +314,11 @@ class BrillouinViewer(QWidget):
 
         self.show_calib_btn = QPushButton("Show")
         self.show_calib_btn.clicked.connect(self.show_calibration_results)
+        self.show_calib_btn.setEnabled(False)
 
         self.save_calib_btn = QPushButton("Save")
-        self.save_calib_btn.clicked.connect(self.save_calibration_data)
+        self.save_calib_btn.clicked.connect(self.save_calibration_results)
+        self.save_calib_btn.setEnabled(False)
 
         # Input and button layout
         form_layout = QFormLayout()
@@ -704,33 +710,56 @@ class BrillouinViewer(QWidget):
 
 
     def show_calibration_results(self):
-        pass
+        self._show_cali = True
+        self._save_cali = False
+        self.get_calibration_results_requested.emit()
 
-    def store_calibration_results(self, cali_results: CalibrationResults):
-        self._current_calibration = cali_results
+    def save_calibration_results(self):
+        self._show_cali = False
+        self._save_cali = True
+        self.get_calibration_results_requested.emit()
 
+    def calibration_finished(self):
+        self.show_calib_btn.setEnabled(True)
+        self.save_calib_btn.setEnabled(True)
+        print(f"[Brillouin Viewer] Calibration available")
 
-
-    def save_calibration_data(self):
-
-        data = self._current_calibration
-        if data is None:
-            print(f"[Brillouin Viewer] Failed to save data, no data availalbe")
-            return
-
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Calibration Data", filter="Pickle Files (*.pkl);;All Files (*)"
-        )
-        if not path:
-            return
-
-        if path:
+    def handle_requested_calibration(self, cali_results: CalibrationResults):
+        if self._show_cali:
             try:
-                with open(path, "wb") as f:
-                    pickle.dump(data, f)
-                print(f"[✓] Calibration data saved to {path}")
+                pixmap = render_calibration_to_pixmap(cali_results, calibration_config.get().reference)
+                dialog = CalibrationImageDialog(pixmap, parent=self)
+                dialog.exec_()
+                print("[Brillouin Viewer] Calibration plot displayed.")
             except Exception as e:
-                print(f"[Error] Failed to save calibration data: {e}")
+                print(f"[Brillouin Viewer] Failed to plot calibration: {e}")
+        elif self._save_cali:
+            data = cali_results
+            if data is None:
+                print(f"[Brillouin Viewer] Failed to save data, no data availalbe")
+                return
+
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Calibration Data", filter="Pickle Files (*.pkl);;All Files (*)"
+            )
+            if not path:
+                return
+
+            if path:
+                try:
+                    with open(path, "wb") as f:
+                        pickle.dump(data, f)
+                    print(f"[✓] Calibration data saved to {path}")
+                except Exception as e:
+                    print(f"[Error] Failed to save calibration data: {e}")
+        else:
+            pass
+
+        self._show_cali = False
+        self._save_cali = True
+
+
+
 
 
     def take_measurements(self):
