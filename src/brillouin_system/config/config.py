@@ -2,15 +2,16 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-from copy import deepcopy
-import threading
-
 
 # Path to the TOML configuration file
-find_peaks_config_toml_path = Path(__file__).parent.resolve() / "fitting_config.toml"
-
+find_peaks_config_toml_path = Path(__file__).parent.resolve() / "config.toml"
 
 # ---------- Thread-safe config wrapper ----------
+import threading
+from copy import deepcopy
+from dataclasses import asdict
+
+
 class ThreadSafeConfig:
     def __init__(self, data_obj):
         self._lock = threading.Lock()
@@ -41,7 +42,6 @@ class ThreadSafeConfig:
         with self._lock:
             return asdict(self._data)
 
-
 # ---------- Config models ----------
 
 @dataclass
@@ -56,6 +56,14 @@ class FindPeaksConfig:
     min_peak_height: int
     rel_height: float
     wlen_pixels: int
+
+
+@dataclass
+class CalibrationConfig:
+    n_per_freq: int
+    calibration_freqs: list[float]
+    reference: str  # 'left', 'right', or 'distance'
+
 
 
 # ---------- Load/save helpers ----------
@@ -113,8 +121,34 @@ def save_find_peaks_config_section(path: Path, section: str, config: ThreadSafeC
         tomli_w.dump(data, f)
 
 
+def load_calibration_config(path: Path) -> CalibrationConfig:
+    with path.open("rb") as f:
+        raw = tomli.load(f)["calibration"]
+
+    return CalibrationConfig(
+        n_per_freq=int(raw["n_per_freq"]),
+        calibration_freqs=[float(v) for v in raw["calibration_freqs"]],
+        reference=raw.get("reference", "distance")
+    )
+
+def save_calibration_config(path: Path, config: ThreadSafeConfig):
+    with path.open("rb") as f:
+        data = tomli.load(f)
+
+    data["calibration"] = {
+        "n_per_freq": config.get_field("n_per_freq"),
+        "calibration_freqs": config.get_field("calibration_freqs"),
+        "reference": config.get_field("reference")
+    }
+
+    with path.open("wb") as f:
+        tomli_w.dump(data, f)
+
+
+
 # ---------- Global config instances ----------
 
 sample_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "sample"))
 reference_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "reference"))
 sline_config = ThreadSafeConfig(load_selected_rows(find_peaks_config_toml_path))
+calibration_config = ThreadSafeConfig(load_calibration_config(find_peaks_config_toml_path))

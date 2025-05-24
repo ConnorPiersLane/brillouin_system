@@ -1,12 +1,14 @@
 import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication, QThread
 import time
-from brillouin_system.gui.manager.brillouin_manager import BrillouinManager
-from brillouin_system.my_dataclasses.background_data import BackgroundData
-from brillouin_system.my_dataclasses.calibration_data import CalibrationData
 
-from brillouin_system.my_dataclasses.fitting_results import FittingResults
-from brillouin_system.utils.calibrate_spectrometer import fit_calibration_curve
+from brillouin_system.config.config import calibration_config, CalibrationConfig
+from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
+from brillouin_system.my_dataclasses.background_data import BackgroundData
+from brillouin_system.my_dataclasses.calibration import CalibrationData
+
+from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
+
 
 
 class BrillouinSignaller(QObject):
@@ -24,19 +26,17 @@ class BrillouinSignaller(QObject):
     illumination_mode_state  = pyqtSignal(bool)
     reference_mode_state = pyqtSignal(bool)
 
+
     # Signals outwards
     camera_settings_ready = pyqtSignal(dict)
     zaber_position_updated = pyqtSignal(float)
     microwave_frequency_updated = pyqtSignal(float)
     background_data_ready = pyqtSignal(object)  # emits a BackgroundData instance
     frame_and_fit_ready = pyqtSignal(object)
-    calibration_result_ready = pyqtSignal(object)
     measurement_result_ready = pyqtSignal(list)
     camera_shutter_state_changed = pyqtSignal(bool)
-    mako_frame_ready = pyqtSignal(np.ndarray)
+    calibration_results_ready = pyqtSignal(object)
 
-    sd_updated = pyqtSignal(float)
-    fsr_updated = pyqtSignal(float)
 
     def __init__(self, manager: BrillouinManager):
         super().__init__()
@@ -53,6 +53,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def on_gui_ready(self):
         self._gui_ready = True
+
 
     @pyqtSlot()
     def emit_do_background_subtraction(self):
@@ -91,23 +92,6 @@ class BrillouinSignaller(QObject):
         )
         self.background_data_ready.emit(data)
 
-    @pyqtSlot()
-    def emit_spectral_dispersion(self):
-        self.sd_updated.emit(self.manager.sd)
-
-    @pyqtSlot()
-    def emit_free_spectral_range(self):
-        self.fsr_updated.emit(self.manager.fsr)
-
-    @pyqtSlot(float)
-    def apply_spectral_dispersion(self, sd: float):
-        self.manager.sd = sd
-        self.log_message.emit(f"Spectral dispersion updated: {sd:.6f} GHz/px")
-
-    @pyqtSlot(float)
-    def apply_free_spectral_range(self, fsr: float):
-        self.manager.fsr = fsr
-        self.log_message.emit(f"Free spectral range updated: {fsr:.6f} GHz")
 
     @pyqtSlot()
     def toggle_illumination_mode(self):
@@ -235,8 +219,9 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def snap_and_fit(self):
         try:
-            fitting: FittingResults = self.manager.snap_and_get_fitting_results()
-            self.frame_and_fit_ready.emit(fitting)
+            fitting: FittedSpectrum = self.manager.snap_and_get_fitting()
+            display = self.manager.get_display_results_from_fitting(fitting)
+            self.frame_and_fit_ready.emit(display)
         except Exception as e:
             self.log_message.emit(f"Error snapping frame: {e}")
 
@@ -270,9 +255,9 @@ class BrillouinSignaller(QObject):
         self._thread_active = False
         self.log_message.emit("Worker stopped live acquisition loop.")
 
-    def _update_gui(self, fitting: FittingResults):
+    def _update_gui(self, display_results: DisplayResults):
         self._gui_ready = False
-        self.frame_and_fit_ready.emit(fitting)
+        self.frame_and_fit_ready.emit(display_results)
         # Wait for GUI to finish rendering
         start = time.time()
         while not self._gui_ready:
@@ -282,46 +267,55 @@ class BrillouinSignaller(QObject):
                 self.log_message.emit("GUI timeout while rendering result.")
                 break
 
-    @pyqtSlot(list)
-    def run_calibration(self, freqs: list[float]):
-        calibration_fits = []
+    @pyqtSlot()
+    def run_calibration(self):
+        gui_in_sample_mode = False
+        # Ensure reference mode:
+        if not self.manager.is_reference_mode:
+            gui_in_sample_mode = True
+            self.manager.change_to_reference_mode()
+            self.reference_mode_state.emit(True)
+            time.sleep(0.2)
+
+        # get config
+        config: CalibrationConfig = calibration_config.get()
+        freqs = config.calibration_freqs
+        n_per_freq = config.n_per_freq
+
+        data = []
 
         for f in freqs:
-            try:
-                self.manager.microwave.set_frequency(f)
-                fitting = self.manager.snap_and_get_fitting_results()
-                fitting.sd = None
-                fitting.fsr = None
-                fitting.freq_shift_ghz = None
-                calibration_fits.append(fitting)
-                self._update_gui(fitting)
-            except Exception as e:
-                self.log_message.emit(f"[Calibration] Failed at {f:.3f} GHz: {e}")
-                continue
+            data_per_f = []
+            for i in range(n_per_freq):
+                try:
+                    self.manager.microwave.set_frequency(f)
+                    fitting = self.manager.snap_and_get_fitting()
+                    data_per_f.append(fitting)
 
-        try:
-            px_dists = [f.inter_peak_distance_px for f in calibration_fits]
-            sd, fsr = fit_calibration_curve(px_dist=px_dists, freq=freqs)
+                    display_results = self.manager.get_display_results_from_fitting(fitting)
+                    self._update_gui(display_results)
+                except Exception as e:
+                    self.log_message.emit(f"[Brillouin Signaller] Failed run {i} at {f:.3f} GHz: {e}")
+                    continue
+            data.append(data_per_f)
 
-            self.manager.sd = sd
-            self.manager.fsr = fsr
-            self.sd_updated.emit(sd)
-            self.fsr_updated.emit(fsr)
-            self.log_message.emit(f"[Calibration] Fit complete. SD = {sd:.5f}, FSR = {fsr:.3f}")
-        except Exception as e:
-            self.log_message.emit(f"[Calibration] Fit failed: {e}")
-            sd, fsr = None, None
+        cali_data: CalibrationData = CalibrationData(n_per_freq=n_per_freq, freqs=freqs, data=data)
 
-        result: CalibrationData = CalibrationData(reference_freqs_ghz=freqs, data=calibration_fits, sd=sd, fsr=fsr)
+        self.manager.update_calibration(cali_data)
+        self.calibration_results_ready.emit(self.manager.calibration_results)
 
-        self.calibration_result_ready.emit(result)
+        if gui_in_sample_mode:
+            self.manager.change_to_sample_mode()
+            self.reference_mode_state.emit(False)
 
         return None
+
 
     @pyqtSlot(bool)
     def set_save_images_state(self, enabled: bool):
         self.manager.do_save_images = enabled
         self.log_message.emit(f"[Manager] Save Images: {enabled}")
+
 
     @pyqtSlot(int, str, float,)
     def take_measurements(self, n: int, which_axis: str, step: float):
@@ -331,13 +325,15 @@ class BrillouinSignaller(QObject):
 
         for i in range(n):
             try:
-                fitting = self.manager.snap_and_get_fitting_results()
-                self._update_gui(fitting)
+                fitting = self.manager.snap_and_get_fitting()
+
+                display_results = self.manager.get_display_results_from_fitting(fitting)
+                self._update_gui(display_results)
 
                 result = self.manager.get_measurement_data(fitting)
                 measurements.append(result)
 
-                if which_axis:
+                if which_axis and not self.manager.is_reference_mode:
                     try:
                         self.manager.zaber.move_rel(which_axis, step)
                         pos = self.manager.zaber.get_position(which_axis)
@@ -350,13 +346,6 @@ class BrillouinSignaller(QObject):
 
         self.measurement_result_ready.emit(measurements)
 
-    def start_mako_stream(self):
-        def on_new_frame(frame: np.ndarray):
-            self.mako_frame_ready.emit(frame)
-        self.manager.mako_camera.start_stream(on_new_frame)
-
-    def stop_mako_stream(self):
-        self.manager.mako_camera.stop_stream()
 
     @pyqtSlot()
     def close(self):
@@ -388,10 +377,5 @@ class BrillouinSignaller(QObject):
         except Exception as e:
             print(f"Error closing zaber: {e}")
 
-        try:
-            self.manager.mako_camera.close()
-            print("Mako Camera closed.")
-        except Exception as e:
-            print(f"Error closing Mako Camera: {e}")
 
         print("BrillouinWorker shutdown complete.")

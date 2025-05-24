@@ -2,13 +2,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from brillouin_system.my_dataclasses.calibration import CalibrationResults
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
-from brillouin_system.my_dataclasses.fitting_results import FittingResults
+from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 
 @dataclass
 class MeasurementData:
-    fitting_results: FittingResults
-    zaber_position: ZaberPosition
+    is_reference_mode: bool
+    fitting_results: FittedSpectrum
+    calibration: CalibrationResults
+    zaber_position: ZaberPosition | None
     camera_settings: CameraSettings
-    mako_image: np.ndarray
+    mako_image: np.ndarray | None

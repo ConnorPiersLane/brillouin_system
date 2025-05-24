@@ -3,19 +3,19 @@ import time
 
 import numpy as np
 
+from brillouin_system.config.config import calibration_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
-from brillouin_system.devices.cameras.allied.base_mako import BaseMakoCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
-from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
+from brillouin_system.my_dataclasses.calibration import CalibrationResults, CalibrationData, calibrate
+from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurement_data import MeasurementData
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
-from brillouin_system.my_dataclasses.fitting_results import FittingResults
 from brillouin_system.utils import brillouin_spectrum_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
-from brillouin_system.utils.brillouin_spectrum_fitting import get_sline_from_image
+
 
 
 def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
@@ -26,37 +26,21 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
     return img.astype(np.uint8)
 
 
-
-# TODO: update this, input should be calibration results
-def compute_frequency_shift(fsr: float, sd: float, interpeak_px: float):
-    if interpeak_px is np.nan:
-        return None
-    else:
-        return 0.5 * (fsr - interpeak_px * sd)
-
-
-
 class BrillouinManager:
-
-
-
 
     def __init__(self,
                  camera: BaseCamera | DummyCamera,
                  shutter_manager: ShutterManager | ShutterManagerDummy,
                  microwave: Microwave | MicrowaveDummy,
                  zaber: ZaberLinearController | ZaberLinearDummy,
-                 mako_camera: BaseMakoCamera,
                  is_sample_illumination_continuous: bool = False,
-                 sd : float = 0,
-                 fsr: float = 0,
                  ):
         # Devices
         self.camera: BaseCamera | DummyCamera = camera
-        self.mako_camera: BaseMakoCamera = mako_camera
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
         self.microwave: Microwave | MicrowaveDummy = microwave
         self.zaber = zaber
+
 
         # State
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
@@ -65,9 +49,8 @@ class BrillouinManager:
         self.do_save_images: bool = False
 
 
-        # Spectrometer Values
-        self.sd = sd
-        self.fsr = fsr
+        # Calibration
+        self.calibration_results: CalibrationResults = None
 
         self.bg_image = None
 
@@ -164,8 +147,7 @@ class BrillouinManager:
         """Pull a raw frame from the camera."""
         return self.camera.snap().astype(np.float64)
 
-
-    def snap_and_get_fitting_results(self) -> FittingResults:
+    def _get_frame(self) -> np.ndarray:
         # Get the frame:
         if self.is_reference_mode or self.is_sample_illumination_continuous:
             frame = self._get_camera_snap()
@@ -175,22 +157,71 @@ class BrillouinManager:
         if self.do_background_subtraction:
             frame = self.subtract_background(frame)
 
-        # Fit sline
-        sline = get_sline_from_image(frame=frame)
+        return frame
+
+    def update_calibration(self, calibration_data: CalibrationData):
+        self.calibration_results = calibrate(calibration_data)
+        print("[Manager] Calibration updated")
 
 
-        fitted_spectrum: FittedSpectrum = brillouin_spectrum_fitting.fitSpectrum(
-            np.copy(sline.astype(float)), is_reference_mode=self.is_reference_mode
+
+    def snap_and_get_fitting(self) -> FittedSpectrum:
+        frame = self._get_frame()
+
+        fitted_spectrum: FittedSpectrum = brillouin_spectrum_fitting.get_fitted_spectrum_from_image(
+            frame=frame, is_reference_mode=self.is_reference_mode
         )
 
-        freq_shift_ghz = compute_frequency_shift(fsr=self.fsr, sd=self.sd, interpeak_px=fitted_spectrum.inter_peak_distance)
-        return FittingResults(
-            frame=frame,
-            fitted_spectrum=fitted_spectrum,
-            sd=self.sd,
-            fsr=self.fsr,
-            freq_shift_ghz=freq_shift_ghz
-        )
+        return fitted_spectrum
+
+    def compute_freq_shift(self, fitting: FittedSpectrum) -> float | None:
+        if not fitting.is_success or self.calibration_results is None:
+            return None
+
+        config = calibration_config.get()
+        calibration = self.calibration_results.get_calibration(config)
+
+        if config.reference == "left":
+            x_value = fitting.left_peak_center_px
+        elif config.reference == "right":
+            x_value = fitting.right_peak_center_px
+        elif config.reference == "distance":
+            x_value = fitting.inter_peak_distance
+        else:
+            return None
+
+        if x_value is None or np.isnan(x_value):
+            return None
+
+        return float(calibration.get_freq(x_value))
+
+
+    def get_display_results_from_fitting(self, fitting: FittedSpectrum) -> DisplayResults:
+        if self.is_reference_mode:
+            freq_shift_ghz = self.microwave.get_frequency()
+        elif fitting.is_success:
+            freq_shift_ghz = self.compute_freq_shift(fitting)
+        else:
+            freq_shift_ghz = None
+
+        if fitting.is_success:
+            return DisplayResults(
+                is_success=True,
+                frame=fitting.frame,
+                x_pixels=fitting.x_pixels,
+                sline=fitting.sline,
+                x_fit_refined=fitting.x_fit_refined,
+                y_fit_refined=fitting.y_fit_refined,
+                inter_peak_distance=fitting.inter_peak_distance,
+                freq_shift_ghz=freq_shift_ghz,
+            )
+        else:
+            return DisplayResults(
+                is_success=False,
+                frame=fitting.frame,
+                x_pixels=fitting.x_pixels,
+                sline=fitting.sline,
+            )
 
 
     def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> np.ndarray:
@@ -218,20 +249,25 @@ class BrillouinManager:
 
 
     def get_measurement_data(self,
-                             fitting_results: FittingResults) -> MeasurementData:
+                             fitting_results: FittedSpectrum) -> MeasurementData:
 
         if self.do_save_images:
-            mako_image = self.mako_camera.snap()
+            pass
         else:
-            mako_image = None
             fitting_results.frame = None
 
+        if self.is_reference_mode:
+            zaber_position = None
+        else:
+            zaber_position = self.zaber.get_zaber_position_class()
 
         return MeasurementData(
+            is_reference_mode=self.is_reference_mode,
             fitting_results = fitting_results,
-            zaber_position=self.zaber.get_zaber_position_class(),
+            calibration = self.calibration_results,
+            zaber_position=zaber_position,
             camera_settings=self.get_camera_settings(),
-            mako_image=mako_image,
+            mako_image=None,
             )
 
 

@@ -3,7 +3,7 @@ import sys
 import pickle
 import numpy as np
 
-from PyQt5.QtGui import QDoubleValidator, QIntValidator, QImage, QPixmap
+from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QDialog, QVBoxLayout, QCheckBox, QComboBox
@@ -12,24 +12,24 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
-from brillouin_system.gui.manager.brillouin_manager import BrillouinManager
-from brillouin_system.gui.signaller.brillouin_signaller import BrillouinSignaller
+from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
+from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
-from brillouin_system.devices.cameras.allied.dummy_mako_camera import DummyMakoCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManagerDummy
 from brillouin_system.my_dataclasses.background_data import BackgroundData
-from brillouin_system.my_dataclasses.calibration_data import CalibrationData
-from brillouin_system.my_dataclasses.fitting_results import FittingResults
+from brillouin_system.my_dataclasses.calibration import CalibrationResults
+from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.measurement_data import MeasurementData
-from brillouin_system.utils.calibrate_spectrometer import _linear_model
+
 
 ###
 # Add other guis
-from config_dialog import ConfigDialog
+from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 
 
 
@@ -39,7 +39,6 @@ brillouin_manager = BrillouinManager(
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
     zaber=ZaberLinearDummy(),
-    mako_camera=DummyMakoCamera(),
     is_sample_illumination_continuous=True
 )
 
@@ -60,7 +59,6 @@ brillouin_manager = BrillouinManager(
 #     shutter_manager=ShutterManager('human_interface'),
 #     microwave=Microwave(),
 #     zaber=ZaberLinearController(),
-#     mako_camera=DummyMakoCamera(),
 #     is_sample_illumination_continuous=True
 # )
 
@@ -74,8 +72,6 @@ class BrillouinViewer(QWidget):
     apply_camera_settings_requested = pyqtSignal(dict)
     toggle_camera_shutter_requested = pyqtSignal()
     emit_camera_settings_requested = pyqtSignal()
-    update_sd_requested = pyqtSignal(float)
-    update_fsr_requested = pyqtSignal(float)
     start_live_requested = pyqtSignal()
     stop_live_requested = pyqtSignal()
     update_microwave_freq_requested = pyqtSignal(float)
@@ -86,8 +82,8 @@ class BrillouinViewer(QWidget):
     acquire_background_requested = pyqtSignal()
     move_zaber_requested = pyqtSignal(str, float)
     request_zaber_position = pyqtSignal(str)
-    run_calibration_requested = pyqtSignal(list)
-    take_measurements_requested = pyqtSignal(int, str, float)
+    run_calibration_requested = pyqtSignal()
+    take_measurement_requested = pyqtSignal(int, str, float)
     toggle_save_images_requested = pyqtSignal(bool)
     shutdown_requested = pyqtSignal()
 
@@ -95,7 +91,8 @@ class BrillouinViewer(QWidget):
         super().__init__()
 
         # Keep track of state:
-        self._current_calibration: CalibrationData | None = None
+        self._current_calibration: CalibrationResults = None
+
         self._stored_measurements: list[MeasurementData] = []  # list of measurement series
 
         self.setWindowTitle("Brillouin Viewer (Live)")
@@ -105,8 +102,6 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.moveToThread(self.brillouin_signaller_thread)
 
         # Sending signals
-        self.update_fsr_requested.connect(self.brillouin_signaller.apply_free_spectral_range)
-        self.update_sd_requested.connect(self.brillouin_signaller.apply_spectral_dispersion)
         self.apply_camera_settings_requested.connect(self.brillouin_signaller.apply_camera_settings)
         self.emit_camera_settings_requested.connect(self.brillouin_signaller.emit_camera_settings)
         self.toggle_camera_shutter_requested.connect(self.brillouin_signaller.toggle_camera_shutter)
@@ -121,12 +116,13 @@ class BrillouinViewer(QWidget):
         self.move_zaber_requested.connect(self.brillouin_signaller.move_zaber_relative)
         self.request_zaber_position.connect(self.brillouin_signaller.query_zaber_position)
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
-        self.take_measurements_requested.connect(self.brillouin_signaller.take_measurements)
+        self.take_measurement_requested.connect(self.brillouin_signaller.take_measurements)
         self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
         self.toggle_save_images_requested.connect(self.brillouin_signaller.set_save_images_state)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
 
         # Receiving signals
+        self.brillouin_signaller.calibration_results_ready.connect(self.store_calibration_results)
         self.brillouin_signaller.background_subtraction_state.connect(self.update_bg_subtraction)
         self.brillouin_signaller.background_available_state.connect(self.handle_is_bg_available)
         self.brillouin_signaller.illumination_mode_state.connect(self.update_illumination_ui)
@@ -134,35 +130,29 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.camera_settings_ready.connect(self.populate_camera_ui)
         self.brillouin_signaller.camera_shutter_state_changed.connect(self.update_camera_shutter_button)
         self.brillouin_signaller.frame_and_fit_ready.connect(self.display_result)
-        self.brillouin_signaller.calibration_result_ready.connect(self.handle_calibration_results)
         self.brillouin_signaller.measurement_result_ready.connect(self.handle_measurement_results)
         self.brillouin_signaller.zaber_position_updated.connect(self.update_zaber_position)
         self.brillouin_signaller.microwave_frequency_updated.connect(self.update_ref_freq_input)
 
-        self.brillouin_signaller.sd_updated.connect(self.update_sd_ui)
-        self.brillouin_signaller.fsr_updated.connect(self.update_fsr_ui)
 
-        # Mako Camera Stream
-        self.brillouin_signaller.mako_frame_ready.connect(self.update_mako_camera_image)
 
-        # 🔁 Connect signals BEFORE starting the thread
+        # Connect signals BEFORE starting the thread
         self.brillouin_signaller.log_message.connect(lambda msg: print("[Worker]", msg))
         self.brillouin_signaller_thread.started.connect(self.run_gui)
 
-        # ✅ Start the thread after all connections
+        # Start the thread after all connections
         self.brillouin_signaller_thread.start()
 
         self.init_ui()
 
         self.update_gui()
 
-        self.brillouin_signaller.start_mako_stream()
 
     def init_ui(self):
         outer_layout = QVBoxLayout()
         self.setLayout(outer_layout)
 
-        # --- Plot area + Allied Vision camera view (side-by-side) ---
+        # --- Plot area + Main Display area (side-by-side) ---
         plot_row_layout = QHBoxLayout()
 
         self.fig, (self.ax_img, self.ax_fit) = plt.subplots(2, 1, figsize=(8, 6))
@@ -171,11 +161,11 @@ class BrillouinViewer(QWidget):
         plot_row_layout.addWidget(self.canvas)
 
         # Placeholder for Allied Vision camera
-        self.allied_camera_display = QLabel("Allied Vision Camera")
-        self.allied_camera_display.setFixedSize(int(640*0.9), int(480*0.9))
-        self.allied_camera_display.setStyleSheet("background-color: black; color: white;")
-        self.allied_camera_display.setAlignment(Qt.AlignCenter)
-        plot_row_layout.addWidget(self.allied_camera_display)
+        self.main_display = QLabel("Diplay area")
+        self.main_display.setFixedSize(int(640 * 0.9), int(480 * 0.9))
+        self.main_display.setStyleSheet("background-color: black; color: white;")
+        self.main_display.setAlignment(Qt.AlignCenter)
+        plot_row_layout.addWidget(self.main_display)
 
         outer_layout.addLayout(plot_row_layout)
 
@@ -185,7 +175,7 @@ class BrillouinViewer(QWidget):
         control_row_layout.addWidget(self.create_camera_group())
         control_row_layout.addWidget(self.create_illumination_group())
         control_row_layout.addWidget(self.create_reference_group())
-        control_row_layout.addWidget(self.create_spectrometer_group())
+        control_row_layout.addWidget(self.create_config_group())
         control_row_layout.addWidget(self.create_zaber_group())
         control_row_layout.addWidget(self.create_measurement_group())
 
@@ -197,8 +187,6 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.emit_is_background_available()
         self.brillouin_signaller.emit_camera_settings()
         self.brillouin_signaller.emit_do_background_subtraction()
-        self.brillouin_signaller.emit_spectral_dispersion()
-        self.brillouin_signaller.emit_free_spectral_range()
 
 
 
@@ -235,21 +223,16 @@ class BrillouinViewer(QWidget):
     def create_camera_group(self):
         self.exposure_input = QLineEdit()
         self.exposure_input.setValidator(QDoubleValidator(0.001, 60.0, 3))
-        self.exposure_input.setFixedWidth(60)
 
         self.gain_input = QLineEdit()
         self.gain_input.setValidator(QIntValidator(0, 1000))
-        self.gain_input.setFixedWidth(60)
 
         self.roi_input = QLineEdit()
-        self.roi_input.setFixedWidth(60)
 
         self.apply_camera_btn = QPushButton("Apply")
-        self.apply_camera_btn.setFixedWidth(60)
         self.apply_camera_btn.clicked.connect(self.apply_camera_settings)
 
         self.toggle_camera_shutter_btn = QPushButton("Close")
-        self.toggle_camera_shutter_btn.setFixedWidth(60)
         self.toggle_camera_shutter_btn.clicked.connect(self.toggle_camera_shutter_requested.emit)
 
         layout = QFormLayout()
@@ -263,11 +246,7 @@ class BrillouinViewer(QWidget):
         # btn_row.addWidget(self.apply_camera_btn)
         # layout.addRow("", btn_row)
 
-        self.config_settings_btn = QPushButton("Configs")
-        self.config_settings_btn.clicked.connect(self.on_configs_clicked)
-        layout.addRow(self.config_settings_btn)
-
-        group = QGroupBox("Andor and Configs")
+        group = QGroupBox("Andor Camera")
         group.setLayout(layout)
 
         return group
@@ -320,17 +299,26 @@ class BrillouinViewer(QWidget):
         # Ref. Freq input
         self.ref_freq_input = QLineEdit()
         self.ref_freq_input.setValidator(QDoubleValidator(0.0, 100.0, 4))
-        self.ref_freq_input.setFixedWidth(60)
         self.ref_freq_input.setText("5.5")  # Default value
 
         # NEW: Set button
-        self.set_ref_btn = QPushButton("Set")
+        self.set_ref_btn = QPushButton("Set freq")
         self.set_ref_btn.clicked.connect(self.set_reference_freq)
+
+        self.calibrate_btn = QPushButton("Cal. all")
+        self.calibrate_btn.clicked.connect(self.run_calibration)
+
+        self.show_calib_btn = QPushButton("Show")
+        self.show_calib_btn.clicked.connect(self.show_calibration_results)
+
+        self.save_calib_btn = QPushButton("Save")
+        self.save_calib_btn.clicked.connect(self.save_calibration_data)
 
         # Input and button layout
         form_layout = QFormLayout()
         form_layout.addRow("Ref. Freq. (GHz):", self.ref_freq_input)
-        form_layout.addRow("", self.set_ref_btn)
+        form_layout.addRow(self.calibrate_btn, self.set_ref_btn)
+        form_layout.addRow(self.show_calib_btn, self.save_calib_btn)
 
         layout = QVBoxLayout()
         layout.addLayout(mode_row)
@@ -340,39 +328,14 @@ class BrillouinViewer(QWidget):
         group.setLayout(layout)
         return group
 
-    def create_spectrometer_group(self):
-        self.sd_input = QLineEdit()
-        self.sd_input.setValidator(QDoubleValidator(0.0001, 100.0, 6))
-        self.sd_input.setFixedWidth(80)
-        self.sd_input.setText("0.0")
-        self.sd_input.editingFinished.connect(self.on_sd_edited)
+    def create_config_group(self):
+        group = QGroupBox("More Configs")
+        layout = QVBoxLayout()
 
-        self.fsr_input = QLineEdit()
-        self.fsr_input.setValidator(QDoubleValidator(0.1, 100.0, 6))
-        self.fsr_input.setFixedWidth(80)
-        self.fsr_input.setText("0.0")
-        self.fsr_input.editingFinished.connect(self.on_fsr_edited)
+        self.config_settings_btn = QPushButton("Configs")
+        self.config_settings_btn.clicked.connect(self.on_configs_clicked)
+        layout.addWidget(self.config_settings_btn)  # ✅ Correct method for QVBoxLayout
 
-        self.calib_freq_input = QLineEdit()
-        self.calib_freq_input.setFixedWidth(80)
-        self.calib_freq_input.setText("3.0, 4.0, 5.5, 5.6, 5.7, 5.8, 5.9, 6.0, 7.0")
-
-        self.calibrate_btn = QPushButton("Calibrate")
-        self.calibrate_btn.clicked.connect(self.run_calibration)
-
-        self.show_calib_btn = QPushButton("Show")
-        self.show_calib_btn.clicked.connect(self.show_calibration_data)
-
-        self.save_calib_btn = QPushButton("Save")
-        self.save_calib_btn.clicked.connect(self.save_calibration_data)
-
-        layout = QFormLayout()
-        layout.addRow("SD (GHz/px):", self.sd_input)
-        layout.addRow("FSR (GHz):", self.fsr_input)
-        layout.addRow("Calibration Freqs [GHz]:", self.calib_freq_input)
-        layout.addRow("", self.calibrate_btn)
-        layout.addRow(self.show_calib_btn, self.save_calib_btn)
-        group = QGroupBox("Spectrometer")
         group.setLayout(layout)
         return group
 
@@ -531,26 +494,6 @@ class BrillouinViewer(QWidget):
             self.snap_once_btn.setEnabled(True)
 
 
-    def update_sd_ui(self, sd: float):
-        self.sd_input.setText(f"{sd:.3f}")
-
-    def update_fsr_ui(self, fsr: float):
-        self.fsr_input.setText(f"{fsr:.3f}")
-
-    def on_sd_edited(self):
-        try:
-            sd = float(self.sd_input.text())
-            self.update_sd_requested.emit(sd)
-        except ValueError:
-            print("[Brillouin Viewer] Invalid SD input.")
-
-    def on_fsr_edited(self):
-        try:
-            fsr = float(self.fsr_input.text())
-            self.update_fsr_requested.emit(fsr)  # ✅ thread-safe
-        except ValueError:
-            print("[Brillouin Viewer] Invalid FSR input.")
-
     # ---------------- Toggle ---------------- #
     def toggle_background_subtraction(self):
         self.toggle_bg_subtraction_requested.emit()
@@ -576,22 +519,15 @@ class BrillouinViewer(QWidget):
     def run_one_gui_update(self):
         self.snap_requested.emit()
 
-    def display_result(self, fitting: FittingResults):
-        frame = fitting.frame
-        spectrum = fitting.fitted_spectrum.sline
-        interpeak = fitting.fitted_spectrum.inter_peak_distance
-        freq_shift_ghz = fitting.freq_shift_ghz
+    def display_result(self, display_results: DisplayResults):
+        frame = display_results.frame
+        x_px = display_results.x_pixels
+        spectrum = display_results.sline
 
-        x_fit_refined = fitting.fitted_spectrum.x_fit_refined
-        y_fit_refined = fitting.fitted_spectrum.y_fit_refined
-
-        row_idx = np.argmax(frame.sum(axis=1))
-        x_px = np.arange(len(spectrum))
 
         # --- Image Plot ---
         self.ax_img.clear()
         self.ax_img.imshow(frame, cmap="gray", aspect='equal', interpolation='none', origin="upper")
-        self.ax_img.set_title(f"Camera Frame | Selected Middle Row: {row_idx}")
         self.ax_img.set_xticks(np.arange(0, frame.shape[1], 10))
         self.ax_img.set_yticks(np.arange(0, frame.shape[0], 5))
         self.ax_img.set_xlabel("Pixel (X)")
@@ -601,17 +537,27 @@ class BrillouinViewer(QWidget):
         self.ax_fit.clear()
         self.ax_fit.plot(x_px, spectrum, 'k.', label="Spectrum")
 
-        if interpeak is not np.nan:
+        interpeak = None
+        freq_shift_ghz = None
+
+        if display_results.is_success:
+            x_fit_refined = display_results.x_fit_refined
+            y_fit_refined = display_results.y_fit_refined
+            interpeak = display_results.inter_peak_distance
+            freq_shift_ghz = display_results.freq_shift_ghz
             self.ax_fit.plot(x_fit_refined, y_fit_refined, 'r--', label="Fit")
-            if freq_shift_ghz is not None:
-                self.ax_fit.set_title(f"Spectrum Fit | Interpeak: {interpeak:.2f} px / {freq_shift_ghz:.3f} GHz")
-            else:
-                self.ax_fit.set_title(f"Spectrum Fit | Interpeak: {interpeak:.2f} px / - GHz")
             self.ax_fit.legend()
 
+        if interpeak is not None and freq_shift_ghz is not None:
+            title = f"Spectrum Fit | Interpeak: {interpeak:.2f} px / {freq_shift_ghz:.3f} GHz"
+        elif interpeak is not None:
+            title = f"Spectrum Fit | Interpeak: {interpeak:.2f} px / - GHz"
+        elif freq_shift_ghz is not None:
+            title = f"Spectrum Fit | Interpeak: - px / {freq_shift_ghz:.3f} GHz"
         else:
-            self.ax_fit.set_title("Spectrum Fit | Interpeak: - px / - GHz")
+            title = "Spectrum Fit | Interpeak: - px / - GHz"
 
+        self.ax_fit.set_title(title)
         self.canvas.draw()
         self.gui_ready.emit()
 
@@ -675,47 +621,20 @@ class BrillouinViewer(QWidget):
             self.calib_label_meas.setStyleSheet("color: gray")
             self.calib_label_calib.setText("● Ref.")
             self.calib_label_calib.setStyleSheet("color: green; font-weight: bold")
-            self.calibrate_btn.setEnabled(True)
-            self.save_calib_btn.setEnabled(True)
         else:
             self.calib_label_meas.setText("● Meas.")
             self.calib_label_meas.setStyleSheet("color: green; font-weight: bold")
             self.calib_label_calib.setText("○ Ref.")
             self.calib_label_calib.setStyleSheet("color: gray")
-            self.calibrate_btn.setEnabled(False)
-            self.save_calib_btn.setEnabled(False)
 
-
-    def update_spectrometer_params(self):
-        try:
-            sd = float(self.sd_input.text())
-            fsr = float(self.fsr_input.text())
-            # Do something with sd and fsr
-            print(f"[Brillouin Viewer] Updated values: SD = {sd}, FSR = {fsr}")
-        except ValueError:
-            print("[Brillouin Viewer] Invalid SD or FSR input.")
 
     def update_ref_freq_input(self, freq: float):
         self.ref_freq_input.setText(f"{freq:.3f}")
 
     # -------------- Functions --------------
 
-    def update_mako_camera_image(self, frame: np.ndarray):
-        try:
-            if frame.ndim == 3 and frame.shape[-1] == 1:
-                frame = frame[..., 0]
-            norm = (frame - frame.min()) / (np.ptp(frame) + 1e-6)
-            norm = (norm * 255).astype(np.uint8)
-            h, w = norm.shape
-            qimg = QImage(norm.data, w, h, w, QImage.Format_Grayscale8)
-            pixmap = QPixmap.fromImage(qimg).scaled(
-                self.allied_camera_display.width(),
-                self.allied_camera_display.height(),
-                Qt.KeepAspectRatio,
-            )
-            self.allied_camera_display.setPixmap(pixmap)
-        except Exception as e:
-            print(f"[AVCamera] Display failed: {e}")
+    def update_main_display(self, pixmap: QPixmap):
+        self.allied_camera_display.setPixmap(pixmap)
 
     def save_background_image(self):
         def receive_data(data: BackgroundData):
@@ -737,18 +656,6 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.background_data_ready.connect(receive_data)
         self.brillouin_signaller.emit_background_data()
 
-    def move_zaber(self, direction: int):
-        try:
-            step = float(self.zaber_step_input.text())
-            axis = self.zaber_axis_selector.currentData()  # 'x', 'y', or 'z'
-            delta = direction * step
-
-            self.zaber_controller.move_rel(axis, delta)
-            pos = self.zaber_controller.get_position(axis)
-            self.pos_display.setText(f"{pos:.0f} µm")
-
-        except Exception as e:
-            print(f"[Zaber] Movement failed: {e}")
 
     def move_zaber(self, direction):
         try:
@@ -791,61 +698,19 @@ class BrillouinViewer(QWidget):
         self.acquire_background_requested.emit()
 
 
-    def open_file_dialog(self, event):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Select Output File", filter="Pickle Files (*.pkl);;All Files (*)"
-        )
-        if path:
-            self.file_path_input.setText(path)
-
 
     def run_calibration(self):
-        try:
-            freqs = [float(f) for f in self.calib_freq_input.text().replace(",", " ").split()]
-            if freqs:
-                self.run_calibration_requested.emit(freqs)
-            else:
-                print("[Brillouin Viewer] No calibration frequencies provided.")
-        except ValueError:
-            print("[Brillouin Viewer] Invalid calibration input.")
-
-    def handle_calibration_results(self, data: CalibrationData):
-        self._current_calibration = data
-        print(f"[Brillouin Viewer] Calibration data stored")
-
-    def show_calibration_data(self):
-        if self._current_calibration is None:
-            print("[Brillouin Viewer] No calibration data to show.")
-            return
+        self.run_calibration_requested.emit()
 
 
-        data: CalibrationData = self._current_calibration
-        px_dists = [fit.inter_peak_distance_px for fit in data.data]
-        freqs = data.reference_freqs_ghz
+    def show_calibration_results(self):
+        pass
 
-        # Fitted line
-        x_fit = np.linspace(min(px_dists), max(px_dists), 100)
-        y_fit = _linear_model(x=x_fit, sd=data.sd, fsr=data.fsr)
+    def store_calibration_results(self, cali_results: CalibrationResults):
+        self._current_calibration = cali_results
 
-        # Create a new window with a matplotlib plot
-        win = QDialog(self)
-        win.setWindowTitle("Calibration Fit")
-        layout = QVBoxLayout(win)
 
-        fig, ax = plt.subplots()
-        ax.plot(px_dists, freqs, 'ko', label="Data")
-        ax.plot(x_fit, y_fit, 'r--', label=f"Fit: SD={data.sd:.4f}, FSR={data.fsr:.2f}")
-        ax.set_xlabel("Pixel Distance")
-        ax.set_ylabel("Frequency (GHz)")
-        ax.set_title("Calibration Curve")
-        ax.grid(True)
-        ax.legend()
 
-        canvas = FigureCanvas(fig)
-        layout.addWidget(canvas)
-        win.setLayout(layout)
-        win.resize(600, 400)
-        win.show()
     def save_calibration_data(self):
 
         data = self._current_calibration
@@ -881,7 +746,7 @@ class BrillouinViewer(QWidget):
             self.stop_live_requested.emit()
             QApplication.processEvents()
 
-            self.take_measurements_requested.emit(n, axis, step_size)
+            self.take_measurement_requested.emit(n, axis, step_size)
 
         except Exception as e:
             print(f"[Brillouin Viewer] Measurement setup failed: {e}")

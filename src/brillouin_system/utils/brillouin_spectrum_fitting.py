@@ -4,9 +4,8 @@ from scipy.signal import find_peaks
 
 import numpy as np
 
-from brillouin_system.config.fitting_config import reference_config, sample_config
-from brillouin_system.config.fitting_config import sline_config
-from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
+from brillouin_system.config.config import reference_config, sample_config, sline_config
+from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
 
 def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
@@ -83,22 +82,17 @@ def select_top_two_peaks(pk_ind, pk_info):
 
     return selected_pk_ind, selected_pk_info
 
-
-def fitSpectrum(sline, is_reference_mode: bool) -> FittedSpectrum:
+def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> FittedSpectrum:
+    sline = get_sline_from_image(frame=frame)
     pk_ind, pk_info = find_brillouin_peak_locations(sline, is_reference_mode=is_reference_mode)
     pix = np.arange(sline.shape[0])
 
     if len(pk_ind) < 1:
         return FittedSpectrum(
+            is_success=False,
+            frame=frame,
             sline=sline,
             x_pixels=pix,
-            fitted_spectrum=np.nan * np.ones_like(sline),
-            x_fit_refined=pix,
-            y_fit_refined=np.nan * np.ones_like(sline),
-            lorentzian_parameters=np.full(7, np.nan),
-            left_peak_pixel=np.nan,
-            right_peak_pixel=np.nan,
-            inter_peak_distance=np.nan
         )
 
     pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
@@ -123,29 +117,30 @@ def fitSpectrum(sline, is_reference_mode: bool) -> FittedSpectrum:
         x_fit, y_fit = refine_fitted_spectrum(pix, popt, factor=10)
 
         fitted_spectrum = FittedSpectrum(
+            is_success=True,
+            frame=frame,
             sline=sline,
             x_pixels=pix,
             fitted_spectrum=fittedSpect,
             x_fit_refined=x_fit,
             y_fit_refined=y_fit,
             lorentzian_parameters=popt,
-            left_peak_pixel=popt[1],
-            right_peak_pixel=popt[4],
+            left_peak_center_px=popt[1],
+            left_peak_width_px=popt[2],
+            left_peak_amplitude=popt[0],
+            right_peak_center_px=popt[4],
+            right_peak_width_px=popt[5],
+            right_peak_amplitude=popt[3],
             inter_peak_distance=interPeaksteps
         )
 
     except Exception as e:
         print(f"[fitSpectrum] Fitting failed: {e}")
-        fitted_spectrum = FittedSpectrum(
+        return FittedSpectrum(
+            is_success=False,
+            frame=frame,
             sline=sline,
             x_pixels=pix,
-            fitted_spectrum=np.nan * np.ones_like(sline),
-            x_fit_refined=pix,
-            y_fit_refined=np.nan * np.ones_like(sline),
-            lorentzian_parameters=np.full(7, np.nan),
-            left_peak_pixel=np.nan,
-            right_peak_pixel=np.nan,
-            inter_peak_distance=np.nan
         )
 
     return fitted_spectrum
