@@ -12,7 +12,7 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
-from brillouin_system.my_dataclasses.measurement_data import MeasurementData
+from brillouin_system.my_dataclasses.measurements import MeasurementPoint
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.utils import brillouin_spectrum_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
@@ -51,7 +51,7 @@ class BrillouinManager:
 
 
         # Calibration
-        self.calibration_results: CalibrationResults = None
+        self.calibration_results: CalibrationResults | None = None
 
         self.bg_image = None
 
@@ -173,7 +173,7 @@ class BrillouinManager:
 
         return fitted_spectrum
 
-    def perform_calibration(self, config: CalibrationConfig, on_step: Callable[[FittedSpectrum], None]) -> bool:
+    def perform_calibration(self, config: CalibrationConfig, on_step: Callable[[DisplayResults], None]) -> bool:
         try:
             data = []
             for freq in config.calibration_freqs:
@@ -269,7 +269,7 @@ class BrillouinManager:
 
 
     def get_measurement_data(self,
-                             fitting_results: FittedSpectrum) -> MeasurementData:
+                             fitting_results: FittedSpectrum) -> MeasurementPoint:
 
         if self.do_save_images:
             pass
@@ -281,10 +281,9 @@ class BrillouinManager:
         else:
             zaber_position = self.zaber.get_zaber_position_class()
 
-        return MeasurementData(
+        return MeasurementPoint(
             is_reference_mode=self.is_reference_mode,
             fitting_results = fitting_results,
-            calibration = self.calibration_results,
             zaber_position=zaber_position,
             camera_settings=self.get_camera_settings(),
             mako_image=None,

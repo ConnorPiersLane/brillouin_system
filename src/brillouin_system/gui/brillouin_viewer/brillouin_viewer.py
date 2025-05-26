@@ -21,10 +21,12 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManagerDummy
 from brillouin_system.my_dataclasses.background_data import BackgroundData
+from brillouin_system.my_dataclasses.measurements import MeasurementSeries
+from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 from brillouin_system.utils.calibration import CalibrationResults, render_calibration_to_pixmap, CalibrationImageDialog
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
-from brillouin_system.my_dataclasses.measurement_data import MeasurementData
+from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 
 
 ###
@@ -92,10 +94,7 @@ class BrillouinViewer(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Keep track of state:
-        self._current_calibration: CalibrationResults = None
-
-        self._stored_measurements: list[MeasurementData] = []  # list of measurement series
+        self._stored_measurements: list[MeasurementSeries] = []  # list of measurement series
 
         self.setWindowTitle("Brillouin Viewer (Live)")
 
@@ -141,7 +140,7 @@ class BrillouinViewer(QWidget):
 
 
         # Connect signals BEFORE starting the thread
-        self.brillouin_signaller.log_message.connect(lambda msg: print("[Worker]", msg))
+        self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
         self.brillouin_signaller_thread.started.connect(self.run_gui)
 
         # Start the thread after all connections
@@ -761,7 +760,6 @@ class BrillouinViewer(QWidget):
 
 
 
-
     def take_measurements(self):
         try:
             n = int(self.num_images_input.text())
@@ -780,7 +778,7 @@ class BrillouinViewer(QWidget):
         except Exception as e:
             print(f"[Brillouin Viewer] Measurement setup failed: {e}")
 
-    def handle_measurement_results(self, measurement_result: MeasurementData):
+    def handle_measurement_results(self, measurement_result: MeasurementSeries):
         self._stored_measurements.append(measurement_result)
         self.measurement_series_label.setText(f"Stored Series: {len(self._stored_measurements)}")
         self.start_live_requested.emit()

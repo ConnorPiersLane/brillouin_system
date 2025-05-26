@@ -5,7 +5,7 @@ import numpy as np
 @dataclass
 class FittedSpectrum:
     is_success: bool
-    frame: np.ndarray
+    frame: np.ndarray | None
     x_pixels: np.ndarray
     sline: np.ndarray
     fitted_spectrum: np.ndarray = field(default=None)

@@ -9,6 +9,7 @@ from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinMan
 from brillouin_system.my_dataclasses.background_data import BackgroundData
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
+from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 
 
 @contextmanager
@@ -49,7 +50,7 @@ class BrillouinSignaller(QObject):
     microwave_frequency_updated = pyqtSignal(float)
     background_data_ready = pyqtSignal(object)  # emits a BackgroundData instance
     frame_and_fit_ready = pyqtSignal(object)
-    measurement_result_ready = pyqtSignal(list)
+    measurement_result_ready = pyqtSignal(object)
     camera_shutter_state_changed = pyqtSignal(bool)
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
@@ -191,7 +192,7 @@ class BrillouinSignaller(QObject):
             pos = self.manager.zaber.get_position(axis)
             self.zaber_position_updated.emit(pos)
         except Exception as e:
-            print(f"[Worker] Failed to get Zaber position for axis '{axis}': {e}")
+            self.log_message.emit(f"Failed to get Zaber position for axis '{axis}': {e}")
 
     @pyqtSlot(str, float)
     def move_zaber_relative(self, which_axis: str, step: float):
@@ -294,16 +295,16 @@ class BrillouinSignaller(QObject):
     def get_calibration_results(self):
         self.calibration_result_ready.emit(self.manager.calibration_results)
 
+    def emit_display_result(self, display: DisplayResults):
+        self.frame_and_fit_ready.emit(display)
+
     @pyqtSlot()
     def run_calibration(self):
         config = calibration_config.get()
 
-        def emit_display_result(display: DisplayResults):
-            self.frame_and_fit_ready.emit(display)
-
         try:
             with force_reference_mode(self.manager, self.reference_mode_state.emit):
-                success = self.manager.perform_calibration(config, on_step=emit_display_result)
+                success = self.manager.perform_calibration(config, on_step=self.emit_display_result)
 
             if success:
                 self.calibration_finished.emit()
@@ -317,10 +318,12 @@ class BrillouinSignaller(QObject):
     def take_measurements(self, n: int, which_axis: str, step: float):
         measurements = []
         self._gui_ready = True
-        self.log_message.emit(f"Taking Measurement Series")
+
+
 
         for i in range(n):
             try:
+                self.log_message.emit(f"Taking Measurement {i+1}")
                 fitting = self.manager.snap_and_get_fitting()
 
                 display_results = self.manager.get_display_results_from_fitting(fitting)
@@ -340,7 +343,8 @@ class BrillouinSignaller(QObject):
             except Exception as e:
                 self.log_message.emit(f"[Measurement] Error at index {i}: {e}")
 
-        self.measurement_result_ready.emit(measurements)
+        measurement_series = MeasurementSeries(measurements=measurements, calibration=self.manager.calibration_results)
+        self.measurement_result_ready.emit(measurement_series)
 
 
     @pyqtSlot()
