@@ -44,7 +44,7 @@ class IxonUltra(BaseCamera):
         )
         if temperature != "off":
             self.cam.set_temperature(temperature, enable_cooler=True)
-            self._wait_for_cooling()
+            self._wait_for_cooling(target_temp=temperature)
 
 
         self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
@@ -69,14 +69,17 @@ class IxonUltra(BaseCamera):
     def set_verbose(self, verbose: bool) -> None:
         self.verbose = verbose
 
-    def _wait_for_cooling(self, timeout=600):
+    def _wait_for_cooling(self, target_temp=0, timeout=600):
         start = time.time()
         while time.time() - start < timeout:
             status = self.cam.get_temperature_status()
             temp = self.cam.get_temperature()
             print(f"[IxonUltra] Cooling... Status: {status}, Temp: {temp:.2f} °C")
-            if status == "stabilized":
-                print("[IxonUltra] Cooling stabilized.")
+            # if status == "stabilized":
+            #     print("[IxonUltra] Cooling stabilized.")
+            #     return
+            if temp < target_temp + 3:
+                print("[IxonUltra] Target Temperature reached")
                 return
             time.sleep(10)
         print("[IxonUltra] Warning: cooling did not stabilize within timeout.")

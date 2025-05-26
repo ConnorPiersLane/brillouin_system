@@ -287,7 +287,7 @@ class BrillouinSignaller(QObject):
                 self.log_message.emit("GUI timeout while rendering result.")
                 break
 
-    @pyqtSlot()
+    @pyqtSlot(bool)
     def set_save_images_state(self, do_save_images: bool):
         self.manager.do_save_images = do_save_images
 

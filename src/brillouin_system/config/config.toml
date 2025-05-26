@@ -1,11 +1,13 @@
 [calibration]
-n_per_freq = 3
+n_per_freq = 10
 calibration_freqs = [
     5.0,
-    5.2,
-    5.4,
-    5.6,
-    5.8,
+    5.5,
+    6.0,
+    6.5,
+    7.0,
+    7.5,
+    8.0,
 ]
 reference = "distance"
 
@@ -15,22 +17,25 @@ gain = 1
 
 [sline]
 selected_rows = [
+    4,
+    5,
+    6,
+    7,
+    8,
     9,
     10,
-    11,
-    12,
 ]
 
 [find_peaks.sample]
 prominence_fraction = 0.05
-min_peak_width = 2
-min_peak_height = 100
+min_peak_width = 1
+min_peak_height = 200
 rel_height = 0.5
-wlen_pixels = 30
+wlen_pixels = 10
 
 [find_peaks.reference]
 prominence_fraction = 0.05
-min_peak_width = 2
-min_peak_height = 100
+min_peak_width = 1
+min_peak_height = 1000
 rel_height = 0.5
-wlen_pixels = 30
+wlen_pixels = 40

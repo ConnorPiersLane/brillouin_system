@@ -14,12 +14,14 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 
 from brillouin_system.config.config import calibration_config
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
+from brillouin_system.devices.zaber_linear import ZaberLinearController
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
-from brillouin_system.devices.microwave_device import MicrowaveDummy
-from brillouin_system.devices.shutter_device import ShutterManagerDummy
+from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
+from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
 from brillouin_system.my_dataclasses.background_data import BackgroundData
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
@@ -36,33 +38,33 @@ from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 
 
 ## Testing
-brillouin_manager = BrillouinManager(
-        camera=DummyCamera(),
-    shutter_manager=ShutterManagerDummy('human_interface'),
-    microwave=MicrowaveDummy(),
-    zaber=ZaberLinearDummy(),
-    is_sample_illumination_continuous=True
-)
+# brillouin_manager = BrillouinManager(
+#         camera=DummyCamera(),
+#     shutter_manager=ShutterManagerDummy('human_interface'),
+#     microwave=MicrowaveDummy(),
+#     zaber=ZaberLinearDummy(),
+#     is_sample_illumination_continuous=True
+# )
 
 #
 # # Real
-# brillouin_manager = BrillouinManager(
-#         camera=IxonUltra(
-#             index = 0,
-#             temperature = -80, #"off"
-#             fan_mode = "full",
-#             x_start = 40, x_end  = 120,
-#             y_start= 300, y_end  = 320,
-#             vbin= 1, hbin  = 1,
-#             exposure_time = 0.5,
-#             gain  = 1,
-#             verbose = True,
-#         ),
-#     shutter_manager=ShutterManager('human_interface'),
-#     microwave=Microwave(),
-#     zaber=ZaberLinearController(),
-#     is_sample_illumination_continuous=True
-# )
+brillouin_manager = BrillouinManager(
+        camera=IxonUltra(
+            index = 0,
+            temperature = -80, #"off"
+            fan_mode = "full",
+            x_start = 40, x_end  = 120,
+            y_start= 300, y_end  = 315,
+            vbin= 1, hbin  = 1,
+            exposure_time = 0.5,
+            gain  = 1,
+            verbose = True,
+        ),
+    shutter_manager=ShutterManager('human_interface'),
+    microwave=Microwave(),
+    zaber=ZaberLinearController(),
+    is_sample_illumination_continuous=True
+)
 
 
 
