@@ -145,8 +145,14 @@ def get_calibration_fig(calibration_result: CalibrationResults,
 
     ax.set_xlabel("Frequency (GHz)")
     ax.set_ylabel(y_label)
-    ax.set_title(f"Calibration Fit ({reference.capitalize()}: a={calibration.a} [GHz/px^2],"
-                 f"b={calibration.b} [GHz/px], c={calibration.c} [GHz])")
+    ax.set_title(f"Calibration Fit ({reference.capitalize()}: "
+                 f"a={round(calibration.a, ndigits=2)} [GHz/px^2], "
+                 f"b={round(calibration.b, ndigits=2)} [GHz/px], "
+                 f"c={round(calibration.c, ndigits=2)} [GHz])")
+    print(f"Calibration Fit ({reference.capitalize()}: "
+                 f"a={round(calibration.a, ndigits=2)} [GHz/px^2], "
+                 f"b={round(calibration.b, ndigits=2)} [GHz/px], "
+                 f"c={round(calibration.c, ndigits=2)} [GHz])")
     ax.grid(True)
     ax.legend()
 
