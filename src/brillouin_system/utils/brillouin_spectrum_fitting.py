@@ -111,6 +111,10 @@ def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> Fitt
 
     try:
         popt, _ = curve_fit(_2Lorentzian, pix, sline, p0=p0, ftol=1e-6, xtol=1e-6)
+
+        # Ensure peak 1 is left, peak 2 is right
+        popt = sort_lorentzian_peaks(popt)
+
         interPeaksteps = np.abs(popt[4] - popt[1])
         fittedSpect = _2Lorentzian(pix, *popt)
 
@@ -125,12 +129,12 @@ def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> Fitt
             x_fit_refined=x_fit,
             y_fit_refined=y_fit,
             lorentzian_parameters=popt,
-            left_peak_center_px=popt[1],
-            left_peak_width_px=popt[2],
-            left_peak_amplitude=popt[0],
-            right_peak_center_px=popt[4],
-            right_peak_width_px=popt[5],
-            right_peak_amplitude=popt[3],
+            left_peak_center_px=float(popt[1]),
+            left_peak_width_px=float(popt[2]),
+            left_peak_amplitude=float(popt[0]),
+            right_peak_center_px=float(popt[4]),
+            right_peak_width_px=float(popt[5]),
+            right_peak_amplitude=float(popt[3]),
             inter_peak_distance=interPeaksteps
         )
 
@@ -180,6 +184,21 @@ def refine_fitted_spectrum(x_pixels: np.ndarray, lorentzian_parameters: list, fa
     return x_fit, y_fit
 
 
+def sort_lorentzian_peaks(params: np.ndarray | list) -> np.ndarray:
+    """
+    Ensure Lorentzian fit parameters are sorted by peak center positions (left-to-right).
 
+    Parameters:
+        params (array-like): [amp1, cen1, wid1, amp2, cen2, wid2, offset]
+
+    Returns:
+        np.ndarray: Reordered parameters so that the left peak comes first
+    """
+    amp1, cen1, wid1, amp2, cen2, wid2, offset = params
+
+    if cen1 <= cen2:
+        return np.array([amp1, cen1, wid1, amp2, cen2, wid2, offset])
+    else:
+        return np.array([amp2, cen2, wid2, amp1, cen1, wid1, offset])
 
 

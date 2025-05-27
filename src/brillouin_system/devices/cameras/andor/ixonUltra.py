@@ -42,6 +42,10 @@ class IxonUltra(BaseCamera):
             temperature=temperature,
             fan_mode=fan_mode,
         )
+
+        print("[IxonUltra] Preamp index:", self.cam.get_preamp())
+        print("[IxonUltra] Preamp gain (e⁻/count):", self.cam.get_preamp_gain())
+
         if temperature != "off":
             self.cam.set_temperature(temperature, enable_cooler=True)
             self._wait_for_cooling(target_temp=temperature)
