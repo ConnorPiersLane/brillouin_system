@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.cameras.for_brillouin_signal.ixonUltra import IxonUltra
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 import numpy as np
 
 def test_ixon_camera():
@@ -6,6 +6,13 @@ def test_ixon_camera():
 
     # Create camera instance
     cam = IxonUltra(index=0, temperature="off", fan_mode="full")
+
+    cam.list_amp_modes()
+    print('Hello')
+    print(cam.get_current_amp_mode())
+
+    cam.set_gain(0)
+    print(cam.get_gain())
 
     # ---- Check camera is opened
     assert cam.is_opened(), "Camera failed to open."

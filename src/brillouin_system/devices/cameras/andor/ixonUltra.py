@@ -42,7 +42,7 @@ class IxonUltra(BaseCamera):
             temperature=temperature,
             fan_mode=fan_mode,
         )
-
+        self.set_amp_mode_by_index(9)
         print("[IxonUltra] Preamp index:", self.cam.get_preamp())
         print("[IxonUltra] Preamp gain (e⁻/count):", self.cam.get_preamp_gain())
 
@@ -191,16 +191,8 @@ class IxonUltra(BaseCamera):
         Returns: mode_index, (channel, oamp, hsspeed, preamp)
 
         """
-        current = self.cam.get_amp_mode()  # returns (channel, oamp, hsspeed, preamp)
-        modes = self.cam.get_all_amp_modes()
-        for i, m in enumerate(modes):
-            if (m.channel, m.oamp, m.hsspeed, m.preamp) == current:
-                print(f"[IxonUltra] Current amplifier mode index: {i}")
-                print(f"  Channel: {m.channel}, BitDepth: {m.channel_bitdepth}, OAmp: {m.oamp} ({m.oamp_kind}), "
-                      f"HSSpeed: {m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp: {m.preamp} ({m.preamp_gain} e⁻/count)")
-                return i, m
-        print("[IxonUltra] Warning: Current amp mode not found in known modes.")
-        return None
+        return self.cam.get_amp_mode()  # returns (channel, oamp, hsspeed, preamp)
+
 
     def list_amp_modes(self):
         modes = self.cam.get_all_amp_modes()
