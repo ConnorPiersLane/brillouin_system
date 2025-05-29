@@ -174,6 +174,39 @@ class IxonUltra(BaseCamera):
             height = (vend - vstart) // vbin
             return (height, width)
 
+    def set_amp_mode_by_index(self, index: int):
+        modes = self.cam.get_all_amp_modes()
+        if index < 0 or index >= len(modes):
+            raise ValueError(f"Invalid amp mode index: {index}.")
+        mode = modes[index]
+        self.cam.set_amp_mode(channel=mode.channel, oamp=mode.oamp, hsspeed=mode.hsspeed, preamp=mode.preamp)
+        if self.verbose:
+            print(f"[IxonUltra] Amplifier mode set to index {index}:")
+            print(f"  Channel: {mode.channel}, Output Amp: {mode.oamp} ({mode.oamp_kind}), "
+                  f"HSSpeed: {mode.hsspeed} ({mode.hsspeed_MHz} MHz), Preamp: {mode.preamp} ({mode.preamp_gain} e⁻/count)")
+
+    def get_current_amp_mode(self) -> tuple:
+        """
+
+        Returns: mode_index, (channel, oamp, hsspeed, preamp)
+
+        """
+        current = self.cam.get_amp_mode()  # returns (channel, oamp, hsspeed, preamp)
+        modes = self.cam.get_all_amp_modes()
+        for i, m in enumerate(modes):
+            if (m.channel, m.oamp, m.hsspeed, m.preamp) == current:
+                print(f"[IxonUltra] Current amplifier mode index: {i}")
+                print(f"  Channel: {m.channel}, BitDepth: {m.channel_bitdepth}, OAmp: {m.oamp} ({m.oamp_kind}), "
+                      f"HSSpeed: {m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp: {m.preamp} ({m.preamp_gain} e⁻/count)")
+                return i, m
+        print("[IxonUltra] Warning: Current amp mode not found in known modes.")
+        return None
+
+    def list_amp_modes(self):
+        modes = self.cam.get_all_amp_modes()
+        for i, m in enumerate(modes):
+            print(f"[{i}] Channel={m.channel}, BitDepth={m.channel_bitdepth}, OAmp={m.oamp} ({m.oamp_kind}), "
+                  f"HSSpeed={m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp={m.preamp} ({m.preamp_gain} e⁻/count)")
 
 
     def is_opened(self) -> bool:

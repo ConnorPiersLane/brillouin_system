@@ -45,8 +45,16 @@ def find_brillouin_peak_locations(sline, is_reference_mode: bool):
     else:
         prominence = find_peak_config.prominence_fraction * np.max(pos_sline)
 
-    min_peak_width = find_peak_config.min_peak_width
-    min_peak_height = find_peak_config.min_peak_height
+
+    if find_peak_config.min_peak_height is None:
+        min_peak_height = 1
+    else:
+        min_peak_height = find_peak_config.min_peak_height
+
+    if find_peak_config.min_peak_width is None:
+        min_peak_width = 1
+    else:
+        min_peak_width = find_peak_config.min_peak_width
 
     if find_peak_config.rel_height is None:
         rel_height = 0.5
@@ -82,8 +90,10 @@ def select_top_two_peaks(pk_ind, pk_info):
 
     return selected_pk_ind, selected_pk_info
 
-def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> FittedSpectrum:
-    sline = get_sline_from_image(frame=frame)
+
+
+
+def get_fitted_spectrum_from_sline(sline, frame, is_reference_mode):
     pk_ind, pk_info = find_brillouin_peak_locations(sline, is_reference_mode=is_reference_mode)
     pix = np.arange(sline.shape[0])
 
@@ -110,7 +120,7 @@ def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> Fitt
           pk_hts[1], pk_ind[1], pk_wids[1], np.amin(sline)]
 
     try:
-        popt, _ = curve_fit(_2Lorentzian, pix, sline, p0=p0, ftol=1e-6, xtol=1e-6)
+        popt, _ = curve_fit(_2Lorentzian, pix, sline, p0=p0)
 
         # Ensure peak 1 is left, peak 2 is right
         popt = sort_lorentzian_peaks(popt)
@@ -149,6 +159,9 @@ def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> Fitt
 
     return fitted_spectrum
 
+def get_fitted_spectrum_from_image(frame: np.ndarray, is_reference_mode) -> FittedSpectrum:
+    sline = get_sline_from_image(frame=frame)
+    return get_fitted_spectrum_from_sline(sline, frame, is_reference_mode)
 
 def _2Lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offs):
     return (amp1 * wid1 ** 2 / ((x - cen1) ** 2 + wid1 ** 2)) + \

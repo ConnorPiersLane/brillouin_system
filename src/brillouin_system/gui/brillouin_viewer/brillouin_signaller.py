@@ -6,7 +6,7 @@ import time
 
 from brillouin_system.config.config import calibration_config
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
-from brillouin_system.my_dataclasses.background_data import BackgroundData
+from brillouin_system.my_dataclasses.background_data import ImageStatistics
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
@@ -106,7 +106,7 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def emit_background_data(self):
-        data = BackgroundData(
+        data = ImageStatistics(
             image=self.manager.bg_image,
             camera_settings=self.manager.get_camera_settings()
         )
@@ -228,7 +228,7 @@ class BrillouinSignaller(QObject):
             self.manager.acquire_background_image(number_of_images_to_be_taken=10)
             self.background_available_state.emit(self.manager.is_background_image_available())
             self.log_message.emit("Background image acquired.")
-            self.background_data_ready.emit(BackgroundData(
+            self.background_data_ready.emit(ImageStatistics(
                 image=self.manager.bg_image,
                 camera_settings=self.manager.get_camera_settings()
             ))

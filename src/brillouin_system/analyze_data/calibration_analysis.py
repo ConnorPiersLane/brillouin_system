@@ -279,4 +279,8 @@ plot_sensitivity_comparison(calibration_results, reference='left')
 plot_sensitivity_comparison(calibration_results, reference='right')
 plot_distance_fit_and_error_with_sensitivity(calibration_results)
 plot_slines_at_freqs(calibration_results, freqs_to_plot=(4.0,8.0))
-plt.show()
+
+
+
+
+

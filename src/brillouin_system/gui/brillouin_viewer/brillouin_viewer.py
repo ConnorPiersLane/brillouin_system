@@ -22,7 +22,7 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
 from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
-from brillouin_system.my_dataclasses.background_data import BackgroundData
+from brillouin_system.my_dataclasses.background_data import ImageStatistics
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 from brillouin_system.utils.calibration import CalibrationResults, render_calibration_to_pixmap, CalibrationImageDialog
@@ -644,7 +644,7 @@ class BrillouinViewer(QWidget):
         self.allied_camera_display.setPixmap(pixmap)
 
     def save_background_image(self):
-        def receive_data(data: BackgroundData):
+        def receive_data(data: ImageStatistics):
             path, _ = QFileDialog.getSaveFileName(
                 self, "Save Background Image", filter="Pickle Files (*.pkl);;All Files (*)"
             )
@@ -692,7 +692,7 @@ class BrillouinViewer(QWidget):
         wait_dialog.setModal(True)
         wait_dialog.setWindowFlags(wait_dialog.windowFlags() | Qt.WindowStaysOnTopHint)
 
-        def on_bg_ready(data: BackgroundData):
+        def on_bg_ready(data: ImageStatistics):
             self.brillouin_signaller.background_data_ready.disconnect(on_bg_ready)
             wait_dialog.close()
             print("[Brillouin Viewer] Background image acquired.")

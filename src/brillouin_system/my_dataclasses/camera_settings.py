@@ -8,3 +8,4 @@ class CameraSettings:
     gain: int
     roi: tuple[int, int, int, int]
     binning: tuple[int, int]
+    amp_mode: tuple

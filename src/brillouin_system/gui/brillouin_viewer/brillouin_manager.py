@@ -53,7 +53,10 @@ class BrillouinManager:
         # Calibration
         self.calibration_results: CalibrationResults | None = None
 
-        self.bg_image = None
+        self.dark_image = None
+        self.bg_image_sample = None
+        self.bg_image_reference = None
+
 
         self.init_shutters()
 
@@ -90,6 +93,11 @@ class BrillouinManager:
         self.is_reference_mode = False
         self.shutter_manager.change_to_objective()
         print("[BrillouinManager] Switched to sample mode.")
+
+    def take_and_store_dark_image(self):
+        self.camera.close_shutter()
+        time.sleep(0.05)
+        self.dark_image = self._get_camera_snap()
 
     # ----------------- Background Subtraction ----------------- #
 

@@ -50,6 +50,13 @@ class SelectedRows:
 
 
 @dataclass
+class AndorCameraConfig:
+    n_dark_images: int
+    n_bg_images: int
+    
+
+
+@dataclass
 class FindPeaksConfig:
     prominence_fraction: float
     min_peak_width: int
