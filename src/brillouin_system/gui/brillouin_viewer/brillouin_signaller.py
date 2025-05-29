@@ -140,7 +140,7 @@ class BrillouinSignaller(QObject):
         cam = self.manager.camera
         settings = {
             "exposure": round(cam.get_exposure_time(),ndigits=4),
-            "gain": cam.get_gain(),
+            "gain": cam.get_emccd_gain(),
             "roi": cam.get_roi(),
             "binning": cam.get_binning(),
         }
@@ -151,7 +151,7 @@ class BrillouinSignaller(QObject):
         try:
             cam = self.manager.camera
             cam.set_exposure_time(settings["exposure"])
-            cam.set_gain(settings["gain"])
+            cam.set_emccd_gain(settings["gain"])
             x0, x1, y0, y1 = settings["roi"]
             hbin, vbin = settings["binning"]
             cam.set_roi(x0, x1, y0, y1)

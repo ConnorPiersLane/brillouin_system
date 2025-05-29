@@ -24,12 +24,17 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
-    def set_gain(self, gain: float | int):
+    def set_emccd_gain(self, gain: int):
         """Set the camera gain."""
         pass
 
     @abstractmethod
-    def get_gain(self) -> float | int:
+    def get_emccd_gain(self) -> int:
+        """Get the current camera gain."""
+        pass
+
+    @abstractmethod
+    def get_preamp_gain(self) -> int:
         """Get the current camera gain."""
         pass
 

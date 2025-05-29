@@ -10,7 +10,7 @@ def main():
     try:
         # Optional: set ROI or exposure
         cam.set_exposure(5000)  # µs
-        cam.set_gain(10)
+        cam.set_emccd_gain(10)
 
         print("[DEBUG] Capturing one image...")
         image = cam.snap()

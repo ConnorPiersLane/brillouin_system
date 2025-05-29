@@ -11,8 +11,8 @@ def test_ixon_camera():
     print('Hello')
     print(cam.get_current_amp_mode())
 
-    cam.set_gain(0)
-    print(cam.get_gain())
+    cam.set_emccd_gain(0)
+    print(cam.get_emccd_gain())
 
     # ---- Check camera is opened
     assert cam.is_opened(), "Camera failed to open."
@@ -27,7 +27,7 @@ def test_ixon_camera():
 
     # ---- Set and verify gain
     gain_value = 100
-    cam.set_gain(gain_value)
+    cam.set_emccd_gain(gain_value)
     actual_gain, _ = cam.cam.get_EMCCD_gain()
     assert actual_gain == gain_value, f"Gain mismatch: set {gain_value}, got {actual_gain}"
     print(f"[OK] Gain set and verified: {actual_gain}")

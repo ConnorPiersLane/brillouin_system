@@ -104,15 +104,17 @@ class IxonUltra(BaseCamera):
             if self.verbose:
                 print(f"[IxonUltra] Exposure time set to {self.get_exposure_time():.4f} seconds")
 
-    def set_gain(self, gain: float | int):
+    def set_emccd_gain(self, gain: float | int):
         #with self._lock:
+        if gain == 1:  # Gain==1 not allowed, switch to gain=0 (deactivate gain in this case)
+            gain = 0
+        actual_gain, adv = self.get_gain_advanced()
+        if adv:
+            print("[IxonUltra Camera Warning] Advanced gain mode was enabled but is now disabled!")
+        self.cam.set_EMCCD_gain(gain, advanced=False)
+        if self.verbose:
             actual_gain, adv = self.get_gain_advanced()
-            if adv:
-                print("[IxonUltra Camera Warning] Advanced gain mode was enabled but is now disabled!")
-            self.cam.set_EMCCD_gain(gain, advanced=False)
-            if self.verbose:
-                actual_gain, adv = self.get_gain_advanced()
-                print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
+            print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
 
 
     def set_gain_advanced(self, gain: float | int, advanced: bool = False):
@@ -144,9 +146,13 @@ class IxonUltra(BaseCamera):
         #with self._lock:
             return self.cam.get_exposure()
 
-    def get_gain(self) -> int:
+    def get_emccd_gain(self) -> int:
         #with self._lock:
             return self.cam.get_EMCCD_gain()[0]
+
+    def get_preamp_gain(self) -> int:
+        """Preamp gain (e⁻/count)"""
+        return self.cam.get_preamp_gain()
 
     def get_gain_advanced(self) -> tuple[int, bool]:
         #with self._lock:

@@ -269,10 +269,10 @@ class BrillouinManager:
 
     def get_camera_settings(self) -> CameraSettings:
         return CameraSettings(name=self.camera.get_name(),
-                                           exposure_time_s=self.camera.get_exposure_time(),
-                                           gain=self.camera.get_gain(),
-                                           roi=self.camera.get_roi(),
-                                           binning=self.camera.get_binning())
+                              exposure_time_s=self.camera.get_exposure_time(),
+                              gain=self.camera.get_emccd_gain(),
+                              roi=self.camera.get_roi(),
+                              binning=self.camera.get_binning())
 
 
 
