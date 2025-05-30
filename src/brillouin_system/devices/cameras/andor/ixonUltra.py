@@ -15,8 +15,9 @@ class IxonUltra(BaseCamera):
                  y_start: int = 1, y_end: int = 512,
                  vbin: int = 1, hbin: int = 1,
                  exposure_time = 0.21,
-                 gain: int = 1,
+                 gain: int = 0,
                  advanced_gain_option: bool = False,
+                 amp_mode_index: int=9,
                  verbose=True):
         """
         Initialize the IxonUltra camera.
@@ -42,7 +43,7 @@ class IxonUltra(BaseCamera):
             temperature=temperature,
             fan_mode=fan_mode,
         )
-        self.set_amp_mode_by_index(9)
+        self.set_amp_mode_by_index(amp_mode_index)
         print("[IxonUltra] Preamp index:", self.cam.get_preamp())
         print("[IxonUltra] Pe", self.get_amp_mode())
         print("[IxonUltra] Preamp gain (e⁻/count):", self.get_preamp_gain())
