@@ -34,7 +34,32 @@ class IxonUltra(BaseCamera):
             hbin (int): Horizontal binning factor (>= 1). Default is 1.
             gain (int): EMCCD gain (0 to 300 typically).
             advanced_gain_option (bool): Use advanced gain (>300). Default is False.
+            amp_mode_index:
+                [0] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [1] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [2] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [3] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [4] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [5] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [6] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [7] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [8] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [9] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [10] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [11] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [12] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=0 (3.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [13] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=0 (3.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [14] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=0 (3.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [15] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=1 (1.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [16] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=2 (0.07999999821186066 MHz), Preamp=0 (1.0 e⁻/count)
+                [17] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=2 (0.07999999821186066 MHz), Preamp=1 (2.0 e⁻/count)
+                [18] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=2 (0.07999999821186066 MHz), Preamp=2 (3.0 e⁻/count)
         """
+
+        # TDeviceInfo(controller_model='USB', head_model='DU897_BV', serial_number=9303)
+        # Controller Model: USB
+        # Camera Name(Head Model): DU897_BV
+        # Serial Number: 9303
 
         self.verbose = verbose
 
@@ -43,6 +68,11 @@ class IxonUltra(BaseCamera):
             temperature=temperature,
             fan_mode=fan_mode,
         )
+        # Set shift speed:
+        desired_speed_index = 4  # Slowest shift speed (3.3 μs)
+        # Available VSSpeeds: [0.30000001192092896, 0.5, 0.8999999761581421, 1.7000000476837158, 3.299999952316284]
+        self.cam.set_vsspeed(desired_speed_index)
+
         self.set_amp_mode_by_index(amp_mode_index)
         print("[IxonUltra] Preamp index:", self.cam.get_preamp())
         print("[IxonUltra] Pe", self.get_amp_mode())

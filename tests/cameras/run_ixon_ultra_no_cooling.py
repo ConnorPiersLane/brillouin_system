@@ -11,6 +11,15 @@ def test_ixon_camera():
     print('Hello')
     print(cam.get_amp_mode())
 
+    vsspeeds = cam.cam.get_all_vsspeeds()
+    print("Available VSSpeeds:", vsspeeds)
+
+    device_info = cam.cam.get_device_info()
+    print(device_info)
+    print("Controller Model:", device_info.controller_model)
+    print("Camera Name (Head Model):", device_info.head_model)
+    print("Serial Number:", device_info.serial_number)
+
     cam.set_emccd_gain(0)
     print(cam.get_emccd_gain())
 
