@@ -30,7 +30,7 @@ def print_x_axis_is_number(data):
     plt.xlabel('Index in List')
     plt.ylabel('Frequency Shift (GHz)')
     plt.title(
-        f'Brillouin Frequency Shift. Expo: {round(data[0].camera_settings_ready.exposure_time_s, ndigits=2)}, Gain: {data[0].camera_settings_ready.gain}')
+        f'Brillouin Frequency Shift. Expo: {round(data[0].camera_settings_ready.exposure_time_s, ndigits=2)}, Gain: {data[0].camera_settings_ready.emccd_gain}')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -54,7 +54,7 @@ def print_x_zaber(data):
 
     plt.xlabel('Lens Position (um)')
     plt.ylabel('Frequency Shift (GHz)')
-    plt.title(f'Brillouin Frequency Shift. Expo: {round(data[0].camera_settings_ready.exposure_time_s, ndigits=2)}, Gain: {data[0].camera_settings_ready.gain}')
+    plt.title(f'Brillouin Frequency Shift. Expo: {round(data[0].camera_settings_ready.exposure_time_s, ndigits=2)}, Gain: {data[0].camera_settings_ready.emccd_gain}')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()

@@ -94,7 +94,7 @@ class MicrowaveDummy:
         print(f"[{self.device_name}] Shutdown (output off)")
 
     def get_frequency(self) -> float:
-        print(f"[{self.device_name}] Current frequency: {self._frequency_ghz} GHz")
+        # print(f"[{self.device_name}] Current frequency: {self._frequency_ghz} GHz")
         return self._frequency_ghz
 
     def set_frequency(self, freq_ghz: float):

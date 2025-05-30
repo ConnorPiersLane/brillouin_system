@@ -78,6 +78,16 @@ class DummyCamera(BaseCamera):
     def is_opened(self) -> bool:
         return True
 
+    def get_preamp_gain(self) -> int:
+        """Preamp gain (e⁻/count)"""
+        return 1.0
+
+    def get_amp_mode(self) -> tuple:
+        """
+
+        """
+        return "Test Amp Mode: (channel, oamp, hsspeed, preamp)"
+
     def close(self):
         pass
 

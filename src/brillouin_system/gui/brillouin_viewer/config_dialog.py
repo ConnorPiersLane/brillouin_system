@@ -1,17 +1,17 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGroupBox,
-    QPushButton, QApplication, QFormLayout, QButtonGroup, QRadioButton
+    QPushButton, QApplication, QFormLayout, QButtonGroup, QRadioButton, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator
 
 from brillouin_system.config.config import (
     sample_config,
     reference_config,
-    sline_config,
     calibration_config,
+    andor_frame_config,
     save_find_peaks_config_section,
-    save_selected_rows,
     save_calibration_config,
+    save_andor_frame_settings,
     find_peaks_config_toml_path,
 )
 
@@ -21,33 +21,54 @@ class ConfigDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("Peak Detection Settings")
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(900, 400)
 
         self.sample_inputs = {}
         self.reference_inputs = {}
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.create_row_input_block())
-        layout.addWidget(self.create_spectrum_fitting_group())
-        layout.addWidget(self.create_calibration_group())
-        layout.addLayout(self.create_save_button())
+        # Predefine Andor Frame inputs
+        self.selected_rows_input = QLineEdit()
+        self.n_dark_images_input = QLineEdit()
+        self.n_dark_images_input.setValidator(QIntValidator(0, 999))
+        self.do_subtract_dark_image_input = QCheckBox()
+        self.n_bg_images_input = QLineEdit()
+        self.n_bg_images_input.setValidator(QIntValidator(0, 999))
 
-        self.setLayout(layout)
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(self.create_andor_frame_group())
+        main_layout.addWidget(self.create_spectrum_fitting_group())
+        main_layout.addWidget(self.create_calibration_group())
+        main_layout.addLayout(self.create_save_button())
+
+        self.setLayout(main_layout)
         self.load_initial_values()
 
-    def create_row_input_block(self):
-        row = QHBoxLayout()
-        self.selected_rows_label = QLabel("Selected Pixel Rows (e.g. 4,5,6):")
-        self.selected_rows_input = QLineEdit()
-        row.addWidget(self.selected_rows_label)
-        row.addWidget(self.selected_rows_input)
-        container = QGroupBox("Rows of Pixel of the Andor frame to be summed")
-        container.setLayout(row)
-        return container
+    def create_andor_frame_group(self):
+        group = QGroupBox("Andor Frame Settings")
+        layout = QVBoxLayout()
+
+        # Row 1: Selected pixel rows
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Selected Pixel Rows (e.g. 4,5,6):"))
+        row1.addWidget(self.selected_rows_input)
+
+        # Row 2: All other inputs in one line
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("BG images:"))
+        row2.addWidget(self.n_bg_images_input)
+        row2.addWidget(QLabel("Dark images:"))
+        row2.addWidget(self.n_dark_images_input)
+        row2.addWidget(QLabel("Subtract dark:"))
+        row2.addWidget(self.do_subtract_dark_image_input)
+
+        layout.addLayout(row1)
+        layout.addLayout(row2)
+        group.setLayout(layout)
+        return group
 
     def create_spectrum_fitting_group(self):
         group = QGroupBox("Spectrum Fitting")
-        layout = QVBoxLayout()
+        layout = QHBoxLayout()
         layout.addWidget(self.create_config_group("Sample", self.sample_inputs))
         layout.addWidget(self.create_config_group("Reference", self.reference_inputs))
         group.setLayout(layout)
@@ -98,11 +119,10 @@ class ConfigDialog(QDialog):
         self.save_button = QPushButton("Save Values")
         self.save_button.clicked.connect(self.on_save_values_clicked)
 
-        bottom_row = QHBoxLayout()
-        bottom_row.addStretch()
-        bottom_row.addWidget(self.save_button)
-
-        return bottom_row
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(self.save_button)
+        return row
 
     def field_names(self):
         return [
@@ -114,7 +134,11 @@ class ConfigDialog(QDialog):
         ]
 
     def load_initial_values(self):
-        self.selected_rows_input.setText(",".join(str(x) for x in sline_config.get().selected_rows))
+        andor = andor_frame_config.get()
+        self.selected_rows_input.setText(",".join(str(x) for x in andor.selected_rows))
+        self.n_dark_images_input.setText(str(andor.n_dark_images))
+        self.do_subtract_dark_image_input.setChecked(andor.do_subtract_dark_image)
+        self.n_bg_images_input.setText(str(andor.n_bg_images))
 
         for field in self.field_names():
             self.sample_inputs[field].setText(str(getattr(sample_config.get(), field)))
@@ -134,16 +158,20 @@ class ConfigDialog(QDialog):
 
     def on_save_values_clicked(self):
         try:
-            # Update sline config
-            rows = [int(x.strip()) for x in self.selected_rows_input.text().split(",") if x.strip().isdigit()]
-            sline_config.set("selected_rows", rows)
+            # Save Andor Frame Settings
+            andor_frame_config.update(
+                selected_rows=[int(x.strip()) for x in self.selected_rows_input.text().split(",") if x.strip().isdigit()],
+                n_dark_images=int(self.n_dark_images_input.text()),
+                do_subtract_dark_image=self.do_subtract_dark_image_input.isChecked(),
+                n_bg_images=int(self.n_bg_images_input.text())
+            )
 
-            # Update sample and reference configs
+            # Save FindPeaks sample/reference
             for field in self.field_names():
                 sample_config.set(field, self._parse_value(self.sample_inputs[field].text(), field))
                 reference_config.set(field, self._parse_value(self.reference_inputs[field].text(), field))
 
-            # Update calibration config
+            # Save calibration
             if self.left_radio.isChecked():
                 ref = "left"
             elif self.right_radio.isChecked():
@@ -157,11 +185,10 @@ class ConfigDialog(QDialog):
                 reference=ref
             )
 
-            # Save to file
-            save_calibration_config(find_peaks_config_toml_path, calibration_config)
-            save_selected_rows(find_peaks_config_toml_path, sline_config)
+            save_andor_frame_settings(find_peaks_config_toml_path, andor_frame_config)
             save_find_peaks_config_section(find_peaks_config_toml_path, "sample", sample_config)
             save_find_peaks_config_section(find_peaks_config_toml_path, "reference", reference_config)
+            save_calibration_config(find_peaks_config_toml_path, calibration_config)
 
             print("[ConfigDialog] Saved successfully.")
         except Exception as e:

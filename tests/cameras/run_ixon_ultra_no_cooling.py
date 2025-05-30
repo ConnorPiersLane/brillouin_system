@@ -9,7 +9,7 @@ def test_ixon_camera():
 
     cam.list_amp_modes()
     print('Hello')
-    print(cam.get_current_amp_mode())
+    print(cam.get_amp_mode())
 
     cam.set_emccd_gain(0)
     print(cam.get_emccd_gain())

@@ -22,7 +22,8 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
 from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
-from brillouin_system.my_dataclasses.background_data import ImageStatistics
+
+from brillouin_system.my_dataclasses.background_image import BackGroundImage
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 from brillouin_system.utils.calibration import CalibrationResults, render_calibration_to_pixmap, CalibrationImageDialog
@@ -38,34 +39,34 @@ from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 
 
 ## Testing
-# brillouin_manager = BrillouinManager(
-#         camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber=ZaberLinearDummy(),
-#     is_sample_illumination_continuous=True
-# )
-
-#
-# # Real
 brillouin_manager = BrillouinManager(
-        camera=IxonUltra(
-            index = 0,
-            temperature = -80, #"off"
-            fan_mode = "full",
-            x_start = 40, x_end  = 120,
-            y_start= 300, y_end  = 315,
-            vbin= 1, hbin  = 1,
-            exposure_time = 0.5,
-            gain  = 1,
-            verbose = True,
-        ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber=ZaberLinearController(),
+        camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
+    zaber=ZaberLinearDummy(),
     is_sample_illumination_continuous=True
 )
 
+#
+# # # Real
+# brillouin_manager = BrillouinManager(
+#         camera=IxonUltra(
+#             index = 0,
+#             temperature = -80, #"off"
+#             fan_mode = "full",
+#             x_start = 40, x_end  = 120,
+#             y_start= 300, y_end  = 315,
+#             vbin= 1, hbin  = 1,
+#             exposure_time = 0.5,
+#             gain  = 1,
+#             verbose = True,
+#         ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber=ZaberLinearController(),
+#     is_sample_illumination_continuous=True
+# )
+#
 
 
 
@@ -644,7 +645,7 @@ class BrillouinViewer(QWidget):
         self.allied_camera_display.setPixmap(pixmap)
 
     def save_background_image(self):
-        def receive_data(data: ImageStatistics):
+        def receive_data(data: BackGroundImage):
             path, _ = QFileDialog.getSaveFileName(
                 self, "Save Background Image", filter="Pickle Files (*.pkl);;All Files (*)"
             )
@@ -681,27 +682,6 @@ class BrillouinViewer(QWidget):
             print("[Brillouin Viewer] [Reference] Invalid frequency input.")
 
     def take_background_image(self):
-        self.stop_live_requested.emit()
-
-        # Show wait dialog
-        wait_dialog = QDialog(self)
-        wait_dialog.setWindowTitle("Acquiring Background")
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Please wait while the background image is being acquired..."))
-        wait_dialog.setLayout(layout)
-        wait_dialog.setModal(True)
-        wait_dialog.setWindowFlags(wait_dialog.windowFlags() | Qt.WindowStaysOnTopHint)
-
-        def on_bg_ready(data: ImageStatistics):
-            self.brillouin_signaller.background_data_ready.disconnect(on_bg_ready)
-            wait_dialog.close()
-            print("[Brillouin Viewer] Background image acquired.")
-            self.update_background_ui()
-            self.start_live_requested.emit()
-
-        self.brillouin_signaller.background_data_ready.connect(on_bg_ready)
-
-        wait_dialog.show()
         self.acquire_background_requested.emit()
 
 

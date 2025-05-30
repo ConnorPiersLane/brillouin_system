@@ -4,7 +4,7 @@ from scipy.signal import find_peaks
 
 import numpy as np
 
-from brillouin_system.config.config import reference_config, sample_config, sline_config
+from brillouin_system.config.config import reference_config, sample_config, andor_frame_config
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
 
@@ -19,7 +19,7 @@ def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Summed 1D spectrum (sline)
     """
-    rows = list(sline_config.get().selected_rows)
+    rows = list(andor_frame_config.get().selected_rows)
 
     height = frame.shape[0]
 

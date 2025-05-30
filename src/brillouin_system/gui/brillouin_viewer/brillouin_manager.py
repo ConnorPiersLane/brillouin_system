@@ -4,12 +4,13 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import calibration_config, CalibrationConfig
+from brillouin_system.config.config import calibration_config, CalibrationConfig, andor_frame_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
+from brillouin_system.my_dataclasses.background_image import ImageStatistics
 from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint
@@ -42,6 +43,17 @@ class BrillouinManager:
         self.microwave: Microwave | MicrowaveDummy = microwave
         self.zaber = zaber
 
+        # Init Camera Settings:
+        self.cam_settings_reference: CameraSettings = CameraSettings(
+            name=self.camera.get_name(),
+            exposure_time_s=0.2,
+            emccd_gain=0,
+            roi=self.camera.get_roi(),
+            binning=self.camera.get_binning(),
+            preamp_gain=self.camera.get_preamp_gain(),
+            amp_mode=self.camera.get_amp_mode(),
+        )
+        self.cam_settings_sample: CameraSettings = self.get_camera_settings() # use init values here
 
         # State
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
@@ -53,9 +65,11 @@ class BrillouinManager:
         # Calibration
         self.calibration_results: CalibrationResults | None = None
 
-        self.dark_image = None
-        self.bg_image_sample = None
-        self.bg_image_reference = None
+        # Dark Images
+        self.dark_image_reference: ImageStatistics | None = None
+        self.dark_image_sample: ImageStatistics | None = None
+        # Background (BG) Image
+        self.bg_image_sample: ImageStatistics | None = None
 
 
         self.init_shutters()
@@ -87,17 +101,26 @@ class BrillouinManager:
     def change_to_reference_mode(self):
         self.is_reference_mode = True
         self.shutter_manager.change_to_reference()
+        self.set_camera_settings(
+            exposure_time=self.cam_settings_reference.exposure_time_s,
+            emccd_gain=self.cam_settings_reference.emccd_gain,
+            roi=self.cam_settings_reference.roi,
+            binning=self.cam_settings_reference.binning,
+        )
         print("[BrillouinManager] Switched to reference mode.")
 
     def change_to_sample_mode(self):
         self.is_reference_mode = False
         self.shutter_manager.change_to_objective()
+        self.set_camera_settings(
+            exposure_time=self.cam_settings_sample.exposure_time_s,
+            emccd_gain=self.cam_settings_sample.emccd_gain,
+            roi=self.cam_settings_sample.roi,
+            binning=self.cam_settings_sample.binning,
+        )
         print("[BrillouinManager] Switched to sample mode.")
 
-    def take_and_store_dark_image(self):
-        self.camera.close_shutter()
-        time.sleep(0.05)
-        self.dark_image = self._get_camera_snap()
+
 
     # ----------------- Background Subtraction ----------------- #
 
@@ -115,41 +138,65 @@ class BrillouinManager:
         if not self.is_background_image_available():
             print("[AcquisitionManager] No background image available")
             return frame
-        return frame - self.bg_image
+        return frame - self.bg_image_sample
 
 
-    def acquire_background_image(self, number_of_images_to_be_taken: int):
+    def take_n_images(self, n_images) -> np.ndarray:
+        return np.stack([self._get_camera_snap() for _ in range(n_images)])
+
+    def take_bg_image(self):
         """Capture and average multiple frames to use as background."""
 
-        if self.is_reference_mode:
-            self.shutter_manager.reference.close()
+        if self.is_sample_illumination_continuous:
+            self.shutter_manager.sample.close()
         else:
-            if self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.close()
-            else:
-                pass # shutter should already be closed
+            pass # shutter should already be closed
         time.sleep(0.05)  # Optional delay before acquisition
 
+        andor_config = andor_frame_config.get()
+        n_bg_images = andor_config.n_bg_images
+
+        n_images = self.take_n_images(n_bg_images)
+
         if isinstance(self.camera, DummyCamera):
-            time.sleep(5)
-            self.bg_image = self._get_camera_snap() * 0.99  # simulate something
-        else:
-            self.bg_image = np.mean(
-                np.stack([self._get_camera_snap() for _ in range(number_of_images_to_be_taken)]),
-                axis=0
-            )
+            n_images = n_images * 0.8
+
+        self.bg_image_sample = ImageStatistics(n_images)
         print("[BrillouinManager] Background Image acquired.")
 
-        if self.is_reference_mode:
-            self.shutter_manager.reference.open()
+
+        if self.is_sample_illumination_continuous:
+            self.shutter_manager.sample.open()
         else:
-            if self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.open()
-            else:
-                pass # do not open shutter, we are in snap mode
+            pass # do not open shutter, we are in snap mode
+
+    def get_dark_image(self) -> ImageStatistics:
+        andor_config = andor_frame_config.get()
+        n_dark_images = andor_config.n_dark_images
+        print(f"[BrillouinManager] Starting dark image acquisition, images to capture: {n_dark_images}")
+
+        self.camera.close_shutter()
+        time.sleep(0.1)
+
+        n_images = self.take_n_images(n_dark_images)
+
+        if isinstance(self.camera, DummyCamera):
+            n_images = n_images * 0.01
+
+        self.camera.open_shutter()
+        time.sleep(0.05)
+
+        print(f"[BrillouinManager] {n_dark_images} dark images acquired with: {self.get_camera_settings()}")
+
+        return ImageStatistics(n_images)
+
+
 
     def is_background_image_available(self) -> bool:
-        return self.bg_image is not None
+        if self.bg_image_sample is None:
+            return False
+        else:
+            return True
 
     # ---------------- Get Frames  ----------------
     def _get_camera_snap(self) -> np.ndarray:
@@ -267,12 +314,43 @@ class BrillouinManager:
 
         return frame
 
+    def set_camera_settings(self,
+                            exposure_time: float,
+                            emccd_gain: int,
+                            roi: tuple[int, int, int, int],
+                            binning: tuple[int, int]):
+        self.camera.set_exposure_time(exposure_time)
+        self.camera.set_emccd_gain(emccd_gain)
+        x0, x1, y0, y1 = roi
+        hbin, vbin = binning
+        self.camera.set_roi(x0, x1, y0, y1)
+        self.camera.set_binning(hbin, vbin)
+
+        andor_config = andor_frame_config.get()
+        if andor_config.do_subtract_dark_image:
+            dark_image = self.get_dark_image()
+        else:
+            dark_image = None
+
+        if self.is_reference_mode:
+            self.dark_image_reference = dark_image
+            self.cam_settings_reference: CameraSettings = self.get_camera_settings()
+        else:
+            self.dark_image_sample = dark_image
+            self.cam_settings_sample: CameraSettings = self.get_camera_settings()
+
+
+
+
+
     def get_camera_settings(self) -> CameraSettings:
         return CameraSettings(name=self.camera.get_name(),
                               exposure_time_s=self.camera.get_exposure_time(),
-                              gain=self.camera.get_emccd_gain(),
+                              emccd_gain=self.camera.get_emccd_gain(),
                               roi=self.camera.get_roi(),
-                              binning=self.camera.get_binning())
+                              binning=self.camera.get_binning(),
+                              preamp_gain=self.camera.get_preamp_gain(),
+                              amp_mode=self.camera.get_amp_mode())
 
 
 

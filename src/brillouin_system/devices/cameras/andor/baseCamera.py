@@ -39,6 +39,10 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
+    def get_amp_mode(self) -> str:
+        pass
+
+    @abstractmethod
     def set_roi(self, x_start: int, x_end: int, y_start: int, y_end: int):
         """Set the region of interest."""
         pass

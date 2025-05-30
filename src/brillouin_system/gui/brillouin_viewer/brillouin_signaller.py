@@ -6,7 +6,7 @@ import time
 
 from brillouin_system.config.config import calibration_config
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
-from brillouin_system.my_dataclasses.background_data import ImageStatistics
+from brillouin_system.my_dataclasses.background_image import BackGroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
@@ -106,9 +106,10 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def emit_background_data(self):
-        data = ImageStatistics(
-            image=self.manager.bg_image,
-            camera_settings=self.manager.get_camera_settings()
+        data = BackGroundImage(
+            dark_image=self.manager.dark_image_sample,
+            bg_image=self.manager.bg_image_sample,
+            camera_settings=self.manager.cam_settings_sample
         )
         self.background_data_ready.emit(data)
 
@@ -132,7 +133,7 @@ class BrillouinSignaller(QObject):
             self.manager.change_to_sample_mode()
         else:
             self.manager.change_to_reference_mode()
-
+        self.emit_camera_settings()
         self.reference_mode_state.emit(self.manager.is_reference_mode)
 
     @pyqtSlot()
@@ -149,23 +150,23 @@ class BrillouinSignaller(QObject):
     @pyqtSlot(dict)
     def apply_camera_settings(self, settings: dict):
         try:
-            cam = self.manager.camera
-            cam.set_exposure_time(settings["exposure"])
-            cam.set_emccd_gain(settings["gain"])
-            x0, x1, y0, y1 = settings["roi"]
-            hbin, vbin = settings["binning"]
-            cam.set_roi(x0, x1, y0, y1)
-            cam.set_binning(hbin, vbin)
+            self.manager.set_camera_settings(
+                exposure_time=settings["exposure"],
+                emccd_gain=settings["gain"],
+                roi=settings["roi"],
+                binning=settings["binning"],
+            )
+            self.log_message.emit(f"Camera settings applied: {settings}")
+        except Exception as e:
+            self.log_message.emit(f"Failed to apply camera settings: {e}")
 
+        # Remove Background if sample mode
+        if not self.manager.is_reference_mode:
             # Reset background
             self.manager.stop_background_subtraction()
             self.manager.bg_image = None
             self.background_subtraction_state.emit(False)
             self.background_available_state.emit(False)
-
-            self.log_message.emit(f"Camera settings applied: {settings}")
-        except Exception as e:
-            self.log_message.emit(f"Failed to apply camera settings: {e}")
 
     @pyqtSlot()
     def toggle_camera_shutter(self):
@@ -224,16 +225,28 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def acquire_background_image(self):
+        #
+        if self.manager.is_reference_mode:
+            self.log_message.emit(f"Change to Sample Mode first to take a background image")
+            return
+
+        # Stop live view
+        self._running = False
+
         try:
-            self.manager.acquire_background_image(number_of_images_to_be_taken=10)
+            self.manager.take_bg_image()
             self.background_available_state.emit(self.manager.is_background_image_available())
             self.log_message.emit("Background image acquired.")
-            self.background_data_ready.emit(ImageStatistics(
-                image=self.manager.bg_image,
-                camera_settings=self.manager.get_camera_settings()
-            ))
         except Exception as e:
             self.log_message.emit(f"Failed to acquire background image: {e}")
+
+        # Start live view again
+        def restart_live_view_when_ready():
+            if not self._thread_active:
+                self.start_live_view()
+            else:
+                QTimer.singleShot(100, restart_live_view_when_ready)
+        restart_live_view_when_ready()
 
 
     @pyqtSlot()
@@ -346,36 +359,42 @@ class BrillouinSignaller(QObject):
         measurement_series = MeasurementSeries(measurements=measurements, calibration=self.manager.calibration_results)
         self.measurement_result_ready.emit(measurement_series)
 
-
     @pyqtSlot()
     def close(self):
         print("Stopping BrillouinWorker and closing hardware...")
         self._running = False
-        self._thread_active = False
 
-        try:
-            self.manager.camera.close()
-            print("Camera closed.")
-        except Exception as e:
-            print(f"Error closing camera: {e}")
+        def _wait_for_thread_and_shutdown():
+            if self._thread_active:
+                QTimer.singleShot(100, _wait_for_thread_and_shutdown)
+            else:
+                _shutdown_devices()
 
-        try:
-            self.manager.shutter_manager.close_all()
-            print("Shutter manager closed.")
-        except Exception as e:
-            print(f"Error closing shutter manager: {e}")
+        def _shutdown_devices():
+            try:
+                self.manager.camera.close()
+                print("Camera closed.")
+            except Exception as e:
+                print(f"Error closing camera: {e}")
 
-        try:
-            self.manager.microwave.shutdown()
-            print("Microwave closed.")
-        except Exception as e:
-            print(f"Error closing microwave: {e}")
+            try:
+                self.manager.shutter_manager.close_all()
+                print("Shutter manager closed.")
+            except Exception as e:
+                print(f"Error closing shutter manager: {e}")
 
-        try:
-            self.manager.zaber.close()
-            print("Zaber closed.")
-        except Exception as e:
-            print(f"Error closing zaber: {e}")
+            try:
+                self.manager.microwave.shutdown()
+                print("Microwave closed.")
+            except Exception as e:
+                print(f"Error closing microwave: {e}")
 
+            try:
+                self.manager.zaber.close()
+                print("Zaber closed.")
+            except Exception as e:
+                print(f"Error closing zaber: {e}")
 
-        print("BrillouinWorker shutdown complete.")
+            print("BrillouinWorker shutdown complete.")
+
+        _wait_for_thread_and_shutdown()

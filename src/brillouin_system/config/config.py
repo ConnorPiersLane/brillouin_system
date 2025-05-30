@@ -2,16 +2,11 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-
-# Path to the TOML configuration file
-find_peaks_config_toml_path = Path(__file__).parent.resolve() / "config.toml"
-
-# ---------- Thread-safe config wrapper ----------
 import threading
 from copy import deepcopy
-from dataclasses import asdict
 
 
+# ---------- Thread-safe config wrapper ----------
 class ThreadSafeConfig:
     def __init__(self, data_obj):
         self._lock = threading.Lock()
@@ -45,18 +40,6 @@ class ThreadSafeConfig:
 # ---------- Config models ----------
 
 @dataclass
-class SelectedRows:
-    selected_rows: list[int]
-
-
-@dataclass
-class AndorCameraConfig:
-    n_dark_images: int
-    n_bg_images: int
-    
-
-
-@dataclass
 class FindPeaksConfig:
     prominence_fraction: float
     min_peak_width: int
@@ -64,50 +47,28 @@ class FindPeaksConfig:
     rel_height: float
     wlen_pixels: int
 
-
 @dataclass
 class CalibrationConfig:
     n_per_freq: int
     calibration_freqs: list[float]
-    reference: str  # 'left', 'right', or 'distance'
+    reference: str
 
+@dataclass
+class AndorFrameSettings:
+    selected_rows: list[int]
+    n_dark_images: int
+    do_subtract_dark_image: bool
+    n_bg_images: int
 
 
 # ---------- Load/save helpers ----------
 
-def load_selected_rows(path: Path) -> SelectedRows:
-    with path.open("rb") as f:
-        data = tomli.load(f)
-
-    if "sline" not in data or "selected_rows" not in data["sline"]:
-        raise KeyError("Missing [sline] section or selected_rows key in TOML.")
-
-    return SelectedRows(selected_rows=data["sline"]["selected_rows"])
-
-
-def save_selected_rows(path: Path, config: ThreadSafeConfig):
-    with path.open("rb") as f:
-        data = tomli.load(f)
-
-    data["sline"] = {
-        "selected_rows": config.get_field("selected_rows")
-    }
-
-    with path.open("wb") as f:
-        tomli_w.dump(data, f)
-
+find_peaks_config_toml_path = Path(__file__).parent.resolve() / "config.toml"
 
 def load_find_peaks_config_section(path: Path, section: str) -> FindPeaksConfig:
     with path.open("rb") as f:
         raw = tomli.load(f)["find_peaks"][section]
-
-    converted = {
-        k: (None if str(v).lower() == "none" else v)
-        for k, v in raw.items()
-    }
-
-    return FindPeaksConfig(**converted)
-
+    return FindPeaksConfig(**raw)
 
 def save_find_peaks_config_section(path: Path, section: str, config: ThreadSafeConfig):
     with path.open("rb") as f:
@@ -116,46 +77,54 @@ def save_find_peaks_config_section(path: Path, section: str, config: ThreadSafeC
     if "find_peaks" not in data:
         data["find_peaks"] = {}
 
-    raw_obj = config.get_raw()
-    serialized = {
-        k: ("None" if v is None else v)
-        for k, v in asdict(raw_obj).items()
-    }
-
-    data["find_peaks"][section] = serialized
+    data["find_peaks"][section] = asdict(config.get_raw())
 
     with path.open("wb") as f:
         tomli_w.dump(data, f)
-
 
 def load_calibration_config(path: Path) -> CalibrationConfig:
     with path.open("rb") as f:
         raw = tomli.load(f)["calibration"]
 
     return CalibrationConfig(
-        n_per_freq=int(raw["n_per_freq"]),
-        calibration_freqs=[float(v) for v in raw["calibration_freqs"]],
-        reference=raw.get("reference", "distance")
+        n_per_freq=raw["n_per_freq"],
+        calibration_freqs=raw["calibration_freqs"],
+        reference=raw["reference"]
     )
 
 def save_calibration_config(path: Path, config: ThreadSafeConfig):
     with path.open("rb") as f:
         data = tomli.load(f)
 
-    data["calibration"] = {
-        "n_per_freq": config.get_field("n_per_freq"),
-        "calibration_freqs": config.get_field("calibration_freqs"),
-        "reference": config.get_field("reference")
-    }
+    data["calibration"] = asdict(config.get_raw())
+
+    with path.open("wb") as f:
+        tomli_w.dump(data, f)
+
+def load_andor_frame_settings(path: Path) -> AndorFrameSettings:
+    with path.open("rb") as f:
+        raw = tomli.load(f)["andor_frame"]
+
+    return AndorFrameSettings(
+        selected_rows=raw["selected_rows"],
+        n_dark_images=raw["n_dark_images"],
+        do_subtract_dark_image=raw["do_subtract_dark_image"],
+        n_bg_images=raw["n_bg_images"]
+    )
+
+def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):
+    with path.open("rb") as f:
+        data = tomli.load(f)
+
+    data["andor_frame"] = asdict(config.get_raw())
 
     with path.open("wb") as f:
         tomli_w.dump(data, f)
 
 
-
-# ---------- Global config instances ----------
+# ---------- Global instances ----------
 
 sample_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "sample"))
 reference_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "reference"))
-sline_config = ThreadSafeConfig(load_selected_rows(find_peaks_config_toml_path))
 calibration_config = ThreadSafeConfig(load_calibration_config(find_peaks_config_toml_path))
+andor_frame_config = ThreadSafeConfig(load_andor_frame_settings(find_peaks_config_toml_path))
