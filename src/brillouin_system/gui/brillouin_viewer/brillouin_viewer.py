@@ -233,8 +233,6 @@ class BrillouinViewer(QWidget):
         self.gain_input = QLineEdit()
         self.gain_input.setValidator(QIntValidator(0, 1000))
 
-        self.roi_input = QLineEdit()
-
         self.apply_camera_btn = QPushButton("Apply")
         self.apply_camera_btn.clicked.connect(self.apply_camera_settings)
 
@@ -244,7 +242,6 @@ class BrillouinViewer(QWidget):
         layout = QFormLayout()
         layout.addRow("Exp. Time (s):", self.exposure_input)
         layout.addRow("Gain:", self.gain_input)
-        layout.addRow("ROI:", self.roi_input)
         layout.addRow(self.toggle_camera_shutter_btn, self.apply_camera_btn)
 
         # btn_row = QHBoxLayout()
@@ -586,10 +583,6 @@ class BrillouinViewer(QWidget):
     def populate_camera_ui(self, settings: dict):
         self.exposure_input.setText(str(settings["exposure"]))
         self.gain_input.setText(str(settings["gain"]))
-        x0, x1, y0, y1 = settings["roi"]
-        hbin, vbin = settings["binning"]
-        roi_str = f"{x0},{x1},{y0},{y1},{hbin},{vbin}"
-        self.roi_input.setText(roi_str)
 
 
     def apply_camera_settings(self):
@@ -597,18 +590,9 @@ class BrillouinViewer(QWidget):
             exposure = round(float(self.exposure_input.text()), ndigits=4)
             gain = int(self.gain_input.text())
 
-            parts = [int(p.strip()) for p in self.roi_input.text().split(",")]
-            if len(parts) != 6:
-                raise ValueError("ROI must have 6 comma-separated integers.")
-
-            roi = parts[:4]
-            binning = parts[4:]
-
             settings = {
                 "exposure": exposure,
                 "gain": gain,
-                "roi": roi,
-                "binning": binning,
             }
 
             self.apply_camera_settings_requested.emit(settings)  # ✅ thread-safe

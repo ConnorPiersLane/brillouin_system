@@ -142,8 +142,6 @@ class BrillouinSignaller(QObject):
         settings = {
             "exposure": round(cam.get_exposure_time(),ndigits=4),
             "gain": cam.get_emccd_gain(),
-            "roi": cam.get_roi(),
-            "binning": cam.get_binning(),
         }
         self.camera_settings_ready.emit(settings)
 
@@ -153,8 +151,6 @@ class BrillouinSignaller(QObject):
             self.manager.set_camera_settings(
                 exposure_time=settings["exposure"],
                 emccd_gain=settings["gain"],
-                roi=settings["roi"],
-                binning=settings["binning"],
             )
             self.log_message.emit(f"Camera settings applied: {settings}")
         except Exception as e:
@@ -252,7 +248,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def snap_and_fit(self):
         try:
-            fitting: FittedSpectrum = self.manager.snap_and_get_fitting()
+            fitting: FittedSpectrum = self.manager.get_fitted_spectrum()
             display = self.manager.get_display_results_from_fitting(fitting)
             self.frame_and_fit_ready.emit(display)
         except Exception as e:
@@ -337,7 +333,7 @@ class BrillouinSignaller(QObject):
         for i in range(n):
             try:
                 self.log_message.emit(f"Taking Measurement {i+1}")
-                fitting = self.manager.snap_and_get_fitting()
+                fitting = self.manager.get_fitted_spectrum()
 
                 display_results = self.manager.get_display_results_from_fitting(fitting)
                 self._update_gui(display_results)

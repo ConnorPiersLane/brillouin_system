@@ -4,13 +4,16 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import calibration_config, CalibrationConfig, andor_frame_config
+from brillouin_system.config.config import calibration_config, CalibrationConfig, andor_frame_config, find_peaks_sample_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
+from brillouin_system.utils.background_model_logistic_step_and_quadratic import \
+    fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg
+from brillouin_system.utils.fit_util import get_sline_from_image
 from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint
@@ -59,6 +62,7 @@ class BrillouinManager:
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
         self.is_reference_mode: bool = False
         self.do_background_subtraction: bool = False
+        self._is_do_bg_subtraction_selected_for_sample = False
         self.do_save_images: bool = False
 
 
@@ -104,8 +108,6 @@ class BrillouinManager:
         self.set_camera_settings(
             exposure_time=self.cam_settings_reference.exposure_time_s,
             emccd_gain=self.cam_settings_reference.emccd_gain,
-            roi=self.cam_settings_reference.roi,
-            binning=self.cam_settings_reference.binning,
         )
         print("[BrillouinManager] Switched to reference mode.")
 
@@ -115,8 +117,6 @@ class BrillouinManager:
         self.set_camera_settings(
             exposure_time=self.cam_settings_sample.exposure_time_s,
             emccd_gain=self.cam_settings_sample.emccd_gain,
-            roi=self.cam_settings_sample.roi,
-            binning=self.cam_settings_sample.binning,
         )
         print("[BrillouinManager] Switched to sample mode.")
 
@@ -138,7 +138,7 @@ class BrillouinManager:
         if not self.is_background_image_available():
             print("[AcquisitionManager] No background image available")
             return frame
-        return frame - self.bg_image_sample
+        return frame - self.bg_image_sample.mean_image
 
 
     def take_n_images(self, n_images) -> np.ndarray:
@@ -203,28 +203,51 @@ class BrillouinManager:
         """Pull a raw frame from the camera."""
         return self.camera.snap().astype(np.float64)
 
-    def _get_frame(self) -> np.ndarray:
+    def get_andor_frame(self) -> np.ndarray:
         # Get the frame:
         if self.is_reference_mode or self.is_sample_illumination_continuous:
             frame = self._get_camera_snap()
         else:
             frame = self._open_sample_shutter_get_frame_close_shutter(timeout=1)
 
-        if self.do_background_subtraction:
-            frame = self.subtract_background(frame)
-
         return frame
 
+    def get_fitted_spectrum(self) -> FittedSpectrum:
+        """
+        Fits a Brillouin spectrum depending on reference mode and background subtraction.
 
+        Returns:
+            FittedSpectrum: Dataclass containing fit results and metadata.
+        """
+        # Retrieve the current frame from the Andor camera
+        frame = self.get_andor_frame()
 
+        # Apply background subtraction if requested
+        if self.do_background_subtraction and not self.is_reference_mode:
+            frame = self.subtract_background(frame)
 
+        # Generate the 1D sline
+        sline = get_sline_from_image(frame)
 
-    def snap_and_get_fitting(self) -> FittedSpectrum:
-        frame = self._get_frame()
-
-        fitted_spectrum: FittedSpectrum = brillouin_spectrum_fitting.get_fitted_spectrum_from_image(
-            frame=frame, is_reference_mode=self.is_reference_mode
-        )
+        # Fit the spectrum using the appropriate model
+        if self.is_reference_mode:
+            fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                sline=sline, is_reference_mode=True
+            )
+        elif self.do_background_subtraction:
+            fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                sline=sline, is_reference_mode=False
+            )
+        else:
+            fit_config = find_peaks_sample_config.get()
+            if fit_config.bg_model == "Logistic Step + Quadr.":
+                fitted_spectrum = fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline=sline)
+            else:
+                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                    sline=sline, is_reference_mode=False
+                )
+        # Attach the frame for context
+        fitted_spectrum.frame = frame
 
         return fitted_spectrum
 
@@ -235,7 +258,7 @@ class BrillouinManager:
                 freq_data = []
                 self.microwave.set_frequency(freq)
                 for _ in range(config.n_per_freq):
-                    fs = self.snap_and_get_fitting()
+                    fs = self.get_fitted_spectrum()
                     display = self.get_display_results_from_fitting(fs)
                     on_step(display)
                     freq_data.append(fs)
@@ -317,14 +340,9 @@ class BrillouinManager:
     def set_camera_settings(self,
                             exposure_time: float,
                             emccd_gain: int,
-                            roi: tuple[int, int, int, int],
-                            binning: tuple[int, int]):
+                            ):
         self.camera.set_exposure_time(exposure_time)
         self.camera.set_emccd_gain(emccd_gain)
-        x0, x1, y0, y1 = roi
-        hbin, vbin = binning
-        self.camera.set_roi(x0, x1, y0, y1)
-        self.camera.set_binning(hbin, vbin)
 
         andor_config = andor_frame_config.get()
         if andor_config.do_subtract_dark_image:

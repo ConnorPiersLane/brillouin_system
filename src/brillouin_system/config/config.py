@@ -5,7 +5,6 @@ import tomli_w
 import threading
 from copy import deepcopy
 
-
 # ---------- Thread-safe config wrapper ----------
 class ThreadSafeConfig:
     def __init__(self, data_obj):
@@ -39,6 +38,8 @@ class ThreadSafeConfig:
 
 # ---------- Config models ----------
 
+available_bg_models = ("no model", "Logistic Step + Quadr.")
+
 @dataclass
 class FindPeaksConfig:
     prominence_fraction: float
@@ -46,6 +47,7 @@ class FindPeaksConfig:
     min_peak_height: int
     rel_height: float
     wlen_pixels: int
+    bg_model: str
 
 @dataclass
 class CalibrationConfig:
@@ -59,7 +61,13 @@ class AndorFrameSettings:
     n_dark_images: int
     do_subtract_dark_image: bool
     n_bg_images: int
-
+    x_start: int
+    x_end: int
+    y_start: int
+    y_end: int
+    vbin: int
+    hbin: int
+    amp_mode_index: int
 
 # ---------- Load/save helpers ----------
 
@@ -109,7 +117,14 @@ def load_andor_frame_settings(path: Path) -> AndorFrameSettings:
         selected_rows=raw["selected_rows"],
         n_dark_images=raw["n_dark_images"],
         do_subtract_dark_image=raw["do_subtract_dark_image"],
-        n_bg_images=raw["n_bg_images"]
+        n_bg_images=raw["n_bg_images"],
+        x_start=raw["x_start"],
+        x_end=raw["x_end"],
+        y_start=raw["y_start"],
+        y_end=raw["y_end"],
+        vbin=raw["vbin"],
+        hbin=raw["hbin"],
+        amp_mode_index=raw["amp_mode_index"]
     )
 
 def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):
@@ -121,10 +136,8 @@ def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):
     with path.open("wb") as f:
         tomli_w.dump(data, f)
 
-
 # ---------- Global instances ----------
-
-sample_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "sample"))
-reference_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "reference"))
+find_peaks_sample_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "sample"))
+find_peaks_reference_config = ThreadSafeConfig(load_find_peaks_config_section(find_peaks_config_toml_path, "reference"))
 calibration_config = ThreadSafeConfig(load_calibration_config(find_peaks_config_toml_path))
 andor_frame_config = ThreadSafeConfig(load_andor_frame_settings(find_peaks_config_toml_path))

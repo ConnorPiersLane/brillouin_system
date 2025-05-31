@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
-from brillouin_system.utils.brillouin_spectrum_fitting import get_fitted_spectrum_from_sline
+from brillouin_system.utils.brillouin_spectrum_fitting import get_fitted_spectrum_from_sline_only_lorentzian
 
 # --- Parameters ---
 reference = "distance"  # Choose from "left", "right", or "distance"
@@ -37,7 +37,7 @@ slines = [mp.fitting_results.sline for mp in s.measurements]
 
 cali = s.calibration.peak_distance
 
-fitted_spectras = [get_fitted_spectrum_from_sline(sline, None, False) for sline in slines]
+fitted_spectras = [get_fitted_spectrum_from_sline_only_lorentzian(sline, None, False) for sline in slines]
 freqs = [cali.get_freq(fs.inter_peak_distance) for fs in fitted_spectras]
 
 [print(fs.inter_peak_distance) for fs in fitted_spectras]
