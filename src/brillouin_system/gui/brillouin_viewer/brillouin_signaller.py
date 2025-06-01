@@ -42,7 +42,7 @@ class BrillouinSignaller(QObject):
     background_subtraction_state = pyqtSignal(bool)
     illumination_mode_state  = pyqtSignal(bool)
     reference_mode_state = pyqtSignal(bool)
-
+    do_live_fitting_state = pyqtSignal(bool)
 
     # Signals outwards
     camera_settings_ready = pyqtSignal(dict)
@@ -54,6 +54,7 @@ class BrillouinSignaller(QObject):
     camera_shutter_state_changed = pyqtSignal(bool)
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
+
 
 
     def __init__(self, manager: BrillouinManager):
@@ -104,15 +105,24 @@ class BrillouinSignaller(QObject):
         self.background_subtraction_state.emit(self.manager.do_background_subtraction)
         self.background_available_state.emit(self.manager.is_background_image_available())
 
+
     @pyqtSlot()
     def emit_background_data(self):
         data = BackGroundImage(
             dark_image=self.manager.dark_image_sample,
-            bg_image=self.manager.bg_image_sample,
-            camera_settings=self.manager.cam_settings_sample
+            bg_image=self.manager.bg_image,
         )
         self.background_data_ready.emit(data)
 
+    @pyqtSlot()
+    def toggle_do_live_fitting(self):
+        self.manager.do_live_fitting = not self.manager.do_live_fitting
+        self.log_message.emit(f"Do Live Fitting toggled to: {self.manager.do_live_fitting}")
+        self.do_live_fitting_state.emit(self.manager.do_live_fitting)
+
+    @pyqtSlot()
+    def emit_do_live_fitting_state(self):
+        self.do_live_fitting_state.emit(self.manager.do_live_fitting)
 
     @pyqtSlot()
     def toggle_illumination_mode(self):
@@ -248,8 +258,9 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def snap_and_fit(self):
         try:
-            fitting: FittedSpectrum = self.manager.get_fitted_spectrum()
-            display = self.manager.get_display_results_from_fitting(fitting)
+            frame = self.manager.get_andor_frame()
+            fitting: FittedSpectrum = self.manager.get_fitted_spectrum(frame)
+            display = self.manager.get_display_results(frame, fitting)
             self.frame_and_fit_ready.emit(display)
         except Exception as e:
             self.log_message.emit(f"Error snapping frame: {e}")
@@ -333,12 +344,13 @@ class BrillouinSignaller(QObject):
         for i in range(n):
             try:
                 self.log_message.emit(f"Taking Measurement {i+1}")
-                fitting = self.manager.get_fitted_spectrum()
+                frame = self.manager.get_andor_frame()
+                fitting = self.manager.get_fitted_spectrum(frame)
 
-                display_results = self.manager.get_display_results_from_fitting(fitting)
+                display_results = self.manager.get_display_results(frame, fitting)
                 self._update_gui(display_results)
 
-                result = self.manager.get_measurement_data(fitting)
+                result = self.manager.get_measurement_data(frame, fitting)
                 measurements.append(result)
 
                 if which_axis and not self.manager.is_reference_mode:

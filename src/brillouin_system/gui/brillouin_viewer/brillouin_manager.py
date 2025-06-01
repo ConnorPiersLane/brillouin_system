@@ -64,6 +64,7 @@ class BrillouinManager:
         self.do_background_subtraction: bool = False
         self._is_do_bg_subtraction_selected_for_sample = False
         self.do_save_images: bool = False
+        self.do_live_fitting = False
 
 
         # Calibration
@@ -73,7 +74,7 @@ class BrillouinManager:
         self.dark_image_reference: ImageStatistics | None = None
         self.dark_image_sample: ImageStatistics | None = None
         # Background (BG) Image
-        self.bg_image_sample: ImageStatistics | None = None
+        self.bg_image: ImageStatistics | None = None
 
 
         self.init_shutters()
@@ -138,7 +139,7 @@ class BrillouinManager:
         if not self.is_background_image_available():
             print("[AcquisitionManager] No background image available")
             return frame
-        return frame - self.bg_image_sample.mean_image
+        return frame - self.bg_image.mean_image
 
 
     def take_n_images(self, n_images) -> np.ndarray:
@@ -161,7 +162,7 @@ class BrillouinManager:
         if isinstance(self.camera, DummyCamera):
             n_images = n_images * 0.8
 
-        self.bg_image_sample = ImageStatistics(n_images)
+        self.bg_image = ImageStatistics(n_images)
         print("[BrillouinManager] Background Image acquired.")
 
 
@@ -193,7 +194,7 @@ class BrillouinManager:
 
 
     def is_background_image_available(self) -> bool:
-        if self.bg_image_sample is None:
+        if self.bg_image is None:
             return False
         else:
             return True
@@ -212,42 +213,43 @@ class BrillouinManager:
 
         return frame
 
-    def get_fitted_spectrum(self) -> FittedSpectrum:
+    def get_fitted_spectrum(self, frame) -> FittedSpectrum:
         """
         Fits a Brillouin spectrum depending on reference mode and background subtraction.
 
         Returns:
             FittedSpectrum: Dataclass containing fit results and metadata.
         """
-        # Retrieve the current frame from the Andor camera
-        frame = self.get_andor_frame()
-
-        # Apply background subtraction if requested
-        if self.do_background_subtraction and not self.is_reference_mode:
-            frame = self.subtract_background(frame)
-
-        # Generate the 1D sline
-        sline = get_sline_from_image(frame)
-
-        # Fit the spectrum using the appropriate model
-        if self.is_reference_mode:
-            fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                sline=sline, is_reference_mode=True
-            )
-        elif self.do_background_subtraction:
-            fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                sline=sline, is_reference_mode=False
-            )
-        else:
-            fit_config = find_peaks_sample_config.get()
-            if fit_config.bg_model == "Logistic Step + Quadr.":
-                fitted_spectrum = fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline=sline)
-            else:
+        if self.do_live_fitting:
+            # Fit the spectrum using the appropriate model
+            if self.is_reference_mode:
+                sline = get_sline_from_image(frame)
+                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                    sline=sline, is_reference_mode=True
+                )
+            elif self.do_background_subtraction:
+                frame_with_sub_bg = self.subtract_background(frame)
+                sline = get_sline_from_image(frame_with_sub_bg)
                 fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
                     sline=sline, is_reference_mode=False
                 )
-        # Attach the frame for context
-        fitted_spectrum.frame = frame
+            else:
+                sline = get_sline_from_image(frame)
+                fit_config = find_peaks_sample_config.get()
+                if fit_config.bg_model == "Logistic Step + Quadr.":
+                    fitted_spectrum = fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline=sline)
+                else:
+                    fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                        sline=sline, is_reference_mode=False
+                )
+        else:
+            sline = get_sline_from_image(frame)
+            return FittedSpectrum(
+                is_success=False,
+                x_pixels=np.arange(sline.shape[0]),
+                sline=sline,
+            )
+
 
         return fitted_spectrum
 
@@ -258,8 +260,9 @@ class BrillouinManager:
                 freq_data = []
                 self.microwave.set_frequency(freq)
                 for _ in range(config.n_per_freq):
-                    fs = self.get_fitted_spectrum()
-                    display = self.get_display_results_from_fitting(fs)
+                    frame = self.get_andor_frame()
+                    fs = self.get_fitted_spectrum(frame)
+                    display = self.get_display_results(frame, fs)
                     on_step(display)
                     freq_data.append(fs)
                 data.append(freq_data)
@@ -294,7 +297,7 @@ class BrillouinManager:
         return float(calibration.get_freq(x_value))
 
 
-    def get_display_results_from_fitting(self, fitting: FittedSpectrum) -> DisplayResults:
+    def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
         if self.is_reference_mode:
             freq_shift_ghz = self.microwave.get_frequency()
         elif fitting.is_success:
@@ -304,8 +307,8 @@ class BrillouinManager:
 
         if fitting.is_success:
             return DisplayResults(
-                is_success=True,
-                frame=fitting.frame,
+                is_fitting_available=True,
+                frame=frame,
                 x_pixels=fitting.x_pixels,
                 sline=fitting.sline,
                 x_fit_refined=fitting.x_fit_refined,
@@ -315,8 +318,8 @@ class BrillouinManager:
             )
         else:
             return DisplayResults(
-                is_success=False,
-                frame=fitting.frame,
+                is_fitting_available=False,
+                frame=frame,
                 x_pixels=fitting.x_pixels,
                 sline=fitting.sline,
             )
@@ -373,12 +376,15 @@ class BrillouinManager:
 
 
     def get_measurement_data(self,
+                             frame: np.ndarray,
                              fitting_results: FittedSpectrum) -> MeasurementPoint:
 
         if self.do_save_images:
-            pass
+            save_frame = frame
+            bg_frame = self.bg_image
         else:
-            fitting_results.frame = None
+            save_frame = None
+            bg_frame = None
 
         if self.is_reference_mode:
             zaber_position = None
@@ -387,6 +393,9 @@ class BrillouinManager:
 
         return MeasurementPoint(
             is_reference_mode=self.is_reference_mode,
+            do_live_fitting=self.do_live_fitting,
+            frame=save_frame,
+            bg_frame=bg_frame,
             fitting_results = fitting_results,
             zaber_position=zaber_position,
             camera_settings=self.get_camera_settings(),

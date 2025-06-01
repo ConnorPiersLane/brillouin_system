@@ -186,7 +186,7 @@ def plot_distance_fit_and_error_with_sensitivity(calibration_results):
     pixel_stds = []
 
     for spectra_list in calibration_results.data.fitted_spectras:
-        px_values = [fs.inter_peak_distance for fs in spectra_list if fs.is_success]
+        px_values = [fs.inter_peak_distance for fs in spectra_list if fs.is_fitting_available]
         if px_values:
             distances.append(np.mean(px_values))
             pixel_stds.append(np.std(px_values))
@@ -239,7 +239,7 @@ def plot_slines_at_freqs(calibration_results, freqs_to_plot=(4.0, 8.0)):
         # Find closest match
         idx = np.argmin(np.abs(freqs - target_freq))
         spectra_list = calibration_results.data.fitted_spectras[idx]
-        fs = next((s for s in spectra_list if s.is_success), None)
+        fs = next((s for s in spectra_list if s.is_fitting_available), None)
 
         if fs is None:
             print(f"No successful spectrum found near {target_freq} GHz.")

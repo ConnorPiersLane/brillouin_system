@@ -92,6 +92,8 @@ class BrillouinViewer(QWidget):
     toggle_save_images_requested = pyqtSignal(bool)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
+    toggle_do_live_fitting_requested = pyqtSignal()
+
 
 
     def __init__(self):
@@ -125,7 +127,7 @@ class BrillouinViewer(QWidget):
         self.toggle_save_images_requested.connect(self.brillouin_signaller.set_save_images_state)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
-
+        self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -140,7 +142,7 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.zaber_position_updated.connect(self.update_zaber_position)
         self.brillouin_signaller.microwave_frequency_updated.connect(self.update_ref_freq_input)
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
-
+        self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
 
         # Connect signals BEFORE starting the thread
         self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
@@ -193,6 +195,7 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.emit_is_background_available()
         self.brillouin_signaller.emit_camera_settings()
         self.brillouin_signaller.emit_do_background_subtraction()
+        self.brillouin_signaller.emit_do_live_fitting_state()
 
 
 
@@ -239,10 +242,14 @@ class BrillouinViewer(QWidget):
         self.toggle_camera_shutter_btn = QPushButton("Close")
         self.toggle_camera_shutter_btn.clicked.connect(self.toggle_camera_shutter_requested.emit)
 
+        self.do_live_fitting_checkbox = QCheckBox("Do Live Fitting")
+        self.do_live_fitting_checkbox.stateChanged.connect(self.on_do_live_fitting_toggled)
+
         layout = QFormLayout()
         layout.addRow("Exp. Time (s):", self.exposure_input)
         layout.addRow("Gain:", self.gain_input)
         layout.addRow(self.toggle_camera_shutter_btn, self.apply_camera_btn)
+        layout.addRow(self.do_live_fitting_checkbox)
 
         # btn_row = QHBoxLayout()
         # btn_row.addWidget(self.toggle_camera_shutter_btn)
@@ -483,6 +490,13 @@ class BrillouinViewer(QWidget):
         self.toggle_bg_btn.setEnabled(available)
         self.btn_save_bg.setEnabled(available)
 
+
+    def on_do_live_fitting_toggled(self, state: int):
+        self.toggle_do_live_fitting_requested.emit()
+
+    def update_do_live_fitting_checkbox(self, state: bool):
+        self.do_live_fitting_checkbox.setChecked(state)
+
     def update_illumination_ui(self, is_cont: bool):
         if is_cont:
             self.illum_label_cont.setText("● Cont.")
@@ -545,7 +559,7 @@ class BrillouinViewer(QWidget):
         interpeak = None
         freq_shift_ghz = None
 
-        if display_results.is_success:
+        if display_results.is_fitting_available:
             x_fit_refined = display_results.x_fit_refined
             y_fit_refined = display_results.y_fit_refined
             interpeak = display_results.inter_peak_distance

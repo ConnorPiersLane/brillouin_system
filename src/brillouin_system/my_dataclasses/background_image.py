@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 
 
 class ImageStatistics:
@@ -15,4 +14,3 @@ class ImageStatistics:
 class BackGroundImage:
     dark_image: ImageStatistics
     bg_image: ImageStatistics
-    camera_settings: CameraSettings
