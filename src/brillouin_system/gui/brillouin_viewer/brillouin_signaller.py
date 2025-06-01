@@ -31,6 +31,7 @@ class BrillouinSignaller(QObject):
     illumination_mode_state  = pyqtSignal(bool)
     reference_mode_state = pyqtSignal(bool)
     do_live_fitting_state = pyqtSignal(bool)
+    gui_ready_received = pyqtSignal()
 
     # Signals outwards
     camera_settings_ready = pyqtSignal(dict)
@@ -52,6 +53,7 @@ class BrillouinSignaller(QObject):
         self._thread_active = False
         self._gui_ready = True
         self._camera_shutter_open = True
+
 
 
     # ------- State control -------
@@ -288,24 +290,19 @@ class BrillouinSignaller(QObject):
         self.log_message.emit("Worker started live acquisition loop.")
 
         while self._running:
-            self.snap_and_fit()
+            if self._gui_ready:
+                self._gui_ready = False
+                self.snap_and_fit()
             QCoreApplication.processEvents()
             time.sleep(0.03)
 
         self._thread_active = False
         self.log_message.emit("Worker stopped live acquisition loop.")
 
+
     def _update_gui(self, display_results: DisplayResults):
         self._gui_ready = False
         self.frame_and_fit_ready.emit(display_results)
-        # Wait for GUI to finish rendering
-        start = time.time()
-        while not self._gui_ready:
-            QCoreApplication.processEvents()
-            QThread.msleep(10)
-            if time.time() - start > 5:
-                self.log_message.emit("GUI timeout while rendering result.")
-                break
 
     @pyqtSlot(bool)
     def set_save_images_state(self, do_save_images: bool):
@@ -334,38 +331,27 @@ class BrillouinSignaller(QObject):
         except Exception as e:
             self.log_message.emit(f"[Calibration] Exception: {e}")
 
-    @pyqtSlot(int, str, float,)
+
+    @pyqtSlot(int, str, float)
     def take_measurements(self, n: int, which_axis: str, step: float):
-        measurements = []
         self._gui_ready = True
 
+        try:
+            # Pass the GUI update callback down to the manager
+            measurement_series = self.manager.take_measurements(
+                n=n,
+                which_axis=which_axis,
+                step=step,
+                on_step=self._update_gui
+            )
+
+            # Emit the final result
+            self.measurement_result_ready.emit(measurement_series)
+
+        except Exception as e:
+            self.log_message.emit(f"[Measurement] Exception: {e}")
 
 
-        for i in range(n):
-            try:
-                self.log_message.emit(f"Taking Measurement {i+1}")
-                frame = self.manager.get_andor_frame()
-                fitting = self.manager.get_fitted_spectrum(frame)
-
-                display_results = self.manager.get_display_results(frame, fitting)
-                self._update_gui(display_results)
-
-                result = self.manager.get_measurement_data(frame, fitting)
-                measurements.append(result)
-
-                if which_axis and not self.manager.is_reference_mode:
-                    try:
-                        self.manager.zaber.move_rel(which_axis, step)
-                        pos = self.manager.zaber.get_position(which_axis)
-                        self.zaber_position_updated.emit(pos)
-                    except Exception as e:
-                        self.log_message.emit(f"Zaber move failed: {e}")
-
-            except Exception as e:
-                self.log_message.emit(f"[Measurement] Error at index {i}: {e}")
-
-        measurement_series = MeasurementSeries(measurements=measurements, calibration=self.manager.calibration_results)
-        self.measurement_result_ready.emit(measurement_series)
 
     @pyqtSlot()
     def close(self):

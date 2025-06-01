@@ -17,7 +17,7 @@ class IxonUltra(BaseCamera):
                  exposure_time = 0.21,
                  gain: int = 0,
                  advanced_gain_option: bool = False,
-                 amp_mode_index: int=9,
+                 amp_mode_index: int=16,
                  verbose=True):
         """
         Initialize the IxonUltra camera.
@@ -72,10 +72,12 @@ class IxonUltra(BaseCamera):
         desired_speed_index = 4  # Slowest shift speed (3.3 μs)
         # Available VSSpeeds: [0.30000001192092896, 0.5, 0.8999999761581421, 1.7000000476837158, 3.299999952316284]
         self.cam.set_vsspeed(desired_speed_index)
+        print(f"[IxonUltra] VSSpeed Index: {self.cam.get_vsspeed()}")
+        print(f"[IxonUltra] VSSpeed Period: {self.cam.get_vsspeed_period():.2f} μs")
 
         self.set_amp_mode_by_index(amp_mode_index)
         print("[IxonUltra] Preamp index:", self.cam.get_preamp())
-        print("[IxonUltra] Pe", self.get_amp_mode())
+        print("[IxonUltra] Preamp mode", self.get_amp_mode())
         print("[IxonUltra] Preamp gain (e⁻/count):", self.get_preamp_gain())
 
         if temperature != "off":

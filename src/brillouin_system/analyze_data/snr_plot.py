@@ -39,7 +39,7 @@ def extract_snr_and_energy(series_path: str, reference: str):
         px_values = []
         for mp in series.measurements:
             fs = mp.fitting_results
-            if not fs.is_fitting_available:
+            if not fs.is_success:
                 continue
 
             if reference == "left":
@@ -123,7 +123,7 @@ for label, path in series_paths.items():
             mp.fitting_results.left_peak_center_px if reference == "left"
             else mp.fitting_results.right_peak_center_px if reference == "right"
             else mp.fitting_results.inter_peak_distance
-            for mp in series.measurements if mp.fitting_results.is_fitting_available
+            for mp in series.measurements if mp.fitting_results.is_success
         ]
 
         if len(px_values) < 2:
@@ -181,7 +181,7 @@ for series in series_list:
         mp.fitting_results.left_peak_center_px if reference == "left"
         else mp.fitting_results.right_peak_center_px if reference == "right"
         else mp.fitting_results.inter_peak_distance
-        for mp in series.measurements if mp.fitting_results.is_fitting_available
+        for mp in series.measurements if mp.fitting_results.is_success
     ]
 
     if not px_values:
@@ -231,7 +231,7 @@ else:
 
     for mp in target_series.measurements:
         fs = mp.fitting_results
-        if not fs.is_fitting_available:
+        if not fs.is_success:
             continue
 
         if reference == "left":

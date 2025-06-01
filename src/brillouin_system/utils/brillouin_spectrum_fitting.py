@@ -9,9 +9,10 @@ from brillouin_system.utils.fit_util import find_brillouin_peak_locations, selec
     sort_lorentzian_peaks, refine_fitted_spectrum
 
 
-def get_fitted_spectrum_lorentzian(sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
+def get_fitted_spectrum_lorentzian(px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
 
-    pix = np.arange(sline.shape[0])
+    pix = px
+    sline = np.clip(sline, 0, None)
     pk_ind, pk_info = find_brillouin_peak_locations(sline, is_reference_mode=is_reference_mode)
 
 
@@ -37,12 +38,21 @@ def get_fitted_spectrum_lorentzian(sline: np.ndarray, is_reference_mode: bool) -
           pk_hts[1], pk_ind[1], pk_wids[1], np.amin(sline)]
 
     try:
-        popt, _ = curve_fit(_2Lorentzian, pix, sline, p0=p0)
+        n_pix = len(pix)
+        lower_bounds = [0, 0, 0, 0, 0, 0, 0]  # amps, centers, widths >= 0
+        upper_bounds = [np.inf, n_pix, n_pix/2, np.inf, n_pix, n_pix/2, np.inf]
 
-        # Ensure peak 1 is left, peak 2 is right
-        popt = sort_lorentzian_peaks(popt)
+        popt, _ = curve_fit(
+            _2Lorentzian,
+            pix,
+            sline,
+            p0=p0,
+            bounds=(lower_bounds, upper_bounds),
+            maxfev=10000
+        )
 
-        interPeaksteps = np.abs(popt[4] - popt[1])
+        amp1, cen1, wid1, amp2, cen2, wid2, offset = sort_lorentzian_peaks(popt)
+
         fittedSpect = _2Lorentzian(pix, *popt)
 
         x_fit, y_fit = refine_fitted_spectrum(_2Lorentzian, pix, popt, factor=10)
@@ -55,13 +65,13 @@ def get_fitted_spectrum_lorentzian(sline: np.ndarray, is_reference_mode: bool) -
             x_fit_refined=x_fit,
             y_fit_refined=y_fit,
             lorentzian_parameters=popt,
-            left_peak_center_px=float(popt[1]),
-            left_peak_width_px=float(popt[2]),
-            left_peak_amplitude=float(popt[0]),
-            right_peak_center_px=float(popt[4]),
-            right_peak_width_px=float(popt[5]),
-            right_peak_amplitude=float(popt[3]),
-            inter_peak_distance=interPeaksteps
+            left_peak_center_px=float(cen1),
+            left_peak_width_px=float(wid1),
+            left_peak_amplitude=float(amp1),
+            right_peak_center_px=float(cen2),
+            right_peak_width_px=float(wid2),
+            right_peak_amplitude=float(amp2),
+            inter_peak_distance=np.abs(cen2 - cen1)
         )
 
     except Exception as e:

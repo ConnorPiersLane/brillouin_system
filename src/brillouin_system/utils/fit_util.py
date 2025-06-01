@@ -2,7 +2,7 @@ import numpy as np
 from scipy.signal import find_peaks
 from brillouin_system.config.config import find_peaks_reference_config, find_peaks_sample_config, andor_frame_config
 
-def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
+def get_px_and_sline_from_image(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Sum the specified vertical rows in the image to produce the Brillouin sline.
     If the row list is invalid or empty, use the full vertical range.
@@ -11,7 +11,8 @@ def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
         frame (np.ndarray): 2D image from the camera
 
     Returns:
-        np.ndarray: Summed 1D spectrum (sline)
+        Tuple[np.ndarray, np.ndarray]: (px, sline) where px is the pixel axis and sline is the summed spectrum.
+
     """
     rows = list(andor_frame_config.get().selected_rows)
 
@@ -22,12 +23,12 @@ def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
         rows = list(range(height))
 
     sline = frame[rows, :].sum(axis=0)
-    return sline
+    px = np.arange(sline.shape[0])
+    return px, sline
 
 
 
 def find_brillouin_peak_locations(sline, is_reference_mode: bool):
-    pos_sline = np.clip(sline, 0, None)
 
     if is_reference_mode:
         find_peak_config = find_peaks_reference_config.get()
@@ -37,7 +38,7 @@ def find_brillouin_peak_locations(sline, is_reference_mode: bool):
     if find_peak_config.prominence_fraction is None:
         prominence = None
     else:
-        prominence = find_peak_config.prominence_fraction * np.max(pos_sline)
+        prominence = find_peak_config.prominence_fraction * np.max(sline)
 
 
     if find_peak_config.min_peak_height is None:

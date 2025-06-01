@@ -4,19 +4,17 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import calibration_config, CalibrationConfig, andor_frame_config, find_peaks_sample_config
+from brillouin_system.config.config import calibration_config, CalibrationConfig, andor_frame_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
-from brillouin_system.utils.background_model_logistic_step_and_quadratic import \
-    fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg
-from brillouin_system.utils.fit_util import get_sline_from_image
+from brillouin_system.utils.fit_util import get_px_and_sline_from_image
 from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
-from brillouin_system.my_dataclasses.measurements import MeasurementPoint
+from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.utils import brillouin_spectrum_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
@@ -216,42 +214,47 @@ class BrillouinManager:
     def get_fitted_spectrum(self, frame) -> FittedSpectrum:
         """
         Fits a Brillouin spectrum depending on reference mode and background subtraction.
+        If live fitting is disabled, returns an unsuccessful fit but includes a raw spectrum line.
+
+        Args:
+            frame (np.ndarray): The input camera frame.
 
         Returns:
             FittedSpectrum: Dataclass containing fit results and metadata.
         """
-        if self.do_live_fitting:
-            # Fit the spectrum using the appropriate model
-            if self.is_reference_mode:
-                sline = get_sline_from_image(frame)
-                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                    sline=sline, is_reference_mode=True
-                )
-            elif self.do_background_subtraction:
-                frame_with_sub_bg = self.subtract_background(frame)
-                sline = get_sline_from_image(frame_with_sub_bg)
-                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                    sline=sline, is_reference_mode=False
-                )
-            else:
-                sline = get_sline_from_image(frame)
-                fit_config = find_peaks_sample_config.get()
-                if fit_config.bg_model == "Logistic Step + Quadr.":
-                    fitted_spectrum = fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline=sline)
-                else:
-                    fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                        sline=sline, is_reference_mode=False
-                )
-        else:
-            sline = get_sline_from_image(frame)
+        px, sline = get_px_and_sline_from_image(frame)
+
+        if not self.do_live_fitting:
             return FittedSpectrum(
                 is_success=False,
                 x_pixels=np.arange(sline.shape[0]),
                 sline=sline,
             )
 
-
-        return fitted_spectrum
+        try:
+            # Fit the spectrum using the appropriate model
+            if self.is_reference_mode:
+                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                    px=px, sline=sline, is_reference_mode=True
+                )
+            elif self.do_background_subtraction:
+                frame_with_sub_bg = self.subtract_background(frame)
+                px, sline_bg_sub = get_px_and_sline_from_image(frame_with_sub_bg)
+                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                    px=px, sline=sline_bg_sub, is_reference_mode=False
+                )
+            else:
+                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                    px=px, sline=sline, is_reference_mode=False
+                )
+            return fitted_spectrum
+        except Exception as e:
+            print(f"[BrillouinManager] Fitting error: {e}")
+            return FittedSpectrum(
+                is_success=False,
+                x_pixels=np.arange(sline.shape[0]),
+                sline=sline,
+            )
 
     def perform_calibration(self, config: CalibrationConfig, on_step: Callable[[DisplayResults], None]) -> bool:
         try:
@@ -274,6 +277,43 @@ class BrillouinManager:
             print(f"[Manager] Calibration failed: {e}")
             return False
 
+
+    def take_measurements(self, n: int, which_axis: str, step: float, on_step: Callable[[DisplayResults], None]) -> MeasurementSeries:
+        """
+        Takes a series of measurements and calls on_step after each one to update the GUI.
+        """
+        measurements = []
+
+        for i in range(n):
+            try:
+                self.log_message(f"Taking Measurement {i+1}")
+
+                frame = self.get_andor_frame()
+                fitting = self.get_fitted_spectrum(frame)
+                display_results = self.get_display_results(frame, fitting)
+
+                # Update GUI via provided callback
+                on_step(display_results)
+
+                result = self.get_measurement_data(frame, fitting)
+                measurements.append(result)
+
+                if which_axis and not self.is_reference_mode:
+                    try:
+                        self.zaber.move_rel(which_axis, step)
+                        pos = self.zaber.get_position(which_axis)
+                        self.log_message(f"Zaber {which_axis}-Axis moved by {step} µm to {pos:.2f} µm")
+                    except Exception as e:
+                        self.log_message(f"Zaber move failed: {e}")
+
+            except Exception as e:
+                self.log_message(f"[Measurement] Error at index {i}: {e}")
+
+        return MeasurementSeries(measurements=measurements, calibration=self.calibration_results)
+
+    def log_message(self, msg: str):
+        """Optional helper to log messages — or use the signaller’s emit if needed."""
+        print(f"[BrillouinManager] {msg}")
 
     def compute_freq_shift(self, fitting: FittedSpectrum) -> float | None:
         if not fitting.is_success or self.calibration_results is None:
@@ -393,7 +433,6 @@ class BrillouinManager:
 
         return MeasurementPoint(
             is_reference_mode=self.is_reference_mode,
-            do_live_fitting=self.do_live_fitting,
             frame=save_frame,
             bg_frame=bg_frame,
             fitting_results = fitting_results,

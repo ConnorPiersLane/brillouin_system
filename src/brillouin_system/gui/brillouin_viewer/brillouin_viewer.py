@@ -137,12 +137,13 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.reference_mode_state.connect(self.update_reference_ui)
         self.brillouin_signaller.camera_settings_ready.connect(self.populate_camera_ui)
         self.brillouin_signaller.camera_shutter_state_changed.connect(self.update_camera_shutter_button)
-        self.brillouin_signaller.frame_and_fit_ready.connect(self.display_result)
+        self.brillouin_signaller.frame_and_fit_ready.connect(self.display_result, Qt.QueuedConnection)
         self.brillouin_signaller.measurement_result_ready.connect(self.handle_measurement_results)
         self.brillouin_signaller.zaber_position_updated.connect(self.update_zaber_position)
         self.brillouin_signaller.microwave_frequency_updated.connect(self.update_ref_freq_input)
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
+        self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
 
         # Connect signals BEFORE starting the thread
         self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
@@ -578,7 +579,7 @@ class BrillouinViewer(QWidget):
 
         self.ax_fit.set_title(title)
         self.canvas.draw()
-        self.gui_ready.emit()
+        self.brillouin_signaller.gui_ready_received.emit()
 
 
     def update_zaber_position(self, pos: float):

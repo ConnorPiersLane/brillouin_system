@@ -70,15 +70,16 @@ def spectrum_function(x, *para):
     # Calculate and return the combined fit
     return _2Lorentzian(x, *p_lorentzian) + _logistic_step_and_quadratic(x, *p_bg)
 
-def fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline):
+def fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=False):
     px = np.arange(sline.shape[0])
 
     # --- Fit background ---
     p_guess_bg = fit_background_as_logistic_step_and_quadratic(px, sline)
     sline_minus_bg = sline - _logistic_step_and_quadratic(px, *p_guess_bg)
+    sline_minus_bg = np.clip(sline_minus_bg, 0, None)
 
     # --- Find peaks ---
-    pk_ind, pk_info = find_brillouin_peak_locations(sline_minus_bg, is_reference_mode=False)
+    pk_ind, pk_info = find_brillouin_peak_locations(sline_minus_bg, is_reference_mode=is_reference_mode)
     if len(pk_ind) < 1:
         return FittedSpectrum(
             is_success=False,
@@ -124,6 +125,14 @@ def fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline):
 
     # --- Sort peaks consistently ---
     popt[:7] = sort_lorentzian_peaks(popt[:7])
+
+    return popt
+
+def get_fitted_spectrum_llq(sline, is_reference_mode=False):
+
+
+    popt = fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=is_reference_mode)
+    px = np.arange(sline.shape[0])
 
     # --- Evaluate fit ---
     fitted_spectrum = spectrum_function(px, *popt)

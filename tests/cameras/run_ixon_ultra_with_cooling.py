@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.cameras.for_brillouin_signal.ixonUltra import IxonUltra
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 
 
 import numpy as np

@@ -11,7 +11,6 @@ from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 @dataclass
 class MeasurementPoint:
     is_reference_mode: bool
-    do_live_fitting: bool
     frame: np.ndarray
     bg_frame: ImageStatistics | None
     fitting_results: FittedSpectrum

@@ -3,9 +3,12 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 
-from brillouin_system.utils.fit_spectrum_logistic_and_quadratic_bg import \
-    fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg, spectrum_function, \
-    fit_background_as_logistic_step_and_quadratic, _logistic_step_and_quadratic
+from brillouin_system.utils.fit_spectrum_quadratic_bg import (
+    fit_lorentzian_peaks_with_quadratic_bg,
+    _fit_background_quadratic,
+    _quadratic,
+    _spectrum_function_quadratic_bg
+)
 from brillouin_system.utils.fit_util import refine_fitted_spectrum
 
 # Data
@@ -28,46 +31,44 @@ series1_path = "2025-5-26/series4.pkl"
 with open(series1_path, "rb") as f:
     series_list = pickle.load(f)
 
-series = series_list[4]
+series = series_list[1]
 
 # Extract signal sline from the first measurement
 sline_signal = series.measurements[2].fitting_results.sline
 
+
 # Combine background and signal
 sline_total = sline + sline_signal
 
+# Fit the background
+popt_bg = _fit_background_quadratic(px, sline_total)
+spectrum_bg = _quadratic(px, *popt_bg)
+
 # Fit the combined spectrum
-popt_bg = fit_background_as_logistic_step_and_quadratic(px, sline_total)
-spectrum_bg = _logistic_step_and_quadratic(px, *popt_bg)
-
-popt = fit_lorentzian_peaks_with_logistic_step_and_quadratic_bg(sline_total)
+popt = fit_lorentzian_peaks_with_quadratic_bg(sline_total)
 # Compute the total fitted model (Lorentzian + background)
-fitted_total = spectrum_function(px, *popt)
-
-
+fitted_total = _spectrum_function_quadratic_bg(px, *popt)
 
 # Print fitted parameters
 param_names = [
     'amp1', 'cen1', 'wid1',
     'amp2', 'cen2', 'wid2',
-    'offset', 'x01', 'k1',
-    'x02', 'k2', 'a', 'b', 'c'
+    'a', 'b', 'c'
 ]
 print("\nFitted Parameters:")
 for name, value in zip(param_names, popt):
     print(f"{name} = {value:.4f}")
 
-
-x_plot, y_plot = refine_fitted_spectrum(spectrum_function, px, popt, factor=10)
+x_plot, y_plot = refine_fitted_spectrum(_spectrum_function_quadratic_bg, px, popt, factor=10)
 
 # Plotting
 plt.figure(figsize=(10, 5))
 plt.plot(px, sline_signal, 'k.', label='Measured Sline')
-plt.plot(px, sline_total, 'b.', label='Measured Sline')
+plt.plot(px, sline_total, 'b.', label='Measured Sline + Background')
 plt.plot(x_plot, y_plot, 'r-', label='Total Fit (Lorentzian + Background)')
 plt.xlabel('Pixel')
 plt.ylabel('Intensity')
-plt.title('S-Line Fit: Lorentzian Peaks + Background')
+plt.title('S-Line Fit: Lorentzian Peaks + Quadratic Background')
 plt.legend()
 plt.grid(True)
 plt.show()
