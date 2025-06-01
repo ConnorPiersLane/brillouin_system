@@ -12,19 +12,7 @@ from brillouin_system.my_dataclasses.fitted_results import DisplayResults, Fitte
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 
 
-@contextmanager
-def force_reference_mode(manager: BrillouinManager, emit_state: Callable[[bool], None]):
-    was_sample_mode = not manager.is_reference_mode
-    if was_sample_mode:
-        manager.change_to_reference_mode()
-        emit_state(True)
-        time.sleep(0.2)
-    try:
-        yield
-    finally:
-        if was_sample_mode:
-            manager.change_to_sample_mode()
-            emit_state(False)
+
 
 
 
@@ -69,7 +57,19 @@ class BrillouinSignaller(QObject):
     # ------- State control -------
     # SLOTS
 
-
+    @contextmanager
+    def force_reference_mode(self):
+        was_sample_mode = not self.manager.is_reference_mode
+        if was_sample_mode:
+            self.manager.change_to_reference_mode()
+            self.reference_mode_state.emit(True)
+            time.sleep(0.2)
+        try:
+            yield
+        finally:
+            if was_sample_mode:
+                self.manager.change_to_sample_mode()
+                self.reference_mode_state.emit(False)
 
     @pyqtSlot()
     def on_gui_ready(self):
@@ -323,7 +323,7 @@ class BrillouinSignaller(QObject):
         config = calibration_config.get()
 
         try:
-            with force_reference_mode(self.manager, self.reference_mode_state.emit):
+            with self.force_reference_mode():
                 success = self.manager.perform_calibration(config, on_step=self.emit_display_result)
 
             if success:

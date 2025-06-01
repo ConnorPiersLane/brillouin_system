@@ -1,5 +1,5 @@
 [calibration]
-n_per_freq = 10
+n_per_freq = 1
 calibration_freqs = [
     5.0,
     5.5,
