@@ -68,8 +68,6 @@ brillouin_manager = BrillouinManager(
 # )
 #
 
-
-
 class BrillouinViewer(QWidget):
 
     # Signals Outgoing
