@@ -13,6 +13,7 @@ class MeasurementPoint:
     is_reference_mode: bool
     frame: np.ndarray
     bg_frame: ImageStatistics | None
+    darknoise_frame: ImageStatistics | None
     fitting_results: FittedSpectrum
     zaber_position: ZaberPosition | None
     camera_settings: CameraSettings

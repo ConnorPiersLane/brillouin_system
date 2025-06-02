@@ -200,7 +200,9 @@ class BrillouinManager:
     # ---------------- Get Frames  ----------------
     def _get_camera_snap(self) -> np.ndarray:
         """Pull a raw frame from the camera."""
-        return self.camera.snap().astype(np.float64)
+        frame = self.camera.snap().astype(np.float64)
+        return np.fliplr(frame)
+
 
     def get_andor_frame(self) -> np.ndarray:
         # Get the frame:
@@ -225,6 +227,7 @@ class BrillouinManager:
         px, sline = get_px_and_sline_from_image(frame)
 
         if not self.do_live_fitting:
+            #ToDo when do bg subtraction, frames should still be subtracted
             return FittedSpectrum(
                 is_success=False,
                 x_pixels=np.arange(sline.shape[0]),
@@ -386,12 +389,20 @@ class BrillouinManager:
                             ):
         self.camera.set_exposure_time(exposure_time)
         self.camera.set_emccd_gain(emccd_gain)
+        #ToDo: change ROI, binning from config
 
         andor_config = andor_frame_config.get()
         if andor_config.do_subtract_dark_image:
             dark_image = self.get_dark_image()
         else:
             dark_image = None
+
+        self.camera.set_roi(x_start=andor_config.x_start,
+                            x_end=andor_config.x_end,
+                            y_start=andor_config.y_start,
+                            y_end=andor_config.y_end,)
+        self.camera.set_binning(hbin=andor_config.hbin,
+                                vbin=andor_config.vbin)
 
         if self.is_reference_mode:
             self.dark_image_reference = dark_image
@@ -422,9 +433,11 @@ class BrillouinManager:
         if self.do_save_images:
             save_frame = frame
             bg_frame = self.bg_image
+            dark_frame = self.dark_image_sample
         else:
             save_frame = None
             bg_frame = None
+            dark_frame = None
 
         if self.is_reference_mode:
             zaber_position = None
@@ -435,6 +448,7 @@ class BrillouinManager:
             is_reference_mode=self.is_reference_mode,
             frame=save_frame,
             bg_frame=bg_frame,
+            darknoise_frame=dark_frame,
             fitting_results = fitting_results,
             zaber_position=zaber_position,
             camera_settings=self.get_camera_settings(),
