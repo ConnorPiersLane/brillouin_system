@@ -1,0 +1,5 @@
+# CODEOWNERS file at the root of the repository
+# Or inside a .github directory (preferred)
+
+# Assign all files to yourself (or a team)
+* @ConnorPiersLane
