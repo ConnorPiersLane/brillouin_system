@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.cameras.for_brillouin_signal.ixonUltra import IxonUltra
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 
 
 import numpy as np
@@ -24,7 +24,7 @@ def test_ixon_camera():
 
     # ---- Set and verify gain
     gain_value = 100
-    cam.set_gain(gain_value)
+    cam.set_emccd_gain(gain_value)
     actual_gain, _ = cam.cam.get_EMCCD_gain()
     assert actual_gain == gain_value, f"Gain mismatch: set {gain_value}, got {actual_gain}"
     print(f"[OK] Gain set and verified: {actual_gain}")

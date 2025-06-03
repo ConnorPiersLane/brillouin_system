@@ -49,7 +49,7 @@ class Microwave:
     def get_frequency(self) -> float:
         self.port.write(b'FREQ:CW?\n')  # try asking for signal generator setting
         result = self.port.readline()
-        freq = float(result[:-4])*1e-9
+        freq = float(result[:-6])*1e-9
         return freq
 
     def set_frequency(self, freq_ghz: float):
@@ -94,7 +94,7 @@ class MicrowaveDummy:
         print(f"[{self.device_name}] Shutdown (output off)")
 
     def get_frequency(self) -> float:
-        print(f"[{self.device_name}] Current frequency: {self._frequency_ghz} GHz")
+        # print(f"[{self.device_name}] Current frequency: {self._frequency_ghz} GHz")
         return self._frequency_ghz
 
     def set_frequency(self, freq_ghz: float):

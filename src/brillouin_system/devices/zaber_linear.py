@@ -75,6 +75,15 @@ class ZaberLinearController:
     def get_zaber_position_class(self) -> ZaberPosition:
         return ZaberPosition(x=self.get_position('x'), y=0, z=0)
 
+    def set_zaber_position_by_class(self, zaber_position: ZaberPosition):
+        axes = self.get_available_axes()
+        if zaber_position.x is not None and 'x' in axes:
+            self.move_abs('x', zaber_position.x)
+        if zaber_position.y is not None and 'y' in axes:
+            self.move_abs('y', zaber_position.y)
+        if zaber_position.z is not None and 'z' in axes:
+            self.move_abs('z', zaber_position.z)
+
     def get_available_axes(self) -> list[str]:
         """Return list of available axes as string labels: ['x', 'y']"""
         return [label for label, axis in self.axis_map.items() if axis is not None]

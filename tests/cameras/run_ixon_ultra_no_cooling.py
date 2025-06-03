@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.cameras.for_brillouin_signal.ixonUltra import IxonUltra
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 import numpy as np
 
 def test_ixon_camera():
@@ -6,6 +6,22 @@ def test_ixon_camera():
 
     # Create camera instance
     cam = IxonUltra(index=0, temperature="off", fan_mode="full")
+
+    cam.list_amp_modes()
+    print('Hello')
+    print(cam.get_amp_mode())
+
+    vsspeeds = cam.cam.get_all_vsspeeds()
+    print("Available VSSpeeds:", vsspeeds)
+
+    device_info = cam.cam.get_device_info()
+    print(device_info)
+    print("Controller Model:", device_info.controller_model)
+    print("Camera Name (Head Model):", device_info.head_model)
+    print("Serial Number:", device_info.serial_number)
+
+    cam.set_emccd_gain(0)
+    print(cam.get_emccd_gain())
 
     # ---- Check camera is opened
     assert cam.is_opened(), "Camera failed to open."
@@ -20,7 +36,7 @@ def test_ixon_camera():
 
     # ---- Set and verify gain
     gain_value = 100
-    cam.set_gain(gain_value)
+    cam.set_emccd_gain(gain_value)
     actual_gain, _ = cam.cam.get_EMCCD_gain()
     assert actual_gain == gain_value, f"Gain mismatch: set {gain_value}, got {actual_gain}"
     print(f"[OK] Gain set and verified: {actual_gain}")

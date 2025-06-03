@@ -15,8 +15,9 @@ class IxonUltra(BaseCamera):
                  y_start: int = 1, y_end: int = 512,
                  vbin: int = 1, hbin: int = 1,
                  exposure_time = 0.21,
-                 gain: int = 1,
+                 gain: int = 0,
                  advanced_gain_option: bool = False,
+                 amp_mode_index: int=16,
                  verbose=True):
         """
         Initialize the IxonUltra camera.
@@ -33,7 +34,32 @@ class IxonUltra(BaseCamera):
             hbin (int): Horizontal binning factor (>= 1). Default is 1.
             gain (int): EMCCD gain (0 to 300 typically).
             advanced_gain_option (bool): Use advanced gain (>300). Default is False.
+            amp_mode_index:
+                [0] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [1] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [2] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [3] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [4] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [5] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [6] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [7] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [8] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [9] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [10] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [11] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [12] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=0 (3.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [13] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=0 (3.0 MHz), Preamp=1 (2.0 e⁻/count)
+                [14] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=0 (3.0 MHz), Preamp=2 (3.0 e⁻/count)
+                [15] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=1 (1.0 MHz), Preamp=0 (1.0 e⁻/count)
+                [16] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=2 (0.07999999821186066 MHz), Preamp=0 (1.0 e⁻/count)
+                [17] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=2 (0.07999999821186066 MHz), Preamp=1 (2.0 e⁻/count)
+                [18] Channel=0, BitDepth=16, OAmp=1 (Conventional), HSSpeed=2 (0.07999999821186066 MHz), Preamp=2 (3.0 e⁻/count)
         """
+
+        # TDeviceInfo(controller_model='USB', head_model='DU897_BV', serial_number=9303)
+        # Controller Model: USB
+        # Camera Name(Head Model): DU897_BV
+        # Serial Number: 9303
 
         self.verbose = verbose
 
@@ -42,14 +68,26 @@ class IxonUltra(BaseCamera):
             temperature=temperature,
             fan_mode=fan_mode,
         )
+        # Set shift speed:
+        desired_speed_index = 4  # Slowest shift speed (3.3 μs)
+        # Available VSSpeeds: [0.30000001192092896, 0.5, 0.8999999761581421, 1.7000000476837158, 3.299999952316284]
+        self.cam.set_vsspeed(desired_speed_index)
+        print(f"[IxonUltra] VSSpeed Index: {self.cam.get_vsspeed()}")
+        print(f"[IxonUltra] VSSpeed Period: {self.cam.get_vsspeed_period():.2f} μs")
+
+        self.set_amp_mode_by_index(amp_mode_index)
+        print("[IxonUltra] Preamp index:", self.cam.get_preamp())
+        print("[IxonUltra] Preamp mode", self.get_amp_mode())
+        print("[IxonUltra] Preamp gain (e⁻/count):", self.get_preamp_gain())
+
         if temperature != "off":
             self.cam.set_temperature(temperature, enable_cooler=True)
-            self._wait_for_cooling()
+            self._wait_for_cooling(target_temp=temperature)
 
 
         self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
         self.set_binning(hbin=hbin, vbin=vbin)
-        self.set_gain_advanced(gain, advanced=advanced_gain_option)
+        self.set_emccd_gain_advanced(gain, advanced=advanced_gain_option)
         self.set_exposure_time(seconds=exposure_time)
 
         self.open_shutter()
@@ -69,14 +107,17 @@ class IxonUltra(BaseCamera):
     def set_verbose(self, verbose: bool) -> None:
         self.verbose = verbose
 
-    def _wait_for_cooling(self, timeout=600):
+    def _wait_for_cooling(self, target_temp: int | float=0, timeout: int=600):
         start = time.time()
         while time.time() - start < timeout:
             status = self.cam.get_temperature_status()
             temp = self.cam.get_temperature()
             print(f"[IxonUltra] Cooling... Status: {status}, Temp: {temp:.2f} °C")
-            if status == "stabilized":
-                print("[IxonUltra] Cooling stabilized.")
+            # if status == "stabilized":
+            #     print("[IxonUltra] Cooling stabilized.")
+            #     return
+            if temp < target_temp + 3:
+                print("[IxonUltra] Target Temperature reached")
                 return
             time.sleep(10)
         print("[IxonUltra] Warning: cooling did not stabilize within timeout.")
@@ -97,24 +138,26 @@ class IxonUltra(BaseCamera):
             if self.verbose:
                 print(f"[IxonUltra] Exposure time set to {self.get_exposure_time():.4f} seconds")
 
-    def set_gain(self, gain: float | int):
+    def set_emccd_gain(self, gain: float | int):
         #with self._lock:
-            actual_gain, adv = self.get_gain_advanced()
-            if adv:
-                print("[IxonUltra Camera Warning] Advanced gain mode was enabled but is now disabled!")
-            self.cam.set_EMCCD_gain(gain, advanced=False)
-            if self.verbose:
-                actual_gain, adv = self.get_gain_advanced()
-                print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
+        if gain == 1:  # Gain==1 not allowed, switch to gain=0 (deactivate gain in this case)
+            gain = 0
+        actual_gain, adv = self.get_emccd_gain_advanced()
+        if adv:
+            print("[IxonUltra Camera Warning] Advanced gain mode was enabled but is now disabled!")
+        self.cam.set_EMCCD_gain(gain, advanced=False)
+        if self.verbose:
+            actual_gain, adv = self.get_emccd_gain_advanced()
+            print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
 
 
-    def set_gain_advanced(self, gain: float | int, advanced: bool = False):
+    def set_emccd_gain_advanced(self, gain: float | int, advanced: bool = False):
         #with self._lock:
             if advanced:
                 print("[IxonUltra Camera Warning] Advanced gain mode enabled: sensor damage possible!")
             self.cam.set_EMCCD_gain(gain, advanced=advanced)
             if self.verbose:
-                actual_gain, adv = self.get_gain_advanced()
+                actual_gain, adv = self.get_emccd_gain_advanced()
                 print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
 
     def set_roi(self, x_start: int, x_end: int, y_start: int, y_end: int):
@@ -137,11 +180,15 @@ class IxonUltra(BaseCamera):
         #with self._lock:
             return self.cam.get_exposure()
 
-    def get_gain(self) -> int:
+    def get_emccd_gain(self) -> int:
         #with self._lock:
             return self.cam.get_EMCCD_gain()[0]
 
-    def get_gain_advanced(self) -> tuple[int, bool]:
+    def get_preamp_gain(self) -> float:
+        """Preamp gain (e⁻/count)"""
+        return self.cam.get_preamp_gain()
+
+    def get_emccd_gain_advanced(self) -> tuple[int, bool]:
         #with self._lock:
             return self.cam.get_EMCCD_gain()
 
@@ -167,6 +214,28 @@ class IxonUltra(BaseCamera):
             height = (vend - vstart) // vbin
             return (height, width)
 
+    def set_amp_mode_by_index(self, index: int):
+        modes = self.cam.get_all_amp_modes()
+        if index < 0 or index >= len(modes):
+            raise ValueError(f"Invalid amp mode index: {index}.")
+        mode = modes[index]
+        self.cam.set_amp_mode(channel=mode.channel, oamp=mode.oamp, hsspeed=mode.hsspeed, preamp=mode.preamp)
+        if self.verbose:
+            print(f"[IxonUltra] Amplifier mode set to index {index}:")
+            print(f"  Channel: {mode.channel}, Output Amp: {mode.oamp} ({mode.oamp_kind}), "
+                  f"HSSpeed: {mode.hsspeed} ({mode.hsspeed_MHz} MHz), Preamp: {mode.preamp} ({mode.preamp_gain} e⁻/count)")
+
+    def get_amp_mode(self) -> object:
+        """
+        """
+        return self.cam.get_amp_mode()
+
+
+    def list_amp_modes(self):
+        modes = self.cam.get_all_amp_modes()
+        for i, m in enumerate(modes):
+            print(f"[{i}] Channel={m.channel}, BitDepth={m.channel_bitdepth}, OAmp={m.oamp} ({m.oamp_kind}), "
+                  f"HSSpeed={m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp={m.preamp} ({m.preamp_gain} e⁻/count)")
 
 
     def is_opened(self) -> bool:

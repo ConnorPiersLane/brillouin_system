@@ -57,10 +57,10 @@ class DummyCamera(BaseCamera):
     def get_exposure_time(self) -> float:
         return self.exposure_time
 
-    def set_gain(self, gain: float | int):
+    def set_emccd_gain(self, gain: float | int):
         self.gain = gain
 
-    def get_gain(self) -> float | int:
+    def get_emccd_gain(self) -> float | int:
         return self.gain
 
     def set_roi(self, x_start: int, x_end: int, y_start: int, y_end: int):
@@ -77,6 +77,16 @@ class DummyCamera(BaseCamera):
 
     def is_opened(self) -> bool:
         return True
+
+    def get_preamp_gain(self) -> int:
+        """Preamp gain (e⁻/count)"""
+        return 1.0
+
+    def get_amp_mode(self) -> tuple:
+        """
+
+        """
+        return "Test Amp Mode: (channel, oamp, hsspeed, preamp)"
 
     def close(self):
         pass
