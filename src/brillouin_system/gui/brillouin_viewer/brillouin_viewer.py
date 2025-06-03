@@ -38,34 +38,34 @@ from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 
 
 
-# ## Testing
-# brillouin_manager = BrillouinManager(
-#         camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber=ZaberLinearDummy(),
-#     is_sample_illumination_continuous=True
-# )
-
-#
-# # Real
+## Testing
 brillouin_manager = BrillouinManager(
-        camera=IxonUltra(
-            index = 0,
-            temperature = -80, #"off"
-            fan_mode = "full",
-            x_start = 40, x_end  = 120,
-            y_start= 300, y_end  = 315,
-            vbin= 1, hbin  = 1,
-            exposure_time = 0.5,
-            gain  = 1,
-            verbose = True,
-        ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber=ZaberLinearController(),
+        camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
+    zaber=ZaberLinearDummy(),
     is_sample_illumination_continuous=True
 )
+
+#
+# # # Real
+# brillouin_manager = BrillouinManager(
+#         camera=IxonUltra(
+#             index = 0,
+#             temperature = -80, #"off"
+#             fan_mode = "full",
+#             x_start = 40, x_end  = 120,
+#             y_start= 300, y_end  = 315,
+#             vbin= 1, hbin  = 1,
+#             exposure_time = 0.5,
+#             gain  = 1,
+#             verbose = True,
+#         ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber=ZaberLinearController(),
+#     is_sample_illumination_continuous=True
+# )
 
 
 class BrillouinViewer(QWidget):

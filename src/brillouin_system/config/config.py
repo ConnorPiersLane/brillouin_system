@@ -38,8 +38,6 @@ class ThreadSafeConfig:
 
 # ---------- Config models ----------
 
-available_bg_models = ("no model", "Logistic Step + Quadr.")
-
 @dataclass
 class FindPeaksConfig:
     prominence_fraction: float
@@ -47,7 +45,6 @@ class FindPeaksConfig:
     min_peak_height: int
     rel_height: float
     wlen_pixels: int
-    bg_model: str
 
 @dataclass
 class CalibrationConfig:
@@ -59,7 +56,7 @@ class CalibrationConfig:
 class AndorFrameSettings:
     selected_rows: list[int]
     n_dark_images: int
-    do_subtract_dark_image: bool
+    take_dark_image: bool
     n_bg_images: int
     x_start: int
     x_end: int
@@ -116,7 +113,7 @@ def load_andor_frame_settings(path: Path) -> AndorFrameSettings:
     return AndorFrameSettings(
         selected_rows=raw["selected_rows"],
         n_dark_images=raw["n_dark_images"],
-        do_subtract_dark_image=raw["do_subtract_dark_image"],
+        take_dark_image=raw["take_dark_image"],
         n_bg_images=raw["n_bg_images"],
         x_start=raw["x_start"],
         x_end=raw["x_end"],

@@ -27,7 +27,7 @@ def plot_frequency_errors(calibration_results: CalibrationResults, reference: st
     freq_errors_std = []
     freq_errors_delta = []
 
-    for freq, spectra_list in zip(calibration_results.data.freqs, calibration_results.data.fitted_spectras):
+    for freq, spectra_list in zip(calibration_results.data.freqs, calibration_results.data.cali_meas_points):
         pixels = np.array([extract_px(fs) for fs in spectra_list if fs.is_success])
         if len(pixels) == 0:
             continue
@@ -66,7 +66,7 @@ def plot_average_peak_widths_in_frequency(calibration_results: CalibrationResult
     right_means = []
     right_stds = []
 
-    for freq, spectra_list in zip(calibration_results.data.freqs, calibration_results.data.fitted_spectras):
+    for freq, spectra_list in zip(calibration_results.data.freqs, calibration_results.data.cali_meas_points):
         left_widths = []
         right_widths = []
 
@@ -134,7 +134,7 @@ def plot_sensitivity_comparison(calibration_results: CalibrationResults, referen
     sens_pi = []
     sens_deriv = []
 
-    for freq, spectra_list in zip(calibration_results.data.freqs, calibration_results.data.fitted_spectras):
+    for freq, spectra_list in zip(calibration_results.data.freqs, calibration_results.data.cali_meas_points):
         widths_ghz = []
         Ns = []
         pixels = []
@@ -185,7 +185,7 @@ def plot_distance_fit_and_error_with_sensitivity(calibration_results):
     distances = []
     pixel_stds = []
 
-    for spectra_list in calibration_results.data.fitted_spectras:
+    for spectra_list in calibration_results.data.cali_meas_points:
         px_values = [fs.inter_peak_distance for fs in spectra_list if fs.is_fitting_available]
         if px_values:
             distances.append(np.mean(px_values))
@@ -238,7 +238,7 @@ def plot_slines_at_freqs(calibration_results, freqs_to_plot=(4.0, 8.0)):
     for target_freq in freqs_to_plot:
         # Find closest match
         idx = np.argmin(np.abs(freqs - target_freq))
-        spectra_list = calibration_results.data.fitted_spectras[idx]
+        spectra_list = calibration_results.data.cali_meas_points[idx]
         fs = next((s for s in spectra_list if s.is_fitting_available), None)
 
         if fs is None:
@@ -260,9 +260,9 @@ with open(file_path, "rb") as f:
     calibration_results: CalibrationResults = pickle.load(f)
 
 data = calibration_results.data
-data.fitted_spectras = [
+data.cali_meas_points = [
     [sort_fitted_spectrum_peaks(fs) for fs in fs_list]
-    for fs_list in data.fitted_spectras
+    for fs_list in data.cali_meas_points
 ]
 
 calibration_results = calibrate(data)

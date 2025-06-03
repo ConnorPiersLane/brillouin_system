@@ -33,7 +33,7 @@ def test_calibration_fit():
     ]
 
     # Create CalibrationData and run fit
-    cal_data = CalibrationData(n_per_freq=1, freqs=freqs, fitted_spectras=[[fs] for fs in mock_spectra])
+    cal_data = CalibrationData(n_per_freq=1, freqs=freqs, cali_meas_points=[[fs] for fs in mock_spectra])
 
     result: CalibrationResults = calibrate(cal_data)
 

@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGroupBox,
     QPushButton, QApplication, QFormLayout, QButtonGroup, QRadioButton,
-    QCheckBox, QComboBox
+    QCheckBox
 )
 from PyQt5.QtGui import QIntValidator
 
@@ -13,8 +13,7 @@ from brillouin_system.config.config import (
     save_find_peaks_config_section,
     save_calibration_config,
     save_andor_frame_settings,
-    find_peaks_config_toml_path,
-    available_bg_models
+    find_peaks_config_toml_path
 )
 
 class ConfigDialog(QDialog):
@@ -27,18 +26,11 @@ class ConfigDialog(QDialog):
         self.sample_inputs = {}
         self.reference_inputs = {}
 
-        # Sample and Reference BG Model dropdowns
-        self.sample_bg_model_dropdown = QComboBox()
-        self.sample_bg_model_dropdown.addItems(available_bg_models)
-
-        self.reference_bg_model_dropdown = QComboBox()
-        self.reference_bg_model_dropdown.addItems(available_bg_models)
-
         # Andor Frame inputs
         self.selected_rows_input = QLineEdit()
         self.n_dark_images_input = QLineEdit()
         self.n_dark_images_input.setValidator(QIntValidator(0, 999))
-        self.do_subtract_dark_image_input = QCheckBox()
+        self.dark_image_input = QCheckBox()
         self.n_bg_images_input = QLineEdit()
         self.n_bg_images_input.setValidator(QIntValidator(0, 999))
         self.x_start_input = QLineEdit()
@@ -94,8 +86,8 @@ class ConfigDialog(QDialog):
         row3.addWidget(self.n_bg_images_input)
         row3.addWidget(QLabel("Dark Images:"))
         row3.addWidget(self.n_dark_images_input)
-        row3.addWidget(QLabel("Subtract Dark:"))
-        row3.addWidget(self.do_subtract_dark_image_input)
+        row3.addWidget(QLabel("Take Dark Images:"))
+        row3.addWidget(self.dark_image_input)
 
         layout.addLayout(row1)
         layout.addLayout(row2)
@@ -106,12 +98,12 @@ class ConfigDialog(QDialog):
     def create_spectrum_fitting_group(self):
         group = QGroupBox("Spectrum Fitting")
         layout = QHBoxLayout()
-        layout.addWidget(self.create_config_group("Sample", self.sample_inputs, self.sample_bg_model_dropdown))
-        layout.addWidget(self.create_config_group("Reference", self.reference_inputs, self.reference_bg_model_dropdown))
+        layout.addWidget(self.create_config_group("Sample", self.sample_inputs))
+        layout.addWidget(self.create_config_group("Reference", self.reference_inputs))
         group.setLayout(layout)
         return group
 
-    def create_config_group(self, title, inputs_dict, bg_model_dropdown):
+    def create_config_group(self, title, inputs_dict):
         group = QGroupBox(title)
         layout = QVBoxLayout()
         for field in self.field_names():
@@ -122,13 +114,6 @@ class ConfigDialog(QDialog):
             row.addWidget(label)
             row.addWidget(input_field)
             layout.addLayout(row)
-
-        bg_row = QHBoxLayout()
-        bg_label = QLabel("BG Model:")
-        bg_row.addWidget(bg_label)
-        bg_row.addWidget(bg_model_dropdown)
-        layout.addLayout(bg_row)
-
         group.setLayout(layout)
         return group
 
@@ -180,7 +165,7 @@ class ConfigDialog(QDialog):
         andor = andor_frame_config.get()
         self.selected_rows_input.setText(",".join(str(x) for x in andor.selected_rows))
         self.n_dark_images_input.setText(str(andor.n_dark_images))
-        self.do_subtract_dark_image_input.setChecked(andor.do_subtract_dark_image)
+        self.dark_image_input.setChecked(andor.take_dark_image)
         self.n_bg_images_input.setText(str(andor.n_bg_images))
         self.x_start_input.setText(str(andor.x_start))
         self.x_end_input.setText(str(andor.x_end))
@@ -193,9 +178,6 @@ class ConfigDialog(QDialog):
         for field in self.field_names():
             self.sample_inputs[field].setText(str(getattr(find_peaks_sample_config.get(), field)))
             self.reference_inputs[field].setText(str(getattr(find_peaks_reference_config.get(), field)))
-
-        self.sample_bg_model_dropdown.setCurrentText(find_peaks_sample_config.get().bg_model)
-        self.reference_bg_model_dropdown.setCurrentText(find_peaks_reference_config.get().bg_model)
 
         calib = calibration_config.get()
         self.n_per_freq_input.setText(str(calib.n_per_freq))
@@ -214,7 +196,7 @@ class ConfigDialog(QDialog):
             andor_frame_config.update(
                 selected_rows=[int(x.strip()) for x in self.selected_rows_input.text().split(",") if x.strip().isdigit()],
                 n_dark_images=int(self.n_dark_images_input.text()),
-                do_subtract_dark_image=self.do_subtract_dark_image_input.isChecked(),
+                take_dark_image=self.dark_image_input.isChecked(),
                 n_bg_images=int(self.n_bg_images_input.text()),
                 x_start=int(self.x_start_input.text()),
                 x_end=int(self.x_end_input.text()),
@@ -228,13 +210,11 @@ class ConfigDialog(QDialog):
             # Sample
             sample_kwargs = {field: self._parse_value(self.sample_inputs[field].text(), field)
                              for field in self.field_names()}
-            sample_kwargs['bg_model'] = self.sample_bg_model_dropdown.currentText()
             find_peaks_sample_config.update(**sample_kwargs)
 
             # Reference
             reference_kwargs = {field: self._parse_value(self.reference_inputs[field].text(), field)
                                 for field in self.field_names()}
-            reference_kwargs['bg_model'] = self.reference_bg_model_dropdown.currentText()
             find_peaks_reference_config.update(**reference_kwargs)
 
             # Calibration

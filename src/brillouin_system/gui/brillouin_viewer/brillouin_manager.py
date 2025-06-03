@@ -11,13 +11,18 @@ from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
+from brillouin_system.my_dataclasses.state_mode import StateMode
 from brillouin_system.utils.fit_util import get_px_and_sline_from_image
-from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate
+from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate, \
+    CalibrationMeasurementPoint, MeasurementsPerFreq
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.utils import brillouin_spectrum_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
+
+
+
 
 
 
@@ -44,18 +49,6 @@ class BrillouinManager:
         self.microwave: Microwave | MicrowaveDummy = microwave
         self.zaber = zaber
 
-        # Init Camera Settings:
-        self.cam_settings_reference: CameraSettings = CameraSettings(
-            name=self.camera.get_name(),
-            exposure_time_s=0.2,
-            emccd_gain=0,
-            roi=self.camera.get_roi(),
-            binning=self.camera.get_binning(),
-            preamp_gain=self.camera.get_preamp_gain(),
-            amp_mode=self.camera.get_amp_mode(),
-        )
-        self.cam_settings_sample: CameraSettings = self.get_camera_settings() # use init values here
-
         # State
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
         self.is_reference_mode: bool = False
@@ -64,18 +57,17 @@ class BrillouinManager:
         self.do_save_images: bool = False
         self.do_live_fitting = False
 
-
         # Calibration
         self.calibration_results: CalibrationResults | None = None
 
-        # Dark Images
-        self.dark_image_reference: ImageStatistics | None = None
-        self.dark_image_sample: ImageStatistics | None = None
-        # Background (BG) Image
+        # Background (BG) Image and dark_image for the sample
         self.bg_image: ImageStatistics | None = None
-
+        self.dark_image: ImageStatistics | None = None
 
         self.init_shutters()
+        self.init_camera_settings()
+        self.reference_state_mode: StateMode = self.init_state_mode(exposure_time=0.1, emccd_gain=0)
+        self.sample_state_mode: StateMode = self.init_state_mode(exposure_time=0.2, emccd_gain=0)
 
     def init_shutters(self):
         if self.is_reference_mode:
@@ -87,6 +79,27 @@ class BrillouinManager:
         else:
             self.shutter_manager.sample.close()
 
+    def init_camera_settings(self):
+        andor_config = andor_frame_config.get()
+        self.camera.set_roi(x_start=andor_config.x_start,
+                            x_end=andor_config.x_end,
+                            y_start=andor_config.y_start,
+                            y_end=andor_config.y_end,)
+        self.camera.set_binning(hbin=andor_config.hbin,
+                                vbin=andor_config.vbin)
+
+
+    def init_state_mode(self, exposure_time: float, emccd_gain: int):
+
+        self.camera.set_exposure_time(exposure_time)
+        self.camera.set_emccd_gain(emccd_gain)
+
+        return StateMode(
+            is_do_bg_subtraction_active=False,
+            bg_image=None,
+            dark_noise_image=None,
+            camera_settings=self.get_camera_settings()
+        )
 
 
     # ---------------- Change Modes ----------------
@@ -101,22 +114,40 @@ class BrillouinManager:
         self.shutter_manager.sample.close()
         print("[BrillouinManager] Switched to pulsed illumination mode.")
 
+    def change_state_modes(self, state_mode: StateMode):
+        self.do_background_subtraction = state_mode.is_do_bg_subtraction_active
+        self.bg_image = state_mode.bg_image
+        self.dark_image = state_mode.dark_noise_image
+        self.set_camera_settings(
+            exposure_time=state_mode.camera_settings.exposure_time_s,
+            emccd_gain=state_mode.camera_settings.emccd_gain,
+        )
+
+    def get_current_state_mode(self) -> StateMode:
+        return StateMode(
+            is_do_bg_subtraction_active=self.do_background_subtraction,
+            bg_image=self.bg_image,
+            dark_noise_image=self.dark_image,
+            camera_settings=self.get_camera_settings()
+        )
+
     def change_to_reference_mode(self):
+        # Store current state mode of the sample for future:
+        self.sample_state_mode = self.get_current_state_mode()
+
         self.is_reference_mode = True
         self.shutter_manager.change_to_reference()
-        self.set_camera_settings(
-            exposure_time=self.cam_settings_reference.exposure_time_s,
-            emccd_gain=self.cam_settings_reference.emccd_gain,
-        )
+        self.change_state_modes(state_mode=self.reference_state_mode)
         print("[BrillouinManager] Switched to reference mode.")
 
+
     def change_to_sample_mode(self):
+        # Store current state mode of the sample for future:
+        self.reference_state_mode = self.get_current_state_mode()
+
         self.is_reference_mode = False
         self.shutter_manager.change_to_objective()
-        self.set_camera_settings(
-            exposure_time=self.cam_settings_sample.exposure_time_s,
-            emccd_gain=self.cam_settings_sample.emccd_gain,
-        )
+        self.change_state_modes(state_mode=self.sample_state_mode)
         print("[BrillouinManager] Switched to sample mode.")
 
 
@@ -137,13 +168,22 @@ class BrillouinManager:
         if not self.is_background_image_available():
             print("[AcquisitionManager] No background image available")
             return frame
-        return frame - self.bg_image.mean_image
+        result = frame - self.bg_image.mean_image
+        result = np.clip(result, 0, None)  # enforce non-negativity
+        return result
 
 
     def take_n_images(self, n_images) -> np.ndarray:
         return np.stack([self._get_camera_snap() for _ in range(n_images)])
 
-    def take_bg_image(self):
+
+    def take_bg_and_darknoise_images(self):
+
+        self.dark_image: ImageStatistics = self.get_dark_image()
+        self.bg_image: ImageStatistics = self.get_bg_image()
+
+
+    def get_bg_image(self):
         """Capture and average multiple frames to use as background."""
 
         if self.is_sample_illumination_continuous:
@@ -153,14 +193,14 @@ class BrillouinManager:
         time.sleep(0.05)  # Optional delay before acquisition
 
         andor_config = andor_frame_config.get()
-        n_bg_images = andor_config.n_bg_images
 
+        n_bg_images = andor_config.n_bg_images
         n_images = self.take_n_images(n_bg_images)
 
         if isinstance(self.camera, DummyCamera):
             n_images = n_images * 0.8
 
-        self.bg_image = ImageStatistics(n_images)
+
         print("[BrillouinManager] Background Image acquired.")
 
 
@@ -169,8 +209,15 @@ class BrillouinManager:
         else:
             pass # do not open shutter, we are in snap mode
 
-    def get_dark_image(self) -> ImageStatistics:
+        return ImageStatistics(n_images)
+
+
+    def get_dark_image(self) -> ImageStatistics | None:
         andor_config = andor_frame_config.get()
+
+        if not andor_config.take_dark_image:
+            return None
+
         n_dark_images = andor_config.n_dark_images
         print(f"[BrillouinManager] Starting dark image acquisition, images to capture: {n_dark_images}")
 
@@ -224,13 +271,18 @@ class BrillouinManager:
         Returns:
             FittedSpectrum: Dataclass containing fit results and metadata.
         """
-        px, sline = get_px_and_sline_from_image(frame)
+
+
+        if self.do_background_subtraction and not self.is_reference_mode:
+            frame_with_sub_bg = self.subtract_background(frame)
+            px, sline = get_px_and_sline_from_image(frame_with_sub_bg)
+        else:
+            px, sline = get_px_and_sline_from_image(frame)
 
         if not self.do_live_fitting:
-            #ToDo when do bg subtraction, frames should still be subtracted
             return FittedSpectrum(
                 is_success=False,
-                x_pixels=np.arange(sline.shape[0]),
+                x_pixels=px,
                 sline=sline,
             )
 
@@ -239,12 +291,6 @@ class BrillouinManager:
             if self.is_reference_mode:
                 fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
                     px=px, sline=sline, is_reference_mode=True
-                )
-            elif self.do_background_subtraction:
-                frame_with_sub_bg = self.subtract_background(frame)
-                px, sline_bg_sub = get_px_and_sline_from_image(frame_with_sub_bg)
-                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                    px=px, sline=sline_bg_sub, is_reference_mode=False
                 )
             else:
                 fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
@@ -259,27 +305,42 @@ class BrillouinManager:
                 sline=sline,
             )
 
+
     def perform_calibration(self, config: CalibrationConfig, on_step: Callable[[DisplayResults], None]) -> bool:
+        """
+        Perform a calibration measurement series and store the results.
+
+        Args:
+            config: CalibrationConfig with frequencies and number of points
+            on_step: Callback to update GUI after each measurement
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
-            data = []
+            measured_freqs = []
             for freq in config.calibration_freqs:
-                freq_data = []
                 self.microwave.set_frequency(freq)
+                freq_points = []
                 for _ in range(config.n_per_freq):
                     frame = self.get_andor_frame()
                     fs = self.get_fitted_spectrum(frame)
-                    display = self.get_display_results(frame, fs)
-                    on_step(display)
-                    freq_data.append(fs)
-                data.append(freq_data)
+                    calibration_point = CalibrationMeasurementPoint(
+                        frame=frame,
+                        microwave_freq=self.microwave.get_frequency(),  # measured freq from device
+                        state_mode=self.get_current_state_mode(),
+                        fitting_results=fs,
+                    )
+                    on_step(self.get_display_results(frame, fs))
+                    freq_points.append(calibration_point)
+                measured_freqs.append(MeasurementsPerFreq(set_freq_ghz=freq, cali_meas_points=freq_points))
 
-            cali_data = CalibrationData(freqs=config.calibration_freqs, n_per_freq=config.n_per_freq, fitted_spectras=data)
+            cali_data = CalibrationData(measured_freqs=measured_freqs)
             self.calibration_results = calibrate(cali_data)
             return True
         except Exception as e:
             print(f"[Manager] Calibration failed: {e}")
             return False
-
 
     def take_measurements(self, n: int, which_axis: str, step: float, on_step: Callable[[DisplayResults], None]) -> MeasurementSeries:
         """
@@ -367,7 +428,6 @@ class BrillouinManager:
                 sline=fitting.sline,
             )
 
-
     def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> np.ndarray:
         """Acquire a frame with temporary shutter open for pulsed mode."""
         frame = None
@@ -376,9 +436,13 @@ class BrillouinManager:
         try:
             self.shutter_manager.sample.open()
             timer.start()
-            frame = self._get_camera_snap()
+            try:
+                frame = self._get_camera_snap()
+            finally:
+                # Always cancel the timer (even if _get_camera_snap() fails)
+                timer.cancel()
         finally:
-            timer.cancel()
+            # Always close the shutter at the end (even if an exception occurs)
             self.shutter_manager.sample.close()
 
         return frame
@@ -389,13 +453,9 @@ class BrillouinManager:
                             ):
         self.camera.set_exposure_time(exposure_time)
         self.camera.set_emccd_gain(emccd_gain)
-        #ToDo: change ROI, binning from config
 
         andor_config = andor_frame_config.get()
-        if andor_config.do_subtract_dark_image:
-            dark_image = self.get_dark_image()
-        else:
-            dark_image = None
+
 
         self.camera.set_roi(x_start=andor_config.x_start,
                             x_end=andor_config.x_end,
@@ -404,12 +464,11 @@ class BrillouinManager:
         self.camera.set_binning(hbin=andor_config.hbin,
                                 vbin=andor_config.vbin)
 
+
         if self.is_reference_mode:
-            self.dark_image_reference = dark_image
-            self.cam_settings_reference: CameraSettings = self.get_camera_settings()
+            self.reference_state_mode.camera_settings = self.get_camera_settings()
         else:
-            self.dark_image_sample = dark_image
-            self.cam_settings_sample: CameraSettings = self.get_camera_settings()
+            self.sample_state_mode.camera_settings = self.get_camera_settings()
 
 
 
@@ -430,14 +489,11 @@ class BrillouinManager:
                              frame: np.ndarray,
                              fitting_results: FittedSpectrum) -> MeasurementPoint:
 
-        if self.do_save_images:
-            save_frame = frame
-            bg_frame = self.bg_image
-            dark_frame = self.dark_image_sample
-        else:
-            save_frame = None
-            bg_frame = None
-            dark_frame = None
+        state_mode = self.get_current_state_mode()
+        if not self.do_save_images:
+            frame = None
+            state_mode.bg_image = None
+            state_mode.dark_noise_image = None
 
         if self.is_reference_mode:
             zaber_position = None
@@ -446,12 +502,10 @@ class BrillouinManager:
 
         return MeasurementPoint(
             is_reference_mode=self.is_reference_mode,
-            frame=save_frame,
-            bg_frame=bg_frame,
-            darknoise_frame=dark_frame,
+            frame=frame,
+            state_mode=state_mode,
             fitting_results = fitting_results,
             zaber_position=zaber_position,
-            camera_settings=self.get_camera_settings(),
             mako_image=None,
             )
 

@@ -44,7 +44,7 @@ def test_show_calibration_plot():
         data.append(spectra_per_freq)
 
     # Build CalibrationData object
-    cal_data = CalibrationData(n_per_freq=10, freqs=freqs, fitted_spectras=data)
+    cal_data = CalibrationData(n_per_freq=10, freqs=freqs, cali_meas_points=data)
 
     # Run calibration
     results: CalibrationResults = calibrate(cal_data)

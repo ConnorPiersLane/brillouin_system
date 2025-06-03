@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
+from brillouin_system.my_dataclasses.state_mode import StateMode
 from brillouin_system.utils.calibration import CalibrationResults
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
@@ -11,12 +12,10 @@ from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 @dataclass
 class MeasurementPoint:
     is_reference_mode: bool
-    frame: np.ndarray
-    bg_frame: ImageStatistics | None
-    darknoise_frame: ImageStatistics | None
+    frame: np.ndarray  # Original frame, not subtracted
+    state_mode: StateMode
     fitting_results: FittedSpectrum
     zaber_position: ZaberPosition | None
-    camera_settings: CameraSettings
     mako_image: np.ndarray | None
 
 @dataclass

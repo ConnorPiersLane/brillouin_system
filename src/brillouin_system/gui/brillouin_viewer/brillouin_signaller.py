@@ -111,7 +111,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def emit_background_data(self):
         data = BackGroundImage(
-            dark_image=self.manager.dark_image_sample,
+            dark_image=self.manager.dark_image,
             bg_image=self.manager.bg_image,
         )
         self.background_data_ready.emit(data)
@@ -147,6 +147,9 @@ class BrillouinSignaller(QObject):
             self.manager.change_to_reference_mode()
         self.emit_camera_settings()
         self.reference_mode_state.emit(self.manager.is_reference_mode)
+        # Emit updated state to viewer
+        self.background_subtraction_state.emit(self.manager.do_background_subtraction)
+        self.background_available_state.emit(self.manager.is_background_image_available())
 
     @pyqtSlot()
     def emit_camera_settings(self):
@@ -233,16 +236,12 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def acquire_background_image(self):
-        #
-        if self.manager.is_reference_mode:
-            self.log_message.emit(f"Change to Sample Mode first to take a background image")
-            return
 
         # Stop live view
         self._running = False
 
         try:
-            self.manager.take_bg_image()
+            self.manager.take_bg_and_darknoise_images()
             self.background_available_state.emit(self.manager.is_background_image_available())
             self.log_message.emit("Background image acquired.")
         except Exception as e:

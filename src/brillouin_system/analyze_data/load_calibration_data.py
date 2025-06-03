@@ -10,7 +10,7 @@ def load_calibration(path):
             print("[✓] Loaded Calibration Data")
             print(f" - Spectral Dispersion (SD): {data.sd:.6f} GHz/px")
             print(f" - Free Spectral Range (FSR): {data.fsr:.3f} GHz")
-            print(f" - Number of calibration points: {len(data.fitted_spectras)}")
+            print(f" - Number of calibration points: {len(data.cali_meas_points)}")
             return data
         else:
             raise TypeError("Loaded object is not a CalibrationData instance")
