@@ -12,13 +12,14 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
 from brillouin_system.my_dataclasses.state_mode import StateMode
-from brillouin_system.utils.fit_util import get_px_and_sline_from_image
+from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
+from brillouin_system.utils.fit_util import get_sline_from_image
 from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate, \
     CalibrationMeasurementPoint, MeasurementsPerFreq
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
-from brillouin_system.utils import brillouin_spectrum_fitting
+from brillouin_system.utils import brillouin_spectrum_fitting, gauss_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
 
 
@@ -66,8 +67,10 @@ class BrillouinManager:
 
         self.init_shutters()
         self.init_camera_settings()
-        self.reference_state_mode: StateMode = self.init_state_mode(exposure_time=0.1, emccd_gain=0)
-        self.sample_state_mode: StateMode = self.init_state_mode(exposure_time=0.2, emccd_gain=0)
+
+        # Init state modes
+        self.reference_state_mode: StateMode = self.init_state_mode(is_reference_mode=True)
+        self.sample_state_mode: StateMode = self.init_state_mode(is_reference_mode=False)
 
     def init_shutters(self):
         if self.is_reference_mode:
@@ -89,18 +92,14 @@ class BrillouinManager:
                                 vbin=andor_config.vbin)
 
 
-    def init_state_mode(self, exposure_time: float, emccd_gain: int):
-
-        self.camera.set_exposure_time(exposure_time)
-        self.camera.set_emccd_gain(emccd_gain)
-
+    def init_state_mode(self, is_reference_mode: bool) -> StateMode:
         return StateMode(
+            is_reference_mode=is_reference_mode,
             is_do_bg_subtraction_active=False,
             bg_image=None,
-            dark_noise_image=None,
+            dark_image=None,
             camera_settings=self.get_camera_settings()
         )
-
 
     # ---------------- Change Modes ----------------
 
@@ -115,9 +114,9 @@ class BrillouinManager:
         print("[BrillouinManager] Switched to pulsed illumination mode.")
 
     def change_state_modes(self, state_mode: StateMode):
+        self.is_reference_mode = state_mode.is_reference_mode
         self.do_background_subtraction = state_mode.is_do_bg_subtraction_active
         self.bg_image = state_mode.bg_image
-        self.dark_image = state_mode.dark_noise_image
         self.set_camera_settings(
             exposure_time=state_mode.camera_settings.exposure_time_s,
             emccd_gain=state_mode.camera_settings.emccd_gain,
@@ -125,9 +124,10 @@ class BrillouinManager:
 
     def get_current_state_mode(self) -> StateMode:
         return StateMode(
+            is_reference_mode=self.is_reference_mode,
             is_do_bg_subtraction_active=self.do_background_subtraction,
             bg_image=self.bg_image,
-            dark_noise_image=self.dark_image,
+            dark_image=self.dark_image,
             camera_settings=self.get_camera_settings()
         )
 
@@ -135,7 +135,6 @@ class BrillouinManager:
         # Store current state mode of the sample for future:
         self.sample_state_mode = self.get_current_state_mode()
 
-        self.is_reference_mode = True
         self.shutter_manager.change_to_reference()
         self.change_state_modes(state_mode=self.reference_state_mode)
         print("[BrillouinManager] Switched to reference mode.")
@@ -144,8 +143,6 @@ class BrillouinManager:
     def change_to_sample_mode(self):
         # Store current state mode of the sample for future:
         self.reference_state_mode = self.get_current_state_mode()
-
-        self.is_reference_mode = False
         self.shutter_manager.change_to_objective()
         self.change_state_modes(state_mode=self.sample_state_mode)
         print("[BrillouinManager] Switched to sample mode.")
@@ -273,28 +270,31 @@ class BrillouinManager:
         """
 
 
-        if self.do_background_subtraction and not self.is_reference_mode:
+        if self.do_background_subtraction:
             frame_with_sub_bg = self.subtract_background(frame)
-            px, sline = get_px_and_sline_from_image(frame_with_sub_bg)
+            sline = get_sline_from_image(frame_with_sub_bg)
         else:
-            px, sline = get_px_and_sline_from_image(frame)
+            sline = get_sline_from_image(frame)
 
         if not self.do_live_fitting:
             return FittedSpectrum(
                 is_success=False,
-                x_pixels=px,
+                x_pixels=np.arange(sline.shape[0]),
                 sline=sline,
             )
 
         try:
             # Fit the spectrum using the appropriate model
             if self.is_reference_mode:
-                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                    px=px, sline=sline, is_reference_mode=True
+                # fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
+                #     sline=sline, is_reference_mode=True
+                # )
+                fitted_spectrum = gauss_fitting.get_fitted_spectrum_gaussian(
+                    sline=sline, is_reference_mode=True
                 )
             else:
                 fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                    px=px, sline=sline, is_reference_mode=False
+                    sline=sline, is_reference_mode=False
                 )
             return fitted_spectrum
         except Exception as e:
@@ -306,13 +306,13 @@ class BrillouinManager:
             )
 
 
-    def perform_calibration(self, config: CalibrationConfig, on_step: Callable[[DisplayResults], None]) -> bool:
+    def perform_calibration(self, config: CalibrationConfig, call_update_gui: Callable[[DisplayResults], None]) -> bool:
         """
         Perform a calibration measurement series and store the results.
 
         Args:
             config: CalibrationConfig with frequencies and number of points
-            on_step: Callback to update GUI after each measurement
+            call_update_gui: Callback to update GUI after each measurement
 
         Returns:
             bool: True if successful, False otherwise
@@ -328,12 +328,13 @@ class BrillouinManager:
                     calibration_point = CalibrationMeasurementPoint(
                         frame=frame,
                         microwave_freq=self.microwave.get_frequency(),  # measured freq from device
-                        state_mode=self.get_current_state_mode(),
                         fitting_results=fs,
                     )
-                    on_step(self.get_display_results(frame, fs))
+                    call_update_gui(self.get_display_results(frame, fs))
                     freq_points.append(calibration_point)
-                measured_freqs.append(MeasurementsPerFreq(set_freq_ghz=freq, cali_meas_points=freq_points))
+                measured_freqs.append(MeasurementsPerFreq(set_freq_ghz=freq,
+                                                          state_mode=self.get_current_state_mode(),
+                                                          cali_meas_points=freq_points))
 
             cali_data = CalibrationData(measured_freqs=measured_freqs)
             self.calibration_results = calibrate(cali_data)
@@ -342,38 +343,45 @@ class BrillouinManager:
             print(f"[Manager] Calibration failed: {e}")
             return False
 
-    def take_measurements(self, n: int, which_axis: str, step: float, on_step: Callable[[DisplayResults], None]) -> MeasurementSeries:
-        """
-        Takes a series of measurements and calls on_step after each one to update the GUI.
-        """
+    def take_measurement_series(
+            self,
+            zaber_positions: list[ZaberPosition],
+            call_update_gui: Callable[[DisplayResults], None]
+    ) -> MeasurementSeries:
         measurements = []
 
-        for i in range(n):
+        for i, zaber_pos in enumerate(zaber_positions):
             try:
-                self.log_message(f"Taking Measurement {i+1}")
+                self.log_message(
+                    f"Measurement {i + 1}: "
+                    f"Zaber (x,y,z) = ({zaber_pos.x:.2f},{zaber_pos.y:.2f},{zaber_pos.z:.2f}) µm"
+                )
+                self.zaber.set_zaber_position_by_class(zaber_position=zaber_pos)
 
                 frame = self.get_andor_frame()
                 fitting = self.get_fitted_spectrum(frame)
-                display_results = self.get_display_results(frame, fitting)
 
                 # Update GUI via provided callback
-                on_step(display_results)
+                display_results = self.get_display_results(frame, fitting)
+                call_update_gui(display_results)
 
-                result = self.get_measurement_data(frame, fitting)
-                measurements.append(result)
-
-                if which_axis and not self.is_reference_mode:
-                    try:
-                        self.zaber.move_rel(which_axis, step)
-                        pos = self.zaber.get_position(which_axis)
-                        self.log_message(f"Zaber {which_axis}-Axis moved by {step} µm to {pos:.2f} µm")
-                    except Exception as e:
-                        self.log_message(f"Zaber move failed: {e}")
+                measurement_point = MeasurementPoint(
+                    frame=frame,
+                    fitting_results=fitting,
+                    zaber_position=self.zaber.get_zaber_position_class(),
+                    mako_image=None
+                )
+                measurements.append(measurement_point)
 
             except Exception as e:
                 self.log_message(f"[Measurement] Error at index {i}: {e}")
 
-        return MeasurementSeries(measurements=measurements, calibration=self.calibration_results)
+        return MeasurementSeries(
+            measurements=measurements,
+            state_mode=self.get_current_state_mode(),
+            calibration=self.calibration_results
+        )
+
 
     def log_message(self, msg: str):
         """Optional helper to log messages — or use the signaller’s emit if needed."""
@@ -489,21 +497,10 @@ class BrillouinManager:
                              frame: np.ndarray,
                              fitting_results: FittedSpectrum) -> MeasurementPoint:
 
-        state_mode = self.get_current_state_mode()
-        if not self.do_save_images:
-            frame = None
-            state_mode.bg_image = None
-            state_mode.dark_noise_image = None
-
-        if self.is_reference_mode:
-            zaber_position = None
-        else:
-            zaber_position = self.zaber.get_zaber_position_class()
+        zaber_position = self.zaber.get_zaber_position_class()
 
         return MeasurementPoint(
-            is_reference_mode=self.is_reference_mode,
             frame=frame,
-            state_mode=state_mode,
             fitting_results = fitting_results,
             zaber_position=zaber_position,
             mako_image=None,

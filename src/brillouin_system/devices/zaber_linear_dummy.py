@@ -63,5 +63,14 @@ class ZaberLinearDummy:
     def get_available_axes(self) -> list[str]:
         return list(self._positions.keys())
 
+    def set_zaber_position_by_class(self, zaber_position: ZaberPosition):
+        axes = self.get_available_axes()
+        if zaber_position.x is not None and 'x' in axes:
+            self.move_abs('x', zaber_position.x)
+        if zaber_position.y is not None and 'y' in axes:
+            self.move_abs('y', zaber_position.y)
+        if zaber_position.z is not None and 'z' in axes:
+            self.move_abs('z', zaber_position.z)
+
     def close(self):
         print(f"[ZaberDummy] Shutdown: port {self.port}, axis {self.axis_index}")

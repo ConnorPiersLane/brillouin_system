@@ -3,13 +3,11 @@ from scipy.optimize import curve_fit
 
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 from brillouin_system.utils.brillouin_spectrum_fitting import (
-    _2Lorentzian,
-    find_brillouin_peak_locations,
-    select_top_two_peaks
+    _2Lorentzian, find_peak_locations, select_top_two_peaks
 )
-from brillouin_system.utils.fit_util import refine_fitted_spectrum, sort_lorentzian_peaks
-
-# Functions
+from brillouin_system.utils.gauss_fitting import _2Gaussian
+from brillouin_system.utils.voigt_fitting import _2Voigt
+from brillouin_system.utils.fit_util import refine_fitted_spectrum, sort_peaks
 
 def _quadratic(x, a, b, c):
     return a * x ** 2 + b * x + c
@@ -25,28 +23,29 @@ def _fit_background_quadratic(px, sline):
     )
     return popt
 
-def _spectrum_function_quadratic_bg(x, *para):
-    p_lorentzian = (*para[:6], 0)  # first 6 parameters + dummy offset
-    p_bg = para[6:]
-    return _2Lorentzian(x, *p_lorentzian) + _quadratic(x, *p_bg)
+def _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *para):
+    p_peaks = para[:7]
+    p_bg = para[7:]
 
-def fit_lorentzian_peaks_with_quadratic_bg(sline, is_reference_mode=False):
+    if peak_model == 'lorentzian':
+        return _2Lorentzian(x, *p_peaks) + _quadratic(x, *p_bg)
+    elif peak_model == 'gaussian':
+        return _2Gaussian(x, *p_peaks) + _quadratic(x, *p_bg)
+    elif peak_model == 'voigt':
+        return _2Voigt(x, *p_peaks, sigma_func) + _quadratic(x, *p_bg)
+    else:
+        raise ValueError(f"Unknown peak model: {peak_model}")
+
+def fit_peaks_with_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func=None):
     px = np.arange(sline.shape[0])
 
-    # --- Fit background ---
     p_guess_bg = _fit_background_quadratic(px, sline)
     sline_minus_bg = sline - _quadratic(px, *p_guess_bg)
 
-    # --- Find peaks ---
-    pk_ind, pk_info = find_brillouin_peak_locations(sline_minus_bg, is_reference_mode=is_reference_mode)
+    pk_ind, pk_info = find_peak_locations(sline_minus_bg, is_reference_mode=is_reference_mode)
     if len(pk_ind) < 1:
-        return FittedSpectrum(
-            is_success=False,
-            sline=sline,
-            x_pixels=px,
-        )
+        return FittedSpectrum(is_success=False, sline=sline, x_pixels=px)
 
-    # --- Select top 2 peaks ---
     pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
     pk_wids = 0.5 * pk_info['widths']
     pk_hts = np.pi * pk_wids * pk_info['peak_heights']
@@ -57,44 +56,39 @@ def fit_lorentzian_peaks_with_quadratic_bg(sline, is_reference_mode=False):
         pk_wids = np.array([pk_wids[0], pk_wids[0]])
         pk_hts = np.array([pk_hts[0] / 2, pk_hts[0] / 2])
 
-    # --- Initial guesses ---
-    amp1_guess, cen1_guess, wid1_guess = pk_hts[0], pk_ind[0], pk_wids[0]
-    amp2_guess, cen2_guess, wid2_guess = pk_hts[1], pk_ind[1], pk_wids[1]
-
     p0 = (
-        amp1_guess, cen1_guess, wid1_guess,
-        amp2_guess, cen2_guess, wid2_guess,
+        pk_hts[0], pk_ind[0], pk_wids[0],
+        pk_hts[1], pk_ind[1], pk_wids[1],
+        0,  # offset placeholder
         *p_guess_bg
     )
 
-    # --- Bounds ---
-    lower_bounds = [0, 0, 0, 0, 0, 0, -np.inf, -np.inf, -np.inf]
-    upper_bounds = [np.inf, max(px), 20, np.inf, max(px), 20, np.inf, np.inf, np.inf]
+    lower_bounds = [0, 0, 0, 0, 0, 0, 0, -np.inf, -np.inf, -np.inf]
+    upper_bounds = [np.inf, max(px), 20, np.inf, max(px), 20, np.inf, np.inf, np.inf, np.inf]
 
-    # --- Fit full model ---
+    fit_func = lambda x, *params: _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *params)
+
     popt, _ = curve_fit(
-        _spectrum_function_quadratic_bg,
+        fit_func,
         px,
         sline,
         p0=p0,
         bounds=(lower_bounds, upper_bounds),
         maxfev=10000
     )
-
-    # --- Sort peaks consistently ---
-    popt[:7] = sort_lorentzian_peaks(popt[:7])
+    popt[:7] = sort_peaks(popt[:7])
 
     return popt
 
-def get_fitted_spectrum_quadratic_bg(sline, is_reference_mode=False):
-    popt = fit_lorentzian_peaks_with_quadratic_bg(sline, is_reference_mode=is_reference_mode)
+def get_fitted_spectrum_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func=None):
     px = np.arange(sline.shape[0])
 
-    # --- Evaluate fit ---
-    fitted_spectrum = _spectrum_function_quadratic_bg(px, *popt)
-    x_fit, y_fit = refine_fitted_spectrum(_spectrum_function_quadratic_bg, px, popt, factor=10)
+    popt = fit_peaks_with_quadratic_bg(sline, is_reference_mode, peak_model, sigma_func)
+    fit_func = lambda x, *params: _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *params)
 
-    # --- Unpack Lorentzian parameters ---
+    fitted_spectrum = fit_func(px, *popt)
+    x_fit, y_fit = refine_fitted_spectrum(fit_func, px, popt, factor=10)
+
     amp1, cen1, wid1, amp2, cen2, wid2 = popt[:6]
     inter_peak_distance = abs(cen2 - cen1)
 
@@ -105,7 +99,7 @@ def get_fitted_spectrum_quadratic_bg(sline, is_reference_mode=False):
         fitted_spectrum=fitted_spectrum,
         x_fit_refined=x_fit,
         y_fit_refined=y_fit,
-        lorentzian_parameters=popt,
+        parameters=popt,
         left_peak_center_px=float(cen1),
         left_peak_width_px=float(wid1),
         left_peak_amplitude=float(amp1),

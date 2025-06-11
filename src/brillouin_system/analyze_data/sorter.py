@@ -14,11 +14,11 @@ def sort_fitted_spectrum_peaks(spectrum: FittedSpectrum) -> FittedSpectrum:
     Returns:
         FittedSpectrum: The corrected spectrum with ordered peaks.
     """
-    if not spectrum.is_success or spectrum.lorentzian_parameters is None:
+    if not spectrum.is_success or spectrum.parameters is None:
         return spectrum  # No sorting needed or possible
 
     # Unpack parameters
-    amp1, cen1, wid1, amp2, cen2, wid2, offset = spectrum.lorentzian_parameters
+    amp1, cen1, wid1, amp2, cen2, wid2, offset = spectrum.parameters
 
     if cen1 <= cen2:
         return spectrum  # Already ordered correctly
@@ -30,6 +30,6 @@ def sort_fitted_spectrum_peaks(spectrum: FittedSpectrum) -> FittedSpectrum:
     spectrum.inter_peak_distance = abs(cen2 - cen1)
 
     # Sort lorentzian_parameters to reflect this
-    spectrum.lorentzian_parameters = np.array([amp2, cen2, wid2, amp1, cen1, wid1, offset])
+    spectrum.parameters = np.array([amp2, cen2, wid2, amp1, cen1, wid1, offset])
 
     return spectrum

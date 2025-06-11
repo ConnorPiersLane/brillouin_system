@@ -11,9 +11,7 @@ from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 
 @dataclass
 class MeasurementPoint:
-    is_reference_mode: bool
     frame: np.ndarray  # Original frame, not subtracted
-    state_mode: StateMode
     fitting_results: FittedSpectrum
     zaber_position: ZaberPosition | None
     mako_image: np.ndarray | None
@@ -21,4 +19,5 @@ class MeasurementPoint:
 @dataclass
 class MeasurementSeries:
     measurements: list[MeasurementPoint]
+    state_mode: StateMode
     calibration: CalibrationResults

@@ -738,16 +738,15 @@ class BrillouinViewer(QWidget):
 
 
 
-
     def take_measurements(self):
         try:
             n = int(self.num_images_input.text())
-            auto_move = self.move_stage_checkbox.isChecked()
-            step_size = float(self.zaber_step_input.text())
-            if auto_move:
-                axis = self.zaber_axis_selector.currentData()
+            axis = self.zaber_axis_selector.currentData()
+
+            if self.move_stage_checkbox.isChecked():
+                step_size = float(self.zaber_step_input.text())
             else:
-                axis = ''
+                step_size = 0
 
             self.stop_live_requested.emit()
             QApplication.processEvents()

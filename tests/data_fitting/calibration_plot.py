@@ -31,7 +31,7 @@ def test_show_calibration_plot():
                 fitted_spectrum=np.zeros(10),
                 x_fit_refined=np.zeros(10),
                 y_fit_refined=np.zeros(10),
-                lorentzian_parameters=np.full(7, np.nan),
+                parameters=np.full(7, np.nan),
                 left_peak_center_px=ip + 3,
                 left_peak_width_px=np.nan,
                 left_peak_amplitude=np.nan,

@@ -10,8 +10,6 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from brillouin_system.config.config import CalibrationConfig
-from brillouin_system.my_dataclasses.background_image import ImageStatistics
-from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 from brillouin_system.my_dataclasses.state_mode import StateMode
 
@@ -23,7 +21,6 @@ class CalibrationMeasurementPoint:
     """
     frame: np.ndarray  # Original frame, not background subtracted
     microwave_freq: float  # Actually measured frequency (GHz)
-    state_mode: StateMode
     fitting_results: FittedSpectrum
 
 
@@ -33,6 +30,7 @@ class MeasurementsPerFreq:
     Contains all measurements taken for a given set frequency.
     """
     set_freq_ghz: float
+    state_mode: StateMode
     cali_meas_points: List[CalibrationMeasurementPoint]
 
 

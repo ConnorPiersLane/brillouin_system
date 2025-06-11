@@ -21,7 +21,7 @@ def test_calibration_fit():
             fitted_spectrum=np.zeros(10),     # dummy
             x_fit_refined=np.zeros(10),       # dummy
             y_fit_refined=np.zeros(10),       # dummy
-            lorentzian_parameters=np.full(7, np.nan),  # not used
+            parameters=np.full(7, np.nan),  # not used
             left_peak_center_px=ip+3,
             left_peak_width_px=np.nan,
             left_peak_amplitude=np.nan,

@@ -34,7 +34,7 @@ class ZaberLinearController:
 
         Args:
             which_axis: 'x', 'y', 'z'
-            position_um:
+            position_um: [um]
 
         Returns:
 
@@ -43,10 +43,11 @@ class ZaberLinearController:
         self.axis_map[which_axis].move_absolute(position_um, Units.LENGTH_MICROMETRES)
         self.axis_map[which_axis].wait_until_idle()
 
-    def move_rel(self, which_axis: str, delta_um):
+    def move_rel(self, which_axis: str, delta_um: float):
         """
         Args:
             which_axis: 'x', 'y', 'z'
+            delta_um; [um]
         """
         self.axis_map[which_axis].move_relative(delta_um, Units.LENGTH_MICROMETRES)
         self.axis_map[which_axis].wait_until_idle()

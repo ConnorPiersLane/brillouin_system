@@ -1,21 +1,55 @@
-
+import numpy as np
 from scipy.optimize import curve_fit
 
-import numpy as np
-
-
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
-from brillouin_system.utils.fit_util import find_brillouin_peak_locations, select_top_two_peaks, _2Lorentzian, \
-    sort_lorentzian_peaks, refine_fitted_spectrum
+from brillouin_system.utils.fit_util import (
+    find_peak_locations,
+    select_top_two_peaks,
+    sort_peaks,
+    refine_fitted_spectrum
+)
 
 
-def get_fitted_spectrum_lorentzian(px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
 
-    pix = px
+def _2Lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offs):
+    return (amp1 * wid1 ** 2 / ((x - cen1) ** 2 + wid1 ** 2)) + \
+           (amp2 * wid2 ** 2 / ((x - cen2) ** 2 + wid2 ** 2)) + offs
+
+def _generate_initial_guess_lorentzian(pk_ind, pk_info, sline):
+    """
+    Generate initial guess parameters for a double Lorentzian fit.
+    """
+    pk_wids = 0.5 * pk_info['widths']
+    pk_hts = np.pi * pk_wids * pk_info['peak_heights']  # Lorentzian area estimate
+
+    if len(pk_ind) == 1:
+        offset = max(int(0.02 * len(sline)), 1)
+        pk_ind = np.array([pk_ind[0] - offset, pk_ind[0] + offset])
+        pk_wids = np.array([pk_wids[0], pk_wids[0]])
+        pk_hts = np.array([pk_hts[0] / 2, pk_hts[0] / 2])
+
+    p0 = [
+        pk_hts[0], pk_ind[0], pk_wids[0],
+        pk_hts[1], pk_ind[1], pk_wids[1],
+        np.amin(sline)
+    ]
+    return p0
+
+
+
+
+
+def get_fitted_spectrum_generic(sline: np.ndarray,
+                                is_reference_mode: bool,
+                                model_function,
+                                p0_generator) -> FittedSpectrum:
+    """
+    Generic spectrum fitting function.
+    """
+    pix = np.arange(sline.shape[0])
     sline = np.clip(sline, 0, None)
-    pk_ind, pk_info = find_brillouin_peak_locations(sline, is_reference_mode=is_reference_mode)
 
-
+    pk_ind, pk_info = find_peak_locations(sline, is_reference_mode=is_reference_mode)
     if len(pk_ind) < 1:
         return FittedSpectrum(
             is_success=False,
@@ -24,26 +58,15 @@ def get_fitted_spectrum_lorentzian(px: np.ndarray, sline: np.ndarray, is_referen
         )
 
     pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
-
-    pk_wids = 0.5 * pk_info['widths']
-    pk_hts = np.pi * pk_wids * pk_info['peak_heights']
-
-    if len(pk_ind) == 1:
-        offset = max(int(0.02 * len(sline)), 1)
-        pk_ind = np.array([pk_ind[0] - offset, pk_ind[0] + offset])
-        pk_wids = np.array([pk_wids[0], pk_wids[0]])
-        pk_hts = np.array([pk_hts[0] / 2, pk_hts[0] / 2])
-
-    p0 = [pk_hts[0], pk_ind[0], pk_wids[0],
-          pk_hts[1], pk_ind[1], pk_wids[1], np.amin(sline)]
+    p0 = p0_generator(pk_ind, pk_info, sline)
 
     try:
         n_pix = len(pix)
-        lower_bounds = [0, 0, 0, 0, 0, 0, 0]  # amps, centers, widths >= 0
+        lower_bounds = [0, 0, 0, 0, 0, 0, 0]
         upper_bounds = [np.inf, n_pix, n_pix/2, np.inf, n_pix, n_pix/2, np.inf]
 
         popt, _ = curve_fit(
-            _2Lorentzian,
+            model_function,
             pix,
             sline,
             p0=p0,
@@ -51,11 +74,10 @@ def get_fitted_spectrum_lorentzian(px: np.ndarray, sline: np.ndarray, is_referen
             maxfev=10000
         )
 
-        amp1, cen1, wid1, amp2, cen2, wid2, offset = sort_lorentzian_peaks(popt)
+        amp1, cen1, wid1, amp2, cen2, wid2, offset = sort_peaks(popt)
 
-        fittedSpect = _2Lorentzian(pix, *popt)
-
-        x_fit, y_fit = refine_fitted_spectrum(_2Lorentzian, pix, popt, factor=10)
+        fittedSpect = model_function(pix, *popt)
+        x_fit, y_fit = refine_fitted_spectrum(model_function, pix, popt, factor=10)
 
         fitted_spectrum = FittedSpectrum(
             is_success=True,
@@ -64,7 +86,7 @@ def get_fitted_spectrum_lorentzian(px: np.ndarray, sline: np.ndarray, is_referen
             fitted_spectrum=fittedSpect,
             x_fit_refined=x_fit,
             y_fit_refined=y_fit,
-            lorentzian_parameters=popt,
+            parameters=popt,
             left_peak_center_px=float(cen1),
             left_peak_width_px=float(wid1),
             left_peak_amplitude=float(amp1),
@@ -83,4 +105,16 @@ def get_fitted_spectrum_lorentzian(px: np.ndarray, sline: np.ndarray, is_referen
         )
 
     return fitted_spectrum
+
+
+def get_fitted_spectrum_lorentzian(sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
+    """
+    Fit using a double Lorentzian model.
+    """
+    return get_fitted_spectrum_generic(
+        sline,
+        is_reference_mode,
+        model_function=_2Lorentzian,
+        p0_generator=_generate_initial_guess_lorentzian
+    )
 

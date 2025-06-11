@@ -1,7 +1,6 @@
 from contextlib import contextmanager
-from typing import Callable
 
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication, QThread
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 import time
 
 from brillouin_system.config.config import calibration_config
@@ -9,11 +8,7 @@ from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinMan
 from brillouin_system.my_dataclasses.background_image import BackGroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
-from brillouin_system.my_dataclasses.measurements import MeasurementSeries
-
-
-
-
+from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
 
 
 class BrillouinSignaller(QObject):
@@ -320,7 +315,7 @@ class BrillouinSignaller(QObject):
 
         try:
             with self.force_reference_mode():
-                success = self.manager.perform_calibration(config, on_step=self.emit_display_result)
+                success = self.manager.perform_calibration(config, call_update_gui=self.emit_display_result)
 
             if success:
                 self.calibration_finished.emit()
@@ -333,15 +328,30 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot(int, str, float)
     def take_measurements(self, n: int, which_axis: str, step: float):
+        """
+        Generates a series of ZaberPositions using the given axis, n, and step,
+        then takes measurements and updates the GUI accordingly.
+        """
         self._gui_ready = True
 
         try:
-            # Pass the GUI update callback down to the manager
-            measurement_series = self.manager.take_measurements(
-                n=n,
-                which_axis=which_axis,
+            # Generate ZaberPositions
+            # Current position:
+            start = self.manager.zaber.get_position(which_axis) # or any default you want
+
+            fixed_positions = {}  # optionally set this if you have known values
+            zaber_positions = generate_zaber_positions(
+                axis=which_axis,
+                start=start,
                 step=step,
-                on_step=self._update_gui
+                n=n,
+                fixed_positions=fixed_positions
+            )
+
+            # Pass the GUI update callback down to the manager
+            measurement_series = self.manager.take_measurement_series(
+                zaber_positions=zaber_positions,
+                call_update_gui=self._update_gui
             )
 
             # Emit the final result
@@ -349,8 +359,6 @@ class BrillouinSignaller(QObject):
 
         except Exception as e:
             self.log_message.emit(f"[Measurement] Exception: {e}")
-
-
 
     @pyqtSlot()
     def close(self):

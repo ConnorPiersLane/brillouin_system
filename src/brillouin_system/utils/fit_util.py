@@ -2,7 +2,7 @@ import numpy as np
 from scipy.signal import find_peaks
 from brillouin_system.config.config import find_peaks_reference_config, find_peaks_sample_config, andor_frame_config
 
-def get_px_and_sline_from_image(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
     """
     Sum the specified vertical rows in the image to produce the Brillouin sline.
     If the row list is invalid or empty, use the full vertical range.
@@ -23,12 +23,12 @@ def get_px_and_sline_from_image(frame: np.ndarray) -> tuple[np.ndarray, np.ndarr
         rows = list(range(height))
 
     sline = frame[rows, :].sum(axis=0)
-    px = np.arange(sline.shape[0])
-    return px, sline
+
+    return sline
 
 
 
-def find_brillouin_peak_locations(sline, is_reference_mode: bool):
+def find_peak_locations(sline, is_reference_mode: bool):
 
     if is_reference_mode:
         find_peak_config = find_peaks_reference_config.get()
@@ -92,9 +92,8 @@ def select_top_two_peaks(pk_ind, pk_info):
 
     return selected_pk_ind, selected_pk_info
 
-def _2Lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offs):
-    return (amp1 * wid1 ** 2 / ((x - cen1) ** 2 + wid1 ** 2)) + \
-           (amp2 * wid2 ** 2 / ((x - cen2) ** 2 + wid2 ** 2)) + offs
+
+
 
 def refine_fitted_spectrum(function, x_pixels: np.ndarray, parameters: tuple, factor: int):
     """
@@ -122,7 +121,7 @@ def refine_fitted_spectrum(function, x_pixels: np.ndarray, parameters: tuple, fa
 
     return x_fit, y_fit
 
-def sort_lorentzian_peaks(params: np.ndarray | list) -> np.ndarray:
+def sort_peaks(params: np.ndarray | list) -> np.ndarray:
     """
     Ensure Lorentzian fit parameters are sorted by peak center positions (left-to-right).
 

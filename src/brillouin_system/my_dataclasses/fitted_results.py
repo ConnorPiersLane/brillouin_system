@@ -10,7 +10,7 @@ class FittedSpectrum:
     fitted_spectrum: np.ndarray = field(default=None)
     x_fit_refined: np.ndarray = field(default=None)
     y_fit_refined: np.ndarray = field(default=None)
-    lorentzian_parameters: np.ndarray = field(default=None)
+    parameters: np.ndarray = field(default=None)
     left_peak_center_px: float = None
     left_peak_width_px: float = None
     left_peak_amplitude: float = None
@@ -18,8 +18,6 @@ class FittedSpectrum:
     right_peak_width_px: float = None
     right_peak_amplitude: float = None
     inter_peak_distance: float = None
-
-
 
 
 
