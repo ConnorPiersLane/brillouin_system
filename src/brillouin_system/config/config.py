@@ -66,6 +66,7 @@ class AndorFrameSettings:
     hbin: int
     amp_mode_index: int
 
+#TODO: remove amp_mode_index
 # ---------- Load/save helpers ----------
 
 find_peaks_config_toml_path = Path(__file__).parent.resolve() / "config.toml"
