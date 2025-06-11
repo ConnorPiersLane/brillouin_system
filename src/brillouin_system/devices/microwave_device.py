@@ -47,9 +47,12 @@ class Microwave:
         return self.port.readline().decode().strip()
 
     def get_frequency(self) -> float:
-        self.port.write(b'FREQ:CW?\n')  # try asking for signal generator setting
-        result = self.port.readline()
-        freq = float(result[:-6])*1e-9
+        self.port.write(b'FREQ:CW?\n')
+        result = self.port.readline().decode().strip().upper()
+        # Remove 'HZ' suffix if present
+        if result.endswith('HZ'):
+            result = result[:-2]
+        freq = float(result) * 1e-9  # Convert from Hz to GHz
         return freq
 
     def set_frequency(self, freq_ghz: float):
