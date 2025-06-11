@@ -215,7 +215,8 @@ class BrillouinSignaller(QObject):
     def set_microwave_frequency(self, freq: float):
         try:
             self.manager.microwave.set_frequency(freq)
-            self.log_message.emit(f"Microwave frequency set to {freq:.3f} GHz")
+            freq_real = self.manager.microwave.get_frequency()
+            self.log_message.emit(f"Microwave frequency set to {freq_real:.3f} GHz")
             self.microwave_frequency_updated.emit(freq)
         except Exception as e:
             self.log_message.emit(f"Failed to set microwave frequency: {e}")

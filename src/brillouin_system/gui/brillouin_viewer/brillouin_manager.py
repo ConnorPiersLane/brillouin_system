@@ -192,13 +192,14 @@ class BrillouinManager:
         andor_config = andor_frame_config.get()
 
         n_bg_images = andor_config.n_bg_images
+        print(f"[BrillouinManager] Taking {n_bg_images} Background Images...")
         n_images = self.take_n_images(n_bg_images)
 
         if isinstance(self.camera, DummyCamera):
             n_images = n_images * 0.8
 
 
-        print("[BrillouinManager] Background Image acquired.")
+        print("[BrillouinManager] ...Background Images acquired.")
 
 
         if self.is_sample_illumination_continuous:
