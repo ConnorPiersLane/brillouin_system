@@ -64,6 +64,19 @@ class Calibration:
         x_px_arr = np.asarray(x_px)
         return self.a * x_px_arr ** 2 + self.b * x_px_arr + self.c
 
+    def get_dfreq(self, dx_px: Union[float, List[float], np.ndarray]) -> np.ndarray:
+        """
+        Calculate the derivative (df/dx)*dx_px from pixel positions using the quadratic model.
+
+        Args:
+            dx_px: delta pixel positions (float, list, or np.ndarray)
+
+        Returns:
+            np.ndarray: corresponding frequencies in GHz
+        """
+        dx_px_arr = np.asarray(dx_px)
+        return 2 * self.a * dx_px_arr + self.b
+
 
 @dataclass
 class CalibrationResults:
@@ -74,8 +87,8 @@ class CalibrationResults:
     left_pixel: Calibration
     right_pixel: Calibration
     peak_distance: Calibration
-    sigma_func_left: Optional[Callable[[float], float]] = None
-    sigma_func_right: Optional[Callable[[float], float]] = None
+    sigma_func_left_px: Optional[Callable[[float], float]] = None
+    sigma_func_right_px: Optional[Callable[[float], float]] = None
 
     def get_calibration(self, config: CalibrationConfig) -> Calibration:
         if config.reference == "left":
@@ -151,8 +164,8 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
         left_pixel=fit(left_px, freqs),
         right_pixel=fit(right_px, freqs),
         peak_distance=fit(inter_px, freqs),
-        sigma_func_left=left_sigma_func,
-        sigma_func_right=right_sigma_func
+        sigma_func_left_px=left_sigma_func,
+        sigma_func_right_px=right_sigma_func
     )
 
 
