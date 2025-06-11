@@ -9,7 +9,6 @@ from brillouin_system.utils.gauss_fitting import _2Gaussian
 from brillouin_system.utils.voigt_fitting import _2Voigt
 from brillouin_system.utils.fit_util import refine_fitted_spectrum, sort_peaks
 
-# Logistic step background functions (unchanged)
 def _logistic_step(x, x0, k):
     u = -k * (x - x0)
     u_clipped = np.clip(u, -500, 500)
@@ -52,7 +51,7 @@ def fit_background_as_logistic_step_and_quadratic(px, sline):
     )
     return popt
 
-def _spectrum_function(x, peak_model, sigma_func, *para):
+def _spectrum_function(x, peak_model, sigma_func_left, sigma_func_right, *para):
     p_peaks = para[:7]
     p_bg = para[7:]
 
@@ -61,11 +60,11 @@ def _spectrum_function(x, peak_model, sigma_func, *para):
     elif peak_model == 'gaussian':
         return _2Gaussian(x, *p_peaks) + _logistic_step_and_quadratic(x, *p_bg)
     elif peak_model == 'voigt':
-        return _2Voigt(x, *p_peaks, sigma_func) + _logistic_step_and_quadratic(x, *p_bg)
+        return _2Voigt(x, *p_peaks, sigma_func_left, sigma_func_right) + _logistic_step_and_quadratic(x, *p_bg)
     else:
         raise ValueError(f"Unknown peak model: {peak_model}")
 
-def fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func=None):
+def fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func_left=None, sigma_func_right=None):
     px = np.arange(sline.shape[0])
 
     p_guess_bg = fit_background_as_logistic_step_and_quadratic(px, sline)
@@ -89,7 +88,7 @@ def fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=False
     p0 = (
         pk_hts[0], pk_ind[0], pk_wids[0],
         pk_hts[1], pk_ind[1], pk_wids[1],
-        0,  # offset placeholder for peak model
+        0,  # offset placeholder
         *p_guess_bg
     )
 
@@ -97,7 +96,7 @@ def fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=False
     lower_bounds = [0, 0, 0, 0, 0, 0, 0] + lower_bounds_bg
     upper_bounds = [np.inf, max(px), 20, np.inf, max(px), 20, np.inf] + upper_bounds_bg
 
-    fit_func = lambda x, *params: _spectrum_function(x, peak_model, sigma_func, *params)
+    fit_func = lambda x, *params: _spectrum_function(x, peak_model, sigma_func_left, sigma_func_right, *params)
 
     popt, _ = curve_fit(
         fit_func,
@@ -111,11 +110,11 @@ def fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode=False
 
     return popt
 
-def get_fitted_spectrum_llq(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func=None):
+def get_fitted_spectrum_llq(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func_left=None, sigma_func_right=None):
     px = np.arange(sline.shape[0])
 
-    popt = fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode, peak_model, sigma_func)
-    fit_func = lambda x, *params: _spectrum_function(x, peak_model, sigma_func, *params)
+    popt = fit_peaks_with_logistic_step_and_quadratic_bg(sline, is_reference_mode, peak_model, sigma_func_left, sigma_func_right)
+    fit_func = lambda x, *params: _spectrum_function(x, peak_model, sigma_func_left, sigma_func_right, *params)
 
     fitted_spectrum = fit_func(px, *popt)
     x_fit, y_fit = refine_fitted_spectrum(fit_func, px, popt, factor=10)

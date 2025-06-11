@@ -23,7 +23,7 @@ def _fit_background_quadratic(px, sline):
     )
     return popt
 
-def _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *para):
+def _spectrum_function_quadratic_bg(x, peak_model, sigma_func_left, sigma_func_right, *para):
     p_peaks = para[:7]
     p_bg = para[7:]
 
@@ -32,11 +32,11 @@ def _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *para):
     elif peak_model == 'gaussian':
         return _2Gaussian(x, *p_peaks) + _quadratic(x, *p_bg)
     elif peak_model == 'voigt':
-        return _2Voigt(x, *p_peaks, sigma_func) + _quadratic(x, *p_bg)
+        return _2Voigt(x, *p_peaks, sigma_func_left, sigma_func_right) + _quadratic(x, *p_bg)
     else:
         raise ValueError(f"Unknown peak model: {peak_model}")
 
-def fit_peaks_with_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func=None):
+def fit_peaks_with_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func_left=None, sigma_func_right=None):
     px = np.arange(sline.shape[0])
 
     p_guess_bg = _fit_background_quadratic(px, sline)
@@ -66,7 +66,7 @@ def fit_peaks_with_quadratic_bg(sline, is_reference_mode=False, peak_model='lore
     lower_bounds = [0, 0, 0, 0, 0, 0, 0, -np.inf, -np.inf, -np.inf]
     upper_bounds = [np.inf, max(px), 20, np.inf, max(px), 20, np.inf, np.inf, np.inf, np.inf]
 
-    fit_func = lambda x, *params: _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *params)
+    fit_func = lambda x, *params: _spectrum_function_quadratic_bg(x, peak_model, sigma_func_left, sigma_func_right, *params)
 
     popt, _ = curve_fit(
         fit_func,
@@ -80,11 +80,11 @@ def fit_peaks_with_quadratic_bg(sline, is_reference_mode=False, peak_model='lore
 
     return popt
 
-def get_fitted_spectrum_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func=None):
+def get_fitted_spectrum_quadratic_bg(sline, is_reference_mode=False, peak_model='lorentzian', sigma_func_left=None, sigma_func_right=None):
     px = np.arange(sline.shape[0])
 
-    popt = fit_peaks_with_quadratic_bg(sline, is_reference_mode, peak_model, sigma_func)
-    fit_func = lambda x, *params: _spectrum_function_quadratic_bg(x, peak_model, sigma_func, *params)
+    popt = fit_peaks_with_quadratic_bg(sline, is_reference_mode, peak_model, sigma_func_left, sigma_func_right)
+    fit_func = lambda x, *params: _spectrum_function_quadratic_bg(x, peak_model, sigma_func_left, sigma_func_right, *params)
 
     fitted_spectrum = fit_func(px, *popt)
     x_fit, y_fit = refine_fitted_spectrum(fit_func, px, popt, factor=10)

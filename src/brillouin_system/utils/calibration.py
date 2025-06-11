@@ -1,6 +1,6 @@
 import io
 from dataclasses import dataclass
-from typing import List, Union
+from typing import List, Union, Optional, Callable
 
 import numpy as np
 from PyQt5.QtGui import QImage, QPixmap
@@ -74,17 +74,10 @@ class CalibrationResults:
     left_pixel: Calibration
     right_pixel: Calibration
     peak_distance: Calibration
+    sigma_func_left: Optional[Callable[[float], float]] = None
+    sigma_func_right: Optional[Callable[[float], float]] = None
 
     def get_calibration(self, config: CalibrationConfig) -> Calibration:
-        """
-        Get the appropriate calibration based on the user's selection.
-
-        Args:
-            config: CalibrationConfig specifying reference
-
-        Returns:
-            Calibration object
-        """
         if config.reference == "left":
             return self.left_pixel
         elif config.reference == "right":
@@ -94,17 +87,33 @@ class CalibrationResults:
         else:
             raise ValueError(f"Unknown calibration reference: {config.reference}")
 
-
-def calibrate(data: CalibrationData) -> CalibrationResults:
+def create_sigma_func(positions: np.ndarray, sigmas: np.ndarray) -> callable:
     """
-    Fits calibration curves for all valid measurement points using a quadratic model.
+    Create an interpolating function for PSF sigma as a function of pixel position.
 
     Args:
-        data: CalibrationData containing all measurement points
+        positions: Array of pixel positions where PSF sigma was measured.
+        sigmas: Array of corresponding PSF sigma values.
 
     Returns:
-        CalibrationResults with fit parameters for each reference
+        A function sigma_func(x) that interpolates sigma at position x.
     """
+    sorted_indices = np.argsort(positions)
+    sorted_positions = positions[sorted_indices]
+    sorted_sigmas = sigmas[sorted_indices]
+
+    def sigma_func(x):
+        return np.interp(
+            x,
+            sorted_positions,
+            sorted_sigmas,
+            left=sorted_sigmas[0],
+            right=sorted_sigmas[-1]
+        )
+
+    return sigma_func
+
+def calibrate(data: CalibrationData) -> CalibrationResults:
     all_fits = []
     freqs = []
 
@@ -112,7 +121,7 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
         for point in freq_block.cali_meas_points:
             if point.fitting_results.is_success:
                 all_fits.append(point.fitting_results)
-                freqs.append(point.microwave_freq)  # use measured freq!
+                freqs.append(point.microwave_freq)
 
     freqs = np.array(freqs)
     left_px = np.array([fs.left_peak_center_px for fs in all_fits])
@@ -125,12 +134,27 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
             return Calibration(a=np.nan, b=np.nan, c=np.nan)
         return Calibration(*np.polyfit(x, y, deg=2))
 
+    # Build sigma lookup functions for left and right peaks separately
+    left_sigma_positions = np.array([fs.left_peak_center_px for fs in all_fits])
+    left_sigmas = np.array([fs.left_peak_width_px for fs in all_fits])
+
+    right_sigma_positions = np.array([fs.right_peak_center_px for fs in all_fits])
+    right_sigmas = np.array([fs.right_peak_width_px for fs in all_fits])
+
+    sorted_left = np.argsort(left_sigma_positions)
+    sorted_right = np.argsort(right_sigma_positions)
+    left_sigma_func = create_sigma_func(left_sigma_positions, left_sigmas)
+    right_sigma_func = create_sigma_func(right_sigma_positions, right_sigmas)
+
     return CalibrationResults(
         data=data,
         left_pixel=fit(left_px, freqs),
         right_pixel=fit(right_px, freqs),
         peak_distance=fit(inter_px, freqs),
+        sigma_func_left=left_sigma_func,
+        sigma_func_right=right_sigma_func
     )
+
 
 
 def get_calibration_fig(calibration_result: CalibrationResults, reference: str) -> Figure:
