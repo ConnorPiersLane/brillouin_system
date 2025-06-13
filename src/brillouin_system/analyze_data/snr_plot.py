@@ -24,7 +24,7 @@ def extract_snr_and_energy(series_path: str, reference: str):
     all_snrs = []
 
     for series in series_list:
-        calibration = series.calibration
+        calibration = series.calibration_data
 
         def get_freq(px):
             if reference == "left":
@@ -107,7 +107,7 @@ for label, path in series_paths.items():
     energies = []
 
     for series in series_list:
-        calibration = series.calibration
+        calibration = series.calibration_data
 
         def get_freq(px):
             if reference == "left":
@@ -165,7 +165,7 @@ for series in series_list:
     if abs(t_exp - target_exposure) > 1e-3:
         continue
 
-    calibration = series.calibration
+    calibration = series.calibration_data
 
     def get_freq(px):
         if reference == "left":

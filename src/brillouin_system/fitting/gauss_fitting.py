@@ -1,7 +1,7 @@
 import numpy as np
 
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
-from brillouin_system.utils.brillouin_spectrum_fitting import get_fitted_spectrum_generic
+from brillouin_system.fitting.fit_util import get_fitted_spectrum_generic
 
 
 def _2Gaussian(x, amp1, cen1, wid1, amp2, cen2, wid2, offs):

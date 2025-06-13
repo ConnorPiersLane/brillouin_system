@@ -2,7 +2,7 @@ import numpy as np
 from scipy.special import wofz
 
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
-from brillouin_system.utils.brillouin_spectrum_fitting import get_fitted_spectrum_generic
+from brillouin_system.fitting.fit_util import get_fitted_spectrum_generic
 
 def voigt_fwhm(gamma, sigma):
     gamma_fwhm = 2 * gamma

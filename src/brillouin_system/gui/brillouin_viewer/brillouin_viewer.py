@@ -6,7 +6,7 @@ import numpy as np
 from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
-    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QDialog, QVBoxLayout, QCheckBox, QComboBox
+    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -14,19 +14,17 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 
 from brillouin_system.config.config import calibration_config
-from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
-from brillouin_system.devices.zaber_linear import ZaberLinearController
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
-from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
-from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
+from brillouin_system.devices.microwave_device import MicrowaveDummy
+from brillouin_system.devices.shutter_device import ShutterManagerDummy
 
 from brillouin_system.my_dataclasses.background_image import BackGroundImage
-from brillouin_system.my_dataclasses.measurements import MeasurementSeries
-from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
-from brillouin_system.utils.calibration import CalibrationResults, render_calibration_to_pixmap, CalibrationImageDialog
+from brillouin_system.my_dataclasses.measurements import MeasurementSettings
+from brillouin_system.my_dataclasses.calibration import CalibrationResults, render_calibration_to_pixmap, \
+    CalibrationImageDialog, CalibrationData
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
@@ -48,22 +46,22 @@ brillouin_manager = BrillouinManager(
 )
 
 #
-# # # Real
-brillouin_manager = BrillouinManager(
-        camera=IxonUltra(
-            index = 0,
-            temperature = "off", #"off"
-            fan_mode = "full",
-            x_start = 40, x_end  = 120,
-            y_start= 300, y_end  = 315,
-            vbin= 1, hbin  = 1,
-            verbose = True,
-        ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber=ZaberLinearController(),
-    is_sample_illumination_continuous=True
-)
+# # # # Real
+# brillouin_manager = BrillouinManager(
+#         camera=IxonUltra(
+#             index = 0,
+#             temperature = "off", #"off"
+#             fan_mode = "full",
+#             x_start = 40, x_end  = 120,
+#             y_start= 300, y_end  = 315,
+#             vbin= 1, hbin  = 1,
+#             verbose = True,
+#         ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber=ZaberLinearController(),
+#     is_sample_illumination_continuous=True
+# )
 
 
 class BrillouinViewer(QWidget):
@@ -84,8 +82,7 @@ class BrillouinViewer(QWidget):
     move_zaber_requested = pyqtSignal(str, float)
     request_zaber_position = pyqtSignal(str)
     run_calibration_requested = pyqtSignal()
-    take_measurement_requested = pyqtSignal(int, str, float)
-    toggle_save_images_requested = pyqtSignal(bool)
+    take_measurement_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
@@ -120,7 +117,6 @@ class BrillouinViewer(QWidget):
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
         self.take_measurement_requested.connect(self.brillouin_signaller.take_measurements)
         self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
-        self.toggle_save_images_requested.connect(self.brillouin_signaller.set_save_images_state)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
@@ -435,10 +431,19 @@ class BrillouinViewer(QWidget):
 
         form_layout = QFormLayout()
 
+        # Number of Measurements
         self.num_images_input = QLineEdit("10")
         self.num_images_input.setValidator(QIntValidator(1, 9999))
         form_layout.addRow("Number of Measurements:", self.num_images_input)
 
+        # Name of Series
+        self.series_name_input = QLineEdit()
+        form_layout.addRow("Name:", self.series_name_input)
+
+        # Power input
+        self.power_input = QLineEdit()
+        self.power_input.setValidator(QDoubleValidator(0.0, 1000.0, 2))
+        form_layout.addRow("Power [mW]:", self.power_input)
 
         layout.addLayout(form_layout)
 
@@ -448,14 +453,11 @@ class BrillouinViewer(QWidget):
 
         self.measurement_series_label = QLabel("Stored Series: 0")
         # layout.addWidget(self.measurement_series_label)
-        self.save_images_checkbox = QCheckBox("Save Images")
-        self.save_images_checkbox.setChecked(True)
-        self.save_images_checkbox.stateChanged.connect(self.on_save_images_toggled)
 
         row = QHBoxLayout()
         row.addWidget(self.measurement_series_label)
         # row.addStretch()
-        row.addWidget(self.save_images_checkbox)
+
 
         layout.addLayout(row)
 
@@ -700,17 +702,19 @@ class BrillouinViewer(QWidget):
         self.save_calib_btn.setEnabled(True)
         print(f"[Brillouin Viewer] Calibration available")
 
-    def handle_requested_calibration(self, cali_results: CalibrationResults):
+    def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationResults]):
+        cali_data = received_cali[0]
+        cali_results = received_cali[1]
         if self._show_cali:
             try:
-                pixmap = render_calibration_to_pixmap(cali_results, calibration_config.get().reference)
+                pixmap = render_calibration_to_pixmap(cali_data, cali_results, calibration_config.get().reference)
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
                 print("[Brillouin Viewer] Calibration plot displayed.")
             except Exception as e:
                 print(f"[Brillouin Viewer] Failed to plot calibration: {e}")
         elif self._save_cali:
-            data = cali_results
+            data = cali_data
             if data is None:
                 print(f"[Brillouin Viewer] Failed to save data, no data availalbe")
                 return
@@ -734,8 +738,6 @@ class BrillouinViewer(QWidget):
         self._show_cali = False
         self._save_cali = True
 
-
-
     def take_measurements(self):
         try:
             n = int(self.num_images_input.text())
@@ -744,12 +746,31 @@ class BrillouinViewer(QWidget):
             if self.move_stage_checkbox.isChecked():
                 step_size = float(self.zaber_step_input.text())
             else:
-                step_size = 0
+                step_size = 0.0
+
+
+            name = self.series_name_input.text().strip()
+            power = float(self.power_input.text())
+
+            print(f"[Brillouin Viewer] Preparing to take {n} measurements along {axis}-axis "
+                  f"with step {step_size} µm. Name: '{name}', Power: {power:.2f} mW")
 
             self.stop_live_requested.emit()
             QApplication.processEvents()
 
-            self.take_measurement_requested.emit(n, axis, step_size)
+            measurement_settings = MeasurementSettings(
+                name = name,
+                n_measurements=n,
+                power_mW=power,
+                move_axes = 'x',
+                move_x_rel_um = step_size,
+                move_y_rel_um = 0.0,
+                move_z_rel_um = 0.0,
+            )
+
+
+            # If needed, you can pass name and power through a signal or store them for later use.
+            self.take_measurement_requested.emit(measurement_settings)
 
         except Exception as e:
             print(f"[Brillouin Viewer] Measurement setup failed: {e}")
@@ -759,8 +780,6 @@ class BrillouinViewer(QWidget):
         self.measurement_series_label.setText(f"Stored Series: {len(self._stored_measurements)}")
         self.start_live_requested.emit()
 
-    def on_save_images_toggled(self, state: int):
-        self.toggle_save_images_requested.emit(bool(state))
 
     def save_measurements_to_file(self):
         if not self._stored_measurements:

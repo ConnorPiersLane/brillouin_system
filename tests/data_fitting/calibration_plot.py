@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from brillouin_system.utils.calibration import (
+from brillouin_system.my_dataclasses.calibration import (
     CalibrationData,
     CalibrationResults,
     calibrate, get_calibration_fig,

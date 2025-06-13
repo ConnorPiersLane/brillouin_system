@@ -37,6 +37,11 @@ class ThreadSafeConfig:
             return asdict(self._data)
 
 # ---------- Config models ----------
+fitting_models_reference = ('gaussian', 'lorentzian')
+fitting_models_sample = ('lorentzian', 'voigt',
+                         'lorentzian_quad_bg', 'lorentzian_log_quad_bg',
+                         'voigt_quad_bg', 'voigt_log_quad_bg',)
+
 
 @dataclass
 class FindPeaksConfig:
@@ -45,6 +50,7 @@ class FindPeaksConfig:
     min_peak_height: int
     rel_height: float
     wlen_pixels: int
+    fitting_model: str
 
 @dataclass
 class CalibrationConfig:

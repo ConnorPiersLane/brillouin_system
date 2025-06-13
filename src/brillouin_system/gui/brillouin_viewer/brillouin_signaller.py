@@ -8,7 +8,7 @@ from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinMan
 from brillouin_system.my_dataclasses.background_image import BackGroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
-from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
+from brillouin_system.my_dataclasses.measurements import MeasurementSettings
 
 
 class BrillouinSignaller(QObject):
@@ -299,13 +299,10 @@ class BrillouinSignaller(QObject):
         self._gui_ready = False
         self.frame_and_fit_ready.emit(display_results)
 
-    @pyqtSlot(bool)
-    def set_save_images_state(self, do_save_images: bool):
-        self.manager.do_save_images = do_save_images
 
     @pyqtSlot()
     def get_calibration_results(self):
-        self.calibration_result_ready.emit(self.manager.calibration_results)
+        self.calibration_result_ready.emit((self.manager.calibration_data, self.manager.calibration_results))
 
     def emit_display_result(self, display: DisplayResults):
         self.frame_and_fit_ready.emit(display)
@@ -327,8 +324,8 @@ class BrillouinSignaller(QObject):
             self.log_message.emit(f"[Calibration] Exception: {e}")
 
 
-    @pyqtSlot(int, str, float)
-    def take_measurements(self, n: int, which_axis: str, step: float):
+    @pyqtSlot(object)
+    def take_measurements(self, measurement_settings: MeasurementSettings):
         """
         Generates a series of ZaberPositions using the given axis, n, and step,
         then takes measurements and updates the GUI accordingly.
@@ -336,22 +333,11 @@ class BrillouinSignaller(QObject):
         self._gui_ready = True
 
         try:
-            # Generate ZaberPositions
-            # Current position:
-            start = self.manager.zaber.get_position(which_axis) # or any default you want
 
-            fixed_positions = {}  # optionally set this if you have known values
-            zaber_positions = generate_zaber_positions(
-                axis=which_axis,
-                start=start,
-                step=step,
-                n=n,
-                fixed_positions=fixed_positions
-            )
 
             # Pass the GUI update callback down to the manager
             measurement_series = self.manager.take_measurement_series(
-                zaber_positions=zaber_positions,
+                measurement_settings=measurement_settings,
                 call_update_gui=self._update_gui
             )
 

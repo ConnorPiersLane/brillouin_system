@@ -83,7 +83,6 @@ class CalibrationResults:
     """
     Stores the calibration results for different references.
     """
-    data: CalibrationData
     left_pixel: Calibration
     right_pixel: Calibration
     peak_distance: Calibration
@@ -160,7 +159,6 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
     right_sigma_func = create_sigma_func(right_sigma_positions, right_sigmas)
 
     return CalibrationResults(
-        data=data,
         left_pixel=fit(left_px, freqs),
         right_pixel=fit(right_px, freqs),
         peak_distance=fit(inter_px, freqs),
@@ -170,11 +168,12 @@ def calibrate(data: CalibrationData) -> CalibrationResults:
 
 
 
-def get_calibration_fig(calibration_result: CalibrationResults, reference: str) -> Figure:
+def get_calibration_fig(calibration_data: CalibrationData, calibration_result: CalibrationResults, reference: str) -> Figure:
     """
     Creates a matplotlib figure displaying the calibration curve.
 
     Args:
+        calibration_data: CalibrationData
         calibration_result: CalibrationResults containing fit parameters
         reference: 'left', 'right', or 'distance' to select calibration type
 
@@ -183,7 +182,7 @@ def get_calibration_fig(calibration_result: CalibrationResults, reference: str) 
     """
     assert reference in ["left", "right", "distance"], "Invalid reference type"
 
-    calibration_data: CalibrationData = calibration_result.data
+    calibration_data: CalibrationData = calibration_data
 
     # Helper functions for extracting the desired peak info
     def extract_left(fs: FittedSpectrum) -> float:
@@ -261,7 +260,7 @@ def get_calibration_fig(calibration_result: CalibrationResults, reference: str) 
     return fig
 
 
-def render_calibration_to_pixmap(calibration_results: CalibrationResults, reference: str) -> QPixmap:
+def render_calibration_to_pixmap(calibration_data: CalibrationData, calibration_results: CalibrationResults, reference: str) -> QPixmap:
     """
     Renders the calibration figure as a Qt pixmap.
 
@@ -272,7 +271,7 @@ def render_calibration_to_pixmap(calibration_results: CalibrationResults, refere
     Returns:
         QPixmap object
     """
-    fig = get_calibration_fig(calibration_results, reference)
+    fig = get_calibration_fig(calibration_data, calibration_results, reference)
 
     # Save figure to buffer
     buf = io.BytesIO()

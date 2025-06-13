@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGroupBox,
     QPushButton, QApplication, QFormLayout, QButtonGroup, QRadioButton,
-    QCheckBox
+    QCheckBox, QComboBox
 )
 from PyQt5.QtGui import QIntValidator
 
@@ -13,8 +13,12 @@ from brillouin_system.config.config import (
     save_find_peaks_config_section,
     save_calibration_config,
     save_andor_frame_settings,
-    find_peaks_config_toml_path
+    find_peaks_config_toml_path,
+    fitting_models_sample,
+    fitting_models_reference
 )
+
+
 
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -96,7 +100,7 @@ class ConfigDialog(QDialog):
         return group
 
     def create_spectrum_fitting_group(self):
-        group = QGroupBox("Spectrum Fitting")
+        group = QGroupBox("Find Peaks")
         layout = QHBoxLayout()
         layout.addWidget(self.create_config_group("Sample", self.sample_inputs))
         layout.addWidget(self.create_config_group("Reference", self.reference_inputs))
@@ -106,6 +110,7 @@ class ConfigDialog(QDialog):
     def create_config_group(self, title, inputs_dict):
         group = QGroupBox(title)
         layout = QVBoxLayout()
+
         for field in self.field_names():
             row = QHBoxLayout()
             label = QLabel(field.replace("_", " ").capitalize() + ":")
@@ -114,6 +119,21 @@ class ConfigDialog(QDialog):
             row.addWidget(label)
             row.addWidget(input_field)
             layout.addLayout(row)
+
+        # Add Peak Fitting combo at end
+        row = QHBoxLayout()
+        label = QLabel("Peak Fitting:")
+        combo = QComboBox()
+        combo.addItems(fitting_models_sample if title.lower() == "sample" else fitting_models_reference)
+        row.addWidget(label)
+        row.addWidget(combo)
+        layout.addLayout(row)
+
+        if title.lower() == "sample":
+            self.sample_model_combo = combo
+        else:
+            self.reference_model_combo = combo
+
         group.setLayout(layout)
         return group
 
@@ -174,6 +194,8 @@ class ConfigDialog(QDialog):
         self.vbin_input.setText(str(andor.vbin))
         self.hbin_input.setText(str(andor.hbin))
         self.amp_mode_index_input.setText(str(andor.amp_mode_index))
+        self.sample_model_combo.setCurrentText(find_peaks_sample_config.get_field("fitting_model"))
+        self.reference_model_combo.setCurrentText(find_peaks_reference_config.get_field("fitting_model"))
 
         for field in self.field_names():
             self.sample_inputs[field].setText(str(getattr(find_peaks_sample_config.get(), field)))
@@ -210,11 +232,13 @@ class ConfigDialog(QDialog):
             # Sample
             sample_kwargs = {field: self._parse_value(self.sample_inputs[field].text(), field)
                              for field in self.field_names()}
+            sample_kwargs["fitting_model"] = self.sample_model_combo.currentText()
             find_peaks_sample_config.update(**sample_kwargs)
 
             # Reference
             reference_kwargs = {field: self._parse_value(self.reference_inputs[field].text(), field)
                                 for field in self.field_names()}
+            reference_kwargs["fitting_model"] = self.reference_model_combo.currentText()
             find_peaks_reference_config.update(**reference_kwargs)
 
             # Calibration

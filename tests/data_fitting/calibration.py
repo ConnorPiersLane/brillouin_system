@@ -1,6 +1,6 @@
 import numpy as np
 
-from brillouin_system.utils.calibration import CalibrationData, CalibrationResults, calibrate
+from brillouin_system.my_dataclasses.calibration import CalibrationData, CalibrationResults, calibrate
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
 

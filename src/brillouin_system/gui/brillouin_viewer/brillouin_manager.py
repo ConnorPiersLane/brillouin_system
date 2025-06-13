@@ -10,20 +10,17 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
-from brillouin_system.my_dataclasses.background_image import ImageStatistics
+from brillouin_system.fitting.fitting_manager import get_empty_fitting, fit_reference_spectrum, fit_sample_spectrum
+from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.state_mode import StateMode
-from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
-from brillouin_system.utils.fit_util import get_sline_from_image
-from brillouin_system.utils.calibration import CalibrationResults, CalibrationData, calibrate, \
+from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
+from brillouin_system.fitting.fit_util import get_sline_from_image
+from brillouin_system.my_dataclasses.calibration import CalibrationResults, CalibrationData, calibrate, \
     CalibrationMeasurementPoint, MeasurementsPerFreq
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
-from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries
+from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries, MeasurementSettings
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
-from brillouin_system.utils import brillouin_spectrum_fitting, gauss_fitting
 from brillouin_system.devices.zaber_linear import ZaberLinearController
-
-
-
 
 
 
@@ -36,6 +33,11 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
 
 
 class BrillouinManager:
+
+    @staticmethod
+    def log_message(msg: str):
+        """Optional helper to log messages — or use the signaller’s emit if needed."""
+        print(f"[BrillouinManager] {msg}")
 
     def __init__(self,
                  camera: BaseCamera | DummyCamera,
@@ -55,10 +57,10 @@ class BrillouinManager:
         self.is_reference_mode: bool = False
         self.do_background_subtraction: bool = False
         self._is_do_bg_subtraction_selected_for_sample = False
-        self.do_save_images: bool = False
         self.do_live_fitting = False
 
         # Calibration
+        self.calibration_data: CalibrationData | None = None
         self.calibration_results: CalibrationResults | None = None
 
         # Background (BG) Image and dark_image for the sample
@@ -207,7 +209,7 @@ class BrillouinManager:
         else:
             pass # do not open shutter, we are in snap mode
 
-        return ImageStatistics(n_images)
+        return generate_image_statistics_dataclass(n_images)
 
 
     def get_dark_image(self) -> ImageStatistics | None:
@@ -232,7 +234,7 @@ class BrillouinManager:
 
         print(f"[BrillouinManager] {n_dark_images} dark images acquired with: {self.get_camera_settings()}")
 
-        return ImageStatistics(n_images)
+        return generate_image_statistics_dataclass(n_images)
 
 
 
@@ -270,7 +272,6 @@ class BrillouinManager:
             FittedSpectrum: Dataclass containing fit results and metadata.
         """
 
-
         if self.do_background_subtraction:
             frame_with_sub_bg = self.subtract_background(frame)
             sline = get_sline_from_image(frame_with_sub_bg)
@@ -278,26 +279,13 @@ class BrillouinManager:
             sline = get_sline_from_image(frame)
 
         if not self.do_live_fitting:
-            return FittedSpectrum(
-                is_success=False,
-                x_pixels=np.arange(sline.shape[0]),
-                sline=sline,
-            )
+            return get_empty_fitting(sline)
 
         try:
-            # Fit the spectrum using the appropriate model
             if self.is_reference_mode:
-                # fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                #     sline=sline, is_reference_mode=True
-                # )
-                fitted_spectrum = gauss_fitting.get_fitted_spectrum_gaussian(
-                    sline=sline, is_reference_mode=True
-                )
+                return fit_reference_spectrum(sline=sline)
             else:
-                fitted_spectrum = brillouin_spectrum_fitting.get_fitted_spectrum_lorentzian(
-                    sline=sline, is_reference_mode=False
-                )
-            return fitted_spectrum
+                return fit_sample_spectrum(sline=sline, calibration_results=self.calibration_results)
         except Exception as e:
             print(f"[BrillouinManager] Fitting error: {e}")
             return FittedSpectrum(
@@ -337,8 +325,8 @@ class BrillouinManager:
                                                           state_mode=self.get_current_state_mode(),
                                                           cali_meas_points=freq_points))
 
-            cali_data = CalibrationData(measured_freqs=measured_freqs)
-            self.calibration_results = calibrate(cali_data)
+            self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
+            self.calibration_results = calibrate(self.calibration_data)
             return True
         except Exception as e:
             print(f"[Manager] Calibration failed: {e}")
@@ -346,10 +334,30 @@ class BrillouinManager:
 
     def take_measurement_series(
             self,
-            zaber_positions: list[ZaberPosition],
+            measurement_settings: MeasurementSettings,
             call_update_gui: Callable[[DisplayResults], None]
     ) -> MeasurementSeries:
         measurements = []
+
+        # Generate ZaberPositions
+        # Current position:
+        which_axis = measurement_settings.move_axes  # ToDo: make this versatil for other axex
+        # Todo: save images is not beeing used
+
+        start = self.zaber.get_position(which_axis)  # or any default you want
+        step = measurement_settings.move_x_rel_um
+        n = measurement_settings.n_measurements
+
+        fixed_positions = {}  # optionally set this if you have known values
+
+        zaber_positions = generate_zaber_positions(
+            axis='x',
+            start=start,
+            step=step,
+            n=n,
+            fixed_positions=fixed_positions
+        )
+
 
         for i, zaber_pos in enumerate(zaber_positions):
             try:
@@ -368,9 +376,8 @@ class BrillouinManager:
 
                 measurement_point = MeasurementPoint(
                     frame=frame,
-                    fitting_results=fitting,
                     zaber_position=self.zaber.get_zaber_position_class(),
-                    mako_image=None
+                    mako_image=frame,
                 )
                 measurements.append(measurement_point)
 
@@ -380,13 +387,11 @@ class BrillouinManager:
         return MeasurementSeries(
             measurements=measurements,
             state_mode=self.get_current_state_mode(),
-            calibration=self.calibration_results
+            calibration_data=self.calibration_data,
+            settings = measurement_settings,
         )
 
 
-    def log_message(self, msg: str):
-        """Optional helper to log messages — or use the signaller’s emit if needed."""
-        print(f"[BrillouinManager] {msg}")
 
     def compute_freq_shift(self, fitting: FittedSpectrum) -> float | None:
         if not fitting.is_success or self.calibration_results is None:
@@ -491,20 +496,3 @@ class BrillouinManager:
                               binning=self.camera.get_binning(),
                               preamp_gain=self.camera.get_preamp_gain(),
                               amp_mode=self.camera.get_amp_mode())
-
-
-
-    def get_measurement_data(self,
-                             frame: np.ndarray,
-                             fitting_results: FittedSpectrum) -> MeasurementPoint:
-
-        zaber_position = self.zaber.get_zaber_position_class()
-
-        return MeasurementPoint(
-            frame=frame,
-            fitting_results = fitting_results,
-            zaber_position=zaber_position,
-            mako_image=None,
-            )
-
-

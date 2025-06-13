@@ -2,12 +2,12 @@ import numpy as np
 from scipy.optimize import curve_fit
 
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
-from brillouin_system.utils.brillouin_spectrum_fitting import (
-    _2Lorentzian, find_peak_locations, select_top_two_peaks
-)
-from brillouin_system.utils.gauss_fitting import _2Gaussian
-from brillouin_system.utils.voigt_fitting import _2Voigt
-from brillouin_system.utils.fit_util import refine_fitted_spectrum, sort_peaks
+from brillouin_system.fitting.lorentzian_fitting import _2Lorentzian
+from brillouin_system.fitting.gauss_fitting import _2Gaussian
+from brillouin_system.fitting.voigt_fitting import _2Voigt
+from brillouin_system.fitting.fit_util import refine_fitted_spectrum, sort_peaks, find_peak_locations, \
+    select_top_two_peaks
+
 
 def _logistic_step(x, x0, k):
     u = -k * (x - x0)

@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-import numpy as np
-
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
 from brillouin_system.my_dataclasses.camera_settings import CameraSettings
 

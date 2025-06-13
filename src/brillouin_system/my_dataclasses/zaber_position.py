@@ -3,9 +3,9 @@ from dataclasses import dataclass
 
 @dataclass
 class ZaberPosition:
-    x: float | None = None
-    y: float | None = None
-    z: float | None = None
+    x: float
+    y: float
+    z: float
 
 
 def generate_zaber_positions(

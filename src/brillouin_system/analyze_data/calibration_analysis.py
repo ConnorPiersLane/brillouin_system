@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from brillouin_system.analyze_data.sorter import sort_fitted_spectrum_peaks
-from brillouin_system.utils.calibration import CalibrationData, calibrate, get_calibration_fig, CalibrationResults
+from brillouin_system.my_dataclasses.calibration import calibrate, get_calibration_fig, CalibrationResults
 
 # --- Helper Function ---
 def plot_frequency_errors(calibration_results: CalibrationResults, reference: str):

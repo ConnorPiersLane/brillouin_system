@@ -1,6 +1,9 @@
 import numpy as np
+from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from brillouin_system.config.config import find_peaks_reference_config, find_peaks_sample_config, andor_frame_config
+from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
+
 
 def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
     """
@@ -137,3 +140,72 @@ def sort_peaks(params: np.ndarray | list) -> np.ndarray:
         return np.array([amp1, cen1, wid1, amp2, cen2, wid2, offset])
     else:
         return np.array([amp2, cen2, wid2, amp1, cen1, wid1, offset])
+
+
+
+def get_fitted_spectrum_generic(sline: np.ndarray,
+                                is_reference_mode: bool,
+                                model_function,
+                                p0_generator) -> FittedSpectrum:
+    """
+    Generic spectrum fitting function.
+    """
+    pix = np.arange(sline.shape[0])
+    sline = np.clip(sline, 0, None)
+
+    pk_ind, pk_info = find_peak_locations(sline, is_reference_mode=is_reference_mode)
+    if len(pk_ind) < 1:
+        return FittedSpectrum(
+            is_success=False,
+            sline=sline,
+            x_pixels=pix,
+        )
+
+    pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
+    p0 = p0_generator(pk_ind, pk_info, sline)
+
+    try:
+        n_pix = len(pix)
+        lower_bounds = [0, 0, 0, 0, 0, 0, 0]
+        upper_bounds = [np.inf, n_pix, n_pix/2, np.inf, n_pix, n_pix/2, np.inf]
+
+        popt, _ = curve_fit(
+            model_function,
+            pix,
+            sline,
+            p0=p0,
+            bounds=(lower_bounds, upper_bounds),
+            maxfev=10000
+        )
+
+        amp1, cen1, wid1, amp2, cen2, wid2, offset = sort_peaks(popt)
+
+        fittedSpect = model_function(pix, *popt)
+        x_fit, y_fit = refine_fitted_spectrum(model_function, pix, popt, factor=10)
+
+        fitted_spectrum = FittedSpectrum(
+            is_success=True,
+            sline=sline,
+            x_pixels=pix,
+            fitted_spectrum=fittedSpect,
+            x_fit_refined=x_fit,
+            y_fit_refined=y_fit,
+            parameters=popt,
+            left_peak_center_px=float(cen1),
+            left_peak_width_px=float(wid1),
+            left_peak_amplitude=float(amp1),
+            right_peak_center_px=float(cen2),
+            right_peak_width_px=float(wid2),
+            right_peak_amplitude=float(amp2),
+            inter_peak_distance=np.abs(cen2 - cen1)
+        )
+
+    except Exception as e:
+        print(f"[fitSpectrum] Fitting failed: {e}")
+        return FittedSpectrum(
+            is_success=False,
+            sline=sline,
+            x_pixels=pix,
+        )
+
+    return fitted_spectrum
