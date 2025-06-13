@@ -15,11 +15,11 @@ from brillouin_system.my_dataclasses.background_image import ImageStatistics, ge
 from brillouin_system.my_dataclasses.state_mode import StateMode
 from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
 from brillouin_system.fitting.fit_util import get_sline_from_image
-from brillouin_system.my_dataclasses.calibration import CalibrationResults, CalibrationData, calibrate, \
-    CalibrationMeasurementPoint, MeasurementsPerFreq
+from brillouin_system.my_dataclasses.calibration import CalibrationData, calibrate, \
+    CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries, MeasurementSettings
-from brillouin_system.my_dataclasses.camera_settings import CameraSettings
+from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
 from brillouin_system.devices.zaber_linear import ZaberLinearController
 
 
@@ -61,7 +61,7 @@ class BrillouinManager:
 
         # Calibration
         self.calibration_data: CalibrationData | None = None
-        self.calibration_results: CalibrationResults | None = None
+        self.calibration_calculator: CalibrationCalculator | None = None
 
         # Background (BG) Image and dark_image for the sample
         self.bg_image: ImageStatistics | None = None
@@ -100,7 +100,7 @@ class BrillouinManager:
             is_do_bg_subtraction_active=False,
             bg_image=None,
             dark_image=None,
-            camera_settings=self.get_camera_settings()
+            camera_settings=self.get_andor_camera_settings()
         )
 
     # ---------------- Change Modes ----------------
@@ -130,7 +130,7 @@ class BrillouinManager:
             is_do_bg_subtraction_active=self.do_background_subtraction,
             bg_image=self.bg_image,
             dark_image=self.dark_image,
-            camera_settings=self.get_camera_settings()
+            camera_settings=self.get_andor_camera_settings()
         )
 
     def change_to_reference_mode(self):
@@ -232,7 +232,7 @@ class BrillouinManager:
         self.camera.open_shutter()
         time.sleep(0.05)
 
-        print(f"[BrillouinManager] {n_dark_images} dark images acquired with: {self.get_camera_settings()}")
+        print(f"[BrillouinManager] {n_dark_images} dark images acquired with: {self.get_andor_camera_settings()}")
 
         return generate_image_statistics_dataclass(n_images)
 
@@ -285,7 +285,7 @@ class BrillouinManager:
             if self.is_reference_mode:
                 return fit_reference_spectrum(sline=sline)
             else:
-                return fit_sample_spectrum(sline=sline, calibration_results=self.calibration_results)
+                return fit_sample_spectrum(sline=sline, calibration_calculator=self.calibration_calculator)
         except Exception as e:
             print(f"[BrillouinManager] Fitting error: {e}")
             return FittedSpectrum(
@@ -294,6 +294,11 @@ class BrillouinManager:
                 sline=sline,
             )
 
+    def update_calibration_calculator(self):
+        if self.calibration_data is None:
+            self.calibration_calculator = None
+        else:
+            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(calibrate(self.calibration_data))
 
     def perform_calibration(self, config: CalibrationConfig, call_update_gui: Callable[[DisplayResults], None]) -> bool:
         """
@@ -326,11 +331,13 @@ class BrillouinManager:
                                                           cali_meas_points=freq_points))
 
             self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
-            self.calibration_results = calibrate(self.calibration_data)
+            self.update_calibration_calculator()
             return True
         except Exception as e:
             print(f"[Manager] Calibration failed: {e}")
             return False
+
+
 
     def take_measurement_series(
             self,
@@ -394,25 +401,20 @@ class BrillouinManager:
 
 
     def compute_freq_shift(self, fitting: FittedSpectrum) -> float | None:
-        if not fitting.is_success or self.calibration_results is None:
+        if not fitting.is_success or self.calibration_calculator is None:
             return None
 
         config = calibration_config.get()
-        calibration = self.calibration_results.get_calibration(config)
+
 
         if config.reference == "left":
-            x_value = fitting.left_peak_center_px
+            return self.calibration_calculator.freq_left_peak(fitting.left_peak_center_px)
         elif config.reference == "right":
-            x_value = fitting.right_peak_center_px
+            return self.calibration_calculator.freq_right_peak(fitting.right_peak_center_px)
         elif config.reference == "distance":
-            x_value = fitting.inter_peak_distance
+            return self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance)
         else:
             return None
-
-        if x_value is None or np.isnan(x_value):
-            return None
-
-        return float(calibration.get_freq(x_value))
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
@@ -480,19 +482,19 @@ class BrillouinManager:
 
 
         if self.is_reference_mode:
-            self.reference_state_mode.camera_settings = self.get_camera_settings()
+            self.reference_state_mode.camera_settings = self.get_andor_camera_settings()
         else:
-            self.sample_state_mode.camera_settings = self.get_camera_settings()
+            self.sample_state_mode.camera_settings = self.get_andor_camera_settings()
 
 
 
 
 
-    def get_camera_settings(self) -> CameraSettings:
-        return CameraSettings(name=self.camera.get_name(),
-                              exposure_time_s=self.camera.get_exposure_time(),
-                              emccd_gain=self.camera.get_emccd_gain(),
-                              roi=self.camera.get_roi(),
-                              binning=self.camera.get_binning(),
-                              preamp_gain=self.camera.get_preamp_gain(),
-                              amp_mode=self.camera.get_amp_mode())
+    def get_andor_camera_settings(self) -> AndorCameraSettings:
+        return AndorCameraSettings(name=self.camera.get_name(),
+                                   exposure_time_s=self.camera.get_exposure_time(),
+                                   emccd_gain=self.camera.get_emccd_gain(),
+                                   roi=np.asarray(self.camera.get_roi()),
+                                   binning=np.asarray(self.camera.get_binning()),
+                                   preamp_gain=self.camera.get_preamp_gain(),
+                                   preamp_mode=f"{self.camera.get_amp_mode()}")

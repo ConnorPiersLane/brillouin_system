@@ -21,10 +21,10 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManagerDummy
 
-from brillouin_system.my_dataclasses.background_image import BackGroundImage
+from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.measurements import MeasurementSettings
-from brillouin_system.my_dataclasses.calibration import CalibrationResults, render_calibration_to_pixmap, \
-    CalibrationImageDialog, CalibrationData
+from brillouin_system.my_dataclasses.calibration import render_calibration_to_pixmap, \
+    CalibrationImageDialog, CalibrationData, CalibrationCalculator
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
@@ -642,7 +642,7 @@ class BrillouinViewer(QWidget):
         self.allied_camera_display.setPixmap(pixmap)
 
     def save_background_image(self):
-        def receive_data(data: BackGroundImage):
+        def receive_data(data: BackgroundImage):
             path, _ = QFileDialog.getSaveFileName(
                 self, "Save Background Image", filter="Pickle Files (*.pkl);;All Files (*)"
             )
@@ -702,12 +702,12 @@ class BrillouinViewer(QWidget):
         self.save_calib_btn.setEnabled(True)
         print(f"[Brillouin Viewer] Calibration available")
 
-    def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationResults]):
+    def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationCalculator]):
         cali_data = received_cali[0]
-        cali_results = received_cali[1]
+        cali_calculator = received_cali[1]
         if self._show_cali:
             try:
-                pixmap = render_calibration_to_pixmap(cali_data, cali_results, calibration_config.get().reference)
+                pixmap = render_calibration_to_pixmap(cali_data, cali_calculator, calibration_config.get().reference)
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
                 print("[Brillouin Viewer] Calibration plot displayed.")

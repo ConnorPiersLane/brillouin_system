@@ -54,6 +54,7 @@ class FindPeaksConfig:
 
 @dataclass
 class CalibrationConfig:
+    degree: int
     n_per_freq: int
     calibration_freqs: list[float]
     reference: str
@@ -99,10 +100,12 @@ def load_calibration_config(path: Path) -> CalibrationConfig:
         raw = tomli.load(f)["calibration"]
 
     return CalibrationConfig(
+        degree=raw["degree"],  # ← Add this
         n_per_freq=raw["n_per_freq"],
         calibration_freqs=raw["calibration_freqs"],
         reference=raw["reference"]
     )
+
 
 def save_calibration_config(path: Path, config: ThreadSafeConfig):
     with path.open("rb") as f:

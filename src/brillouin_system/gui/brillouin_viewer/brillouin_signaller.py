@@ -5,7 +5,7 @@ import time
 
 from brillouin_system.config.config import calibration_config
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
-from brillouin_system.my_dataclasses.background_image import BackGroundImage
+from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSettings
@@ -105,7 +105,7 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def emit_background_data(self):
-        data = BackGroundImage(
+        data = BackgroundImage(
             dark_image=self.manager.dark_image,
             bg_image=self.manager.bg_image,
         )
@@ -302,7 +302,8 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def get_calibration_results(self):
-        self.calibration_result_ready.emit((self.manager.calibration_data, self.manager.calibration_results))
+        self.manager.update_calibration_calculator() # this recalculates the calibration
+        self.calibration_result_ready.emit((self.manager.calibration_data, self.manager.calibration_calculator))
 
     def emit_display_result(self, display: DisplayResults):
         self.frame_and_fit_ready.emit(display)

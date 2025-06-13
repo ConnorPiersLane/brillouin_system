@@ -145,6 +145,10 @@ class ConfigDialog(QDialog):
         self.n_per_freq_input.setValidator(QIntValidator(1, 999))
         layout.addRow("n_per_freq:", self.n_per_freq_input)
 
+        self.degree_input = QLineEdit()
+        self.degree_input.setValidator(QIntValidator(1, 99))
+        layout.addRow("Polynomial Degree:", self.degree_input)
+
         self.calib_freqs_input = QLineEdit()
         layout.addRow("Frequencies for Calibration (GHz):", self.calib_freqs_input)
 
@@ -203,6 +207,7 @@ class ConfigDialog(QDialog):
 
         calib = calibration_config.get()
         self.n_per_freq_input.setText(str(calib.n_per_freq))
+        self.degree_input.setText(str(calib.degree))
         self.calib_freqs_input.setText(", ".join(f"{f:.3f}" for f in calib.calibration_freqs))
 
         ref = calib.reference
@@ -250,6 +255,7 @@ class ConfigDialog(QDialog):
                 ref = "distance"
 
             calibration_config.update(
+                degree=int(self.degree_input.text()),
                 n_per_freq=int(self.n_per_freq_input.text()),
                 calibration_freqs=[float(f.strip()) for f in self.calib_freqs_input.text().split(",") if f.strip()],
                 reference=ref

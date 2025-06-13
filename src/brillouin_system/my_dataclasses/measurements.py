@@ -28,5 +28,5 @@ class MeasurementPoint:
 class MeasurementSeries:
     measurements: list[MeasurementPoint]
     state_mode: StateMode
-    calibration_data: CalibrationData | None
     settings: MeasurementSettings
+    calibration_data: CalibrationData | None

@@ -10,16 +10,16 @@ def generate_image_statistics_dataclass(images: list[np.ndarray] | np.ndarray):
     return ImageStatistics(
         mean_image=mean_image,
         std_image=std_image,
-        n_images=n_images,
+        n=len(n_images),
     )
 
 @dataclass
 class ImageStatistics:
     mean_image: np.ndarray
     std_image: np.ndarray
-    n_images: list[np.ndarray] | np.ndarray
+    n: int
 
 @dataclass
-class BackGroundImage:
-    dark_image: ImageStatistics | None
-    bg_image: ImageStatistics | None
+class BackgroundImage:
+    dark_image: ImageStatistics | None = None
+    bg_image: ImageStatistics | None = None

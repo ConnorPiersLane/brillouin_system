@@ -7,6 +7,7 @@ class FittedSpectrum:
     is_success: bool
     x_pixels: np.ndarray
     sline: np.ndarray
+    model: str = ''
     fitted_spectrum: np.ndarray = field(default=None)
     x_fit_refined: np.ndarray = field(default=None)
     y_fit_refined: np.ndarray = field(default=None)

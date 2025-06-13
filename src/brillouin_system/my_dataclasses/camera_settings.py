@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
-class CameraSettings:
+class AndorCameraSettings:
     """
     Container for configuration parameters used in scientific or industrial imaging systems.
 
@@ -30,11 +32,7 @@ class CameraSettings:
     name: str
     exposure_time_s: float
     emccd_gain: int
-    roi: tuple[int, int, int, int]
-    binning: tuple[int, int]
+    roi: np.ndarray
+    binning: np.ndarray
     preamp_gain: int | float
-    amp_mode: object
-
-    def __str__(self):
-        return (f"{self.name} — Exposure: {self.exposure_time_s} s, "
-                f"EMCCD Gain: {self.emccd_gain}, Preamp Gain: {self.preamp_gain}")
+    preamp_mode: str
