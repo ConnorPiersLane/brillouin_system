@@ -87,7 +87,7 @@ class TestSafeAndLoadHDF5(unittest.TestCase):
         arr = np.array([{"a": 1}, {"b": 2}], dtype=object)
         encoded = dataclass_to_hdf5_native_dict(arr)
         decoded = dict_to_dataclass_tree(encoded, known_classes={})
-        self.assertEqual(decoded, [{'a': 1}, {'b': 2}])
+        self.assertEqual(decoded.tolist(), [{'a': 1}, {'b': 2}])
 
     def test_nested_structure(self):
         obj = {
