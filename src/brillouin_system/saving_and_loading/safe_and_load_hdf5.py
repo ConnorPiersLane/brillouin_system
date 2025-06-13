@@ -12,14 +12,31 @@ Markers:
 - '__ndarray__'   : represents object-type numpy arrays
 - '__dataclass__' : indicates a serialized dataclass, stores the class name
 - '__tuple__'     : represents a tuple structure
+- '__version__'   : format version identifier
 """
 
 _NONE_MARKER = "__NONE__"
 _ARRAY_MARKER = "__ndarray__"
 _DATACLASS_MARKER = "__dataclass__"
+_VERSION = "1.0"
 
+# =============================================================================
+# Dataclass Registry (Auto-Register via Decorator)
+# =============================================================================
+
+known_classes: dict[str, Any] = {}
+
+def register_dataclass(cls):
+    """Register a dataclass so it can be rehydrated from HDF5."""
+    known_classes[cls.__name__] = cls
+    return cls
+
+# =============================================================================
+# Serialization Functions
+# =============================================================================
 
 def dataclass_to_hdf5_native_dict(obj: Any) -> Union[dict, list, tuple, str, int, float, bool]:
+    """Convert a dataclass or supported type into an HDF5-native Python structure."""
     if obj is None:
         return _NONE_MARKER
     elif isinstance(obj, (int, float, bool, str)):
@@ -48,13 +65,14 @@ def dataclass_to_hdf5_native_dict(obj: Any) -> Union[dict, list, tuple, str, int
     else:
         raise TypeError(f"Unsupported type for HDF5-native conversion: {type(obj)} (value: {obj})")
 
-
 def save_dict_to_hdf5(filepath: str, data_dict: dict) -> None:
+    """Write a native dictionary structure to an HDF5 file."""
     with h5py.File(filepath, 'w') as f:
+        f.attrs['__version__'] = _VERSION
         _write_to_hdf5_group(f, data_dict)
 
-
 def _write_to_hdf5_group(h5group: h5py.Group, data: Any) -> None:
+    """Recursively write native Python types into an HDF5 group."""
     if isinstance(data, dict):
         if data.get("__tuple__") is True:
             h5group.attrs["__tuple__"] = True
@@ -100,31 +118,35 @@ def _write_to_hdf5_group(h5group: h5py.Group, data: Any) -> None:
     else:
         raise TypeError(f"Cannot store unsupported type: {type(data)}")
 
+# =============================================================================
+# Deserialization Functions
+# =============================================================================
 
 def load_dict_from_hdf5(filepath: str) -> Any:
+    """Load an HDF5 file and return a native Python dictionary structure."""
     with h5py.File(filepath, 'r') as f:
+        version = f.attrs.get('__version__', '1.0')
+        if version != _VERSION:
+            raise ValueError(f"Unsupported HDF5 format version: {version}")
         return _read_hdf5_group(f)
 
-
 def _read_hdf5_group(h5group: h5py.Group) -> Any:
+    """Recursively read an HDF5 group back into native Python objects."""
     if 'value' in h5group.attrs:
         return h5group.attrs['value']
 
-    # only read 'value' as dataset if it's a dataset
     if 'value' in h5group and isinstance(h5group.get('value', None), h5py.Dataset):
         val = h5group['value'][()]
         if isinstance(val, np.void):
             return val.tolist()
         if isinstance(val, np.ndarray):
-            return val.tolist()
+            return val
         return val
 
-    # Check if this is a tuple
     if h5group.attrs.get("__tuple__") is True and "items" in h5group:
         item_keys = sorted(h5group["items"].keys(), key=int)
         return tuple(_read_hdf5_group(h5group["items"][k]) for k in item_keys)
 
-    # Otherwise handle as dict or list
     keys = list(h5group.keys())
     is_list = all(k.isdigit() for k in keys)
     keys = sorted(keys, key=lambda k: int(k) if k.isdigit() else k)
@@ -134,31 +156,33 @@ def _read_hdf5_group(h5group: h5py.Group) -> Any:
     else:
         return {k: _read_hdf5_group(h5group[k]) for k in keys}
 
-
-
-def dict_to_dataclass_tree(data: Any, known_classes: dict[str, Any] = {}) -> Any:
-    if data == _NONE_MARKER:
+def dict_to_dataclass_tree(data: Any, known: dict[str, Any] = None) -> Any:
+    """Recursively convert a deserialized structure back into dataclass instances."""
+    if isinstance(data, str) and data == _NONE_MARKER:
         return None
 
+    # Use global known_classes if no override is passed
+    resolved_known = known if known is not None else globals().get("known_classes", {})
+
     if isinstance(data, list):
-        return [dict_to_dataclass_tree(item, known_classes) for item in data]
+        return [dict_to_dataclass_tree(item, resolved_known) for item in data]
 
     if isinstance(data, dict):
         if data.get("__ndarray__") is True and "items" in data:
-            return np.array([dict_to_dataclass_tree(item, known_classes) for item in data["items"]], dtype=object)
+            return np.array([dict_to_dataclass_tree(item, resolved_known) for item in data["items"]], dtype=object)
 
         if data.get("__tuple__") is True:
-            return tuple(dict_to_dataclass_tree(x, known_classes) for x in data["items"])
+            return tuple(dict_to_dataclass_tree(x, resolved_known) for x in data["items"])
 
         cls_name = data.get("__dataclass__")
         if cls_name:
-            if cls_name not in known_classes:
+            if cls_name not in resolved_known:
                 raise ValueError(f"Unknown dataclass '{cls_name}'. Please register it in known_classes.")
-            cls = known_classes[cls_name]
-            kwargs = {f.name: dict_to_dataclass_tree(data[f.name], known_classes)
+            cls = resolved_known[cls_name]
+            kwargs = {f.name: dict_to_dataclass_tree(data[f.name], resolved_known)
                       for f in fields(cls) if f.name in data}
             return cls(**kwargs)
 
-        return {k: dict_to_dataclass_tree(v, known_classes) for k, v in data.items()}
+        return {k: dict_to_dataclass_tree(v, resolved_known) for k, v in data.items()}
 
     return data

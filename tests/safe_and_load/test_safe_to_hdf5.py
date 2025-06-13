@@ -83,7 +83,7 @@ def test_rehydrate_to_dataclasses():
 
     print("🧬 Rehydrating into dataclass structure...")
     rehydrated = [
-        dict_to_dataclass_tree(item, known_classes=known_classes)
+        dict_to_dataclass_tree(item, known=known_classes)
         for item in reloaded_dict
     ]
 
