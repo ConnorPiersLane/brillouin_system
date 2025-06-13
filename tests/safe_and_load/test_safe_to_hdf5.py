@@ -1,17 +1,17 @@
 import pickle
 import numpy as np
-from pathlib import Path
 
-from brillouin_system.saving_and_loading.safe_and_load_dict2hdf5 import (
+from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
     dataclass_to_hdf5_native_dict,
     save_dict_to_hdf5,
     load_dict_from_hdf5,
+    dict_to_dataclass_tree
 )
-from brillouin_system.saving_and_loading.dict2dataclass import dict_to_dataclass_tree
+
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 
-TEST_FILE = "test6.pkl"
-HDF5_FILE = "test6.h5"
+TEST_FILE = "test5.pkl"
+HDF5_FILE = "test5.h5"
 
 
 def deep_equal(a, b, path="root"):
@@ -52,8 +52,6 @@ def deep_equal(a, b, path="root"):
         return True
 
 
-
-
 def load_pickle(path):
     with open(path, "rb") as f:
         return pickle.load(f)
@@ -85,7 +83,7 @@ def test_rehydrate_to_dataclasses():
 
     print("🧬 Rehydrating into dataclass structure...")
     rehydrated = [
-        dict_to_dataclass_tree(item, name_hint="measurement_series", known_classes=known_classes)
+        dict_to_dataclass_tree(item, known_classes=known_classes)
         for item in reloaded_dict
     ]
 

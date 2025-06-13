@@ -1,0 +1,167 @@
+import h5py
+import numpy as np
+from dataclasses import is_dataclass, fields
+from typing import get_origin, get_args
+
+_NONE_MARKER = "__NONE__"
+_ARRAY_MARKER = "__ndarray__"
+_DATACLASS_MARKER = "__dataclass__"
+
+
+def dataclass_to_hdf5_native_dict(obj):
+    if obj is None:
+        return _NONE_MARKER
+    elif isinstance(obj, (int, float, bool, str)):
+        return obj
+    elif isinstance(obj, np.generic):
+        return obj.item()
+    elif isinstance(obj, np.ndarray):
+        if obj.dtype == object:
+            return {_ARRAY_MARKER: True, "items": [dataclass_to_hdf5_native_dict(x) for x in obj]}
+        return obj
+    elif is_dataclass(obj):
+        result = {_DATACLASS_MARKER: obj.__class__.__name__}
+        for f in fields(obj):
+            value = getattr(obj, f.name)
+            result[f.name] = dataclass_to_hdf5_native_dict(value)
+        return result
+    elif isinstance(obj, list):
+        return [dataclass_to_hdf5_native_dict(x) for x in obj]
+    elif isinstance(obj, tuple):
+        return {"__tuple__": True, "items": [dataclass_to_hdf5_native_dict(x) for x in obj]}
+    elif isinstance(obj, dict):
+        for k in obj.keys():
+            if not isinstance(k, str):
+                raise TypeError(f"HDF5 keys must be strings. Got {type(k)}: {k}")
+        return {str(k): dataclass_to_hdf5_native_dict(v) for k, v in obj.items()}
+    else:
+        raise TypeError(f"Unsupported type for HDF5-native conversion: {type(obj)} (value: {obj})")
+
+
+def save_dict_to_hdf5(filepath, data_dict):
+    with h5py.File(filepath, 'w') as f:
+        _write_to_hdf5_group(f, data_dict)
+
+def _write_to_hdf5_group(h5group, data):
+    if isinstance(data, dict):
+        if "__tuple__" in data and data["__tuple__"] is True:
+            h5group.attrs["__tuple__"] = True
+            items_group = h5group.create_group("items")
+            for idx, item in enumerate(data["items"]):
+                _write_to_hdf5_group(items_group.create_group(str(idx)), item)
+            return
+
+        if "__ndarray__" in data and data["__ndarray__"] is True:
+            h5group.attrs["__ndarray__"] = True
+            items_group = h5group.create_group("items")
+            for idx, item in enumerate(data["items"]):
+                _write_to_hdf5_group(items_group.create_group(str(idx)), item)
+            return
+
+        for key, val in data.items():
+            if not isinstance(key, str):
+                raise TypeError(f"HDF5 requires string keys, got {type(key)}: {key}")
+            _write_to_hdf5_group(h5group.create_group(key), val)
+
+    elif isinstance(data, list):
+        if all(isinstance(x, (int, float, np.number, bool)) for x in data):
+            h5group.create_dataset('value', data=np.array(data))
+        elif all(isinstance(x, (int, float, bool, str)) or x == _NONE_MARKER for x in data):
+            h5group.attrs['value'] = np.array(data, dtype=object)
+        else:
+            for idx, item in enumerate(data):
+                _write_to_hdf5_group(h5group.create_group(str(idx)), item)
+
+    elif isinstance(data, np.ndarray):
+        if data.dtype == object:
+            for idx, item in enumerate(data):
+                _write_to_hdf5_group(h5group.create_group(str(idx)), item)
+        else:
+            h5group.create_dataset('value', data=data)
+
+    elif isinstance(data, (int, float, bool, str)):
+        h5group.attrs['value'] = data
+
+    elif data == _NONE_MARKER:
+        h5group.attrs['value'] = _NONE_MARKER
+
+    else:
+        raise TypeError(f"Cannot store unsupported type: {type(data)}")
+
+
+
+
+def load_dict_from_hdf5(filepath):
+    with h5py.File(filepath, 'r') as f:
+        return _read_hdf5_group(f)
+
+
+def _read_hdf5_group(h5group):
+    if 'value' in h5group.attrs:
+        return h5group.attrs['value']
+
+    if 'value' in h5group and isinstance(h5group['value'], h5py.Dataset):
+        val = h5group['value'][()]
+        if isinstance(val, np.void):  # for object arrays
+            return val.tolist()
+        if isinstance(val, np.ndarray):
+            return val.tolist()
+        return val
+
+    # Check if this is a tuple
+    if h5group.attrs.get("__tuple__") is True and "items" in h5group:
+        item_keys = sorted(h5group["items"].keys(), key=int)
+        return tuple(_read_hdf5_group(h5group["items"][k]) for k in item_keys)
+
+    # Otherwise handle as dict or list
+    keys = list(h5group.keys())
+    is_list = all(k.isdigit() for k in keys)
+
+    if is_list:
+        keys = sorted(keys, key=int)
+        result = []
+        for key in keys:
+            result.append(_read_hdf5_group(h5group[key]))
+        return result
+    else:
+        result = {}
+        for key in sorted(keys):
+            result[key] = _read_hdf5_group(h5group[key])
+        return result
+
+
+
+def dict_to_dataclass_tree(data, known_classes={}):
+    if data == _NONE_MARKER:
+        return None
+
+    if isinstance(data, list):
+        return [dict_to_dataclass_tree(item, known_classes) for item in data]
+
+    # Handle special ndarray marker
+    if isinstance(data, dict) and data.get("__ndarray__") is True and "items" in data:
+        return [dict_to_dataclass_tree(item, known_classes) for item in data["items"]]
+
+    if isinstance(data, dict):
+        if data.get("__tuple__") is True:
+            return tuple(dict_to_dataclass_tree(x, known_classes) for x in data["items"])
+
+        cls_name = data.get("__dataclass__")
+        if cls_name:
+            if cls_name not in known_classes:
+                raise ValueError(f"Unknown dataclass '{cls_name}'. Please register it in known_classes.")
+
+            cls = known_classes[cls_name]
+            kwargs = {}
+
+            for f in fields(cls):
+                if f.name not in data:
+                    continue
+                value = dict_to_dataclass_tree(data[f.name], known_classes)
+                kwargs[f.name] = value
+
+            return cls(**kwargs)
+
+        return {k: dict_to_dataclass_tree(v, known_classes) for k, v in data.items()}
+
+    return data
