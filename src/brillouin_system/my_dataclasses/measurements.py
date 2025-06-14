@@ -22,7 +22,7 @@ class MeasurementSettings:
 class MeasurementPoint:
     frame: np.ndarray  # Original frame, not subtracted
     zaber_position: ZaberPosition # tuple[float, float, float]
-    mako_image: np.ndarray = field(default=None)
+    mako_image: np.ndarray | None = field(default=None)
 
 @dataclass
 class MeasurementSeries:

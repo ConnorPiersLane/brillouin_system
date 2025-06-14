@@ -33,8 +33,7 @@ from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 ###
 # Add other guis
 from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
-
-
+from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 
 ## Testing
 brillouin_manager = BrillouinManager(
@@ -644,17 +643,27 @@ class BrillouinViewer(QWidget):
     def save_background_image(self):
         def receive_data(data: BackgroundImage):
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Background Image", filter="Pickle Files (*.pkl);;All Files (*)"
+                self, "Save Background Image", filter="All Files (*)"
             )
             if not path:
                 return
 
             try:
-                with open(path, "wb") as f:
+                # Save as Pickle
+                pkl_path = path if path.endswith(".pkl") else path + ".pkl"
+                with open(pkl_path, "wb") as f:
                     pickle.dump(data, f)
-                print(f"[Brillouin Viewer] Background image and settings saved to {path}")
+                print(f"[✓] Background image saved to: {pkl_path}")
+
+                # Save as HDF5
+                h5_path = path if path.endswith(".h5") else path + ".h5"
+                native_dict = dataclass_to_hdf5_native_dict(data)
+                save_dict_to_hdf5(h5_path, native_dict)
+                print(f"[✓] Background image saved as HDF5 to: {h5_path}")
+
             except Exception as e:
                 print(f"[Brillouin Viewer] [Error] Failed to save background data: {e}")
+
             finally:
                 self.brillouin_signaller.background_data_ready.disconnect(receive_data)
 
@@ -705,35 +714,44 @@ class BrillouinViewer(QWidget):
     def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationCalculator]):
         cali_data = received_cali[0]
         cali_calculator = received_cali[1]
+
         if self._show_cali:
             try:
-                pixmap = render_calibration_to_pixmap(cali_data, cali_calculator, calibration_config.get().reference)
+                pixmap = render_calibration_to_pixmap(
+                    cali_data, cali_calculator, calibration_config.get().reference
+                )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
                 print("[Brillouin Viewer] Calibration plot displayed.")
             except Exception as e:
                 print(f"[Brillouin Viewer] Failed to plot calibration: {e}")
+
         elif self._save_cali:
-            data = cali_data
-            if data is None:
-                print(f"[Brillouin Viewer] Failed to save data, no data availalbe")
+            if cali_data is None:
+                print("[Brillouin Viewer] Failed to save data, no data available")
                 return
 
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Save Calibration Data", filter="Pickle Files (*.pkl);;All Files (*)"
+            base_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Calibration Data", filter="All Files (*)"
             )
-            if not path:
+            if not base_path:
                 return
 
-            if path:
-                try:
-                    with open(path, "wb") as f:
-                        pickle.dump(data, f)
-                    print(f"[✓] Calibration data saved to {path}")
-                except Exception as e:
-                    print(f"[Error] Failed to save calibration data: {e}")
-        else:
-            pass
+            try:
+                # Save Pickle
+                pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
+                with open(pkl_path, "wb") as f:
+                    pickle.dump(cali_data, f)
+                print(f"[✓] Calibration data saved to {pkl_path}")
+
+                # Save HDF5
+                h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
+                hdf5_dict = dataclass_to_hdf5_native_dict(cali_data)
+                save_dict_to_hdf5(h5_path, hdf5_dict)
+                print(f"[✓] Calibration data saved as HDF5 to {h5_path}")
+
+            except Exception as e:
+                print(f"[Error] Failed to save calibration data: {e}")
 
         self._show_cali = False
         self._save_cali = True
@@ -780,24 +798,34 @@ class BrillouinViewer(QWidget):
         self.measurement_series_label.setText(f"Stored Series: {len(self._stored_measurements)}")
         self.start_live_requested.emit()
 
-
     def save_measurements_to_file(self):
         if not self._stored_measurements:
             print("[Brillouin Viewer] No measurements to save.")
             return
 
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Measurements", filter="Pickle Files (*.pkl);;All Files (*)"
+        # Ask user for base file path
+        base_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Measurements (base name, without extension)",
+            filter="All Files (*)"
         )
-        if not path:
+        if not base_path:
             return
 
         try:
-            with open(path, "wb") as f:
+            # Save as Pickle
+            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
+            with open(pkl_path, "wb") as f:
                 pickle.dump(self._stored_measurements, f)
-            print(f"[✓] Measurement series saved to {path}")
+            print(f"[✓] Pickle saved to: {pkl_path}")
+
+            # Save as HDF5
+            h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
+            native_dict = dataclass_to_hdf5_native_dict(self._stored_measurements)
+            save_dict_to_hdf5(h5_path, native_dict)
+            print(f"[✓] HDF5 saved to: {h5_path}")
+
         except Exception as e:
-            print(f"[Brillouin Viewer] [Error] Failed to save measurements: {e}")
+            print(f"[Brillouin Viewer] [Error] Failed to save: {e}")
 
     def clear_measurements(self):
         self._stored_measurements.clear()

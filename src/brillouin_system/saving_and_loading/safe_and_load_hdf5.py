@@ -89,6 +89,8 @@ def _write_to_hdf5_group(h5group: h5py.Group, data: Any) -> None:
             return
 
         for key, val in data.items():
+            if key in {"__tuple__", "__ndarray__"}:
+                continue  # already handled above as attribute
             if not isinstance(key, str):
                 raise TypeError(f"HDF5 requires string keys, got {type(key)}: {key}")
             _write_to_hdf5_group(h5group.create_group(key), val)
@@ -132,6 +134,18 @@ def load_dict_from_hdf5(filepath: str) -> Any:
 
 def _read_hdf5_group(h5group: h5py.Group) -> Any:
     """Recursively read an HDF5 group back into native Python objects."""
+
+    #print(f"🔍 Entering group: {h5group.name}, keys={list(h5group.keys())}, attrs={dict(h5group.attrs)}")
+
+    if h5group.attrs.get("__tuple__") and "items" in h5group:
+        item_keys = sorted(h5group["items"].keys(), key=int)
+        return {"__tuple__": True, "items": [_read_hdf5_group(h5group["items"][k]) for k in item_keys]}
+
+    if h5group.attrs.get("__ndarray__") and "items" in h5group:
+        item_keys = sorted(h5group["items"].keys(), key=int)
+        return {"__ndarray__": True, "items": [_read_hdf5_group(h5group["items"][k]) for k in item_keys]}
+
+
     if 'value' in h5group.attrs:
         return h5group.attrs['value']
 
@@ -143,9 +157,7 @@ def _read_hdf5_group(h5group: h5py.Group) -> Any:
             return val
         return val
 
-    if h5group.attrs.get("__tuple__") is True and "items" in h5group:
-        item_keys = sorted(h5group["items"].keys(), key=int)
-        return tuple(_read_hdf5_group(h5group["items"][k]) for k in item_keys)
+
 
     keys = list(h5group.keys())
     is_list = all(k.isdigit() for k in keys)

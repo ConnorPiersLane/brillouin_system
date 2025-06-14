@@ -20,6 +20,7 @@ def get_empty_fitting(sline):
     )
 
 
+
 def fit_reference_spectrum(sline: np.ndarray) -> FittedSpectrum:
     config = find_peaks_reference_config.get()
 

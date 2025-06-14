@@ -71,9 +71,9 @@ class AndorFrameSettings:
     y_end: int
     vbin: int
     hbin: int
-    amp_mode_index: int
+    n_px_crop_left_side: int
+    n_px_crop_right_side: int
 
-#TODO: remove amp_mode_index
 # ---------- Load/save helpers ----------
 
 find_peaks_config_toml_path = Path(__file__).parent.resolve() / "config.toml"
@@ -100,12 +100,11 @@ def load_calibration_config(path: Path) -> CalibrationConfig:
         raw = tomli.load(f)["calibration"]
 
     return CalibrationConfig(
-        degree=raw["degree"],  # ← Add this
+        degree=raw["degree"],
         n_per_freq=raw["n_per_freq"],
         calibration_freqs=raw["calibration_freqs"],
         reference=raw["reference"]
     )
-
 
 def save_calibration_config(path: Path, config: ThreadSafeConfig):
     with path.open("rb") as f:
@@ -131,7 +130,8 @@ def load_andor_frame_settings(path: Path) -> AndorFrameSettings:
         y_end=raw["y_end"],
         vbin=raw["vbin"],
         hbin=raw["hbin"],
-        amp_mode_index=raw["amp_mode_index"]
+        n_px_crop_left_side=raw["n_px_crop_left_side"],
+        n_px_crop_right_side=raw["n_px_crop_right_side"]
     )
 
 def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):

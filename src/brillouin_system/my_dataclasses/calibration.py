@@ -33,7 +33,9 @@ class MeasurementsPerFreq:
     state_mode: StateMode
     cali_meas_points: list[CalibrationMeasurementPoint]
 
-
+"""
+This is stored:
+"""
 @dataclass
 class CalibrationData:
     measured_freqs: list[MeasurementsPerFreq]
@@ -49,27 +51,40 @@ class CalibrationPolyfitParameters:
     sigma_right_peak: np.ndarray
 
 
-
 class CalibrationCalculator:
     def __init__(self, parameters: CalibrationPolyfitParameters):
         self.p = parameters
 
     def freq_left_peak(self, px):
-        return np.polyval(p=self.p.freq_left_peak, x=px)
+        return np.polyval(self.p.freq_left_peak, px)
+
+    def dfreq_dpx_left_peak(self, px):
+        coeffs = np.polyder(self.p.freq_left_peak, m=1)
+        return np.polyval(coeffs, px)
 
     def freq_right_peak(self, px):
-        return np.polyval(p=self.p.freq_right_peak, x=px)
+        return np.polyval(self.p.freq_right_peak, px)
+
+    def dfreq_dpx_right_peak(self, px):
+        coeffs = np.polyder(self.p.freq_right_peak, m=1)
+        return np.polyval(coeffs, px)
 
     def freq_peak_distance(self, px):
-        return np.polyval(p=self.p.freq_peak_distance, x=px)
+        return np.polyval(self.p.freq_peak_distance, px)
+
+    def dfreq_dpx_peak_distance(self, px):
+        coeffs = np.polyder(self.p.freq_peak_distance, m=1)
+        return np.polyval(coeffs, px)
 
     def sigma_left_peak(self, px):
-        return np.polyval(p=self.p.sigma_left_peak, x=px)
+        return np.polyval(self.p.sigma_left_peak, px)
 
     def sigma_right_peak(self, px):
-        return np.polyval(p=self.p.sigma_right_peak, x=px)
+        return np.polyval(self.p.sigma_right_peak, px)
 
 
+def get_calibration_calculator_from_data(calibration_data: CalibrationData) -> CalibrationCalculator:
+    return CalibrationCalculator(calibrate(data=calibration_data))
 
 def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
     config = calibration_config.get()

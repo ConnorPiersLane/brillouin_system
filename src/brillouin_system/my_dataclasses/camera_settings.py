@@ -32,7 +32,7 @@ class AndorCameraSettings:
     name: str
     exposure_time_s: float
     emccd_gain: int
-    roi: np.ndarray
-    binning: np.ndarray
+    roi: tuple[int, int, int, int]
+    binning: tuple[int, int]
     preamp_gain: int | float
     preamp_mode: str

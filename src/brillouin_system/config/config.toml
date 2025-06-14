@@ -1,5 +1,5 @@
 [calibration]
-degree = 2
+degree = 1
 n_per_freq = 3
 calibration_freqs = [
     4.0,
@@ -44,4 +44,5 @@ y_start = 300
 y_end = 315
 vbin = 1
 hbin = 1
-amp_mode_index = 16
+n_px_crop_left_side = 0
+n_px_crop_right_side = 0

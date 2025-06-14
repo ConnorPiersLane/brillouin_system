@@ -18,8 +18,6 @@ from brillouin_system.config.config import (
     fitting_models_reference
 )
 
-
-
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +28,6 @@ class ConfigDialog(QDialog):
         self.sample_inputs = {}
         self.reference_inputs = {}
 
-        # Andor Frame inputs
         self.selected_rows_input = QLineEdit()
         self.n_dark_images_input = QLineEdit()
         self.n_dark_images_input.setValidator(QIntValidator(0, 999))
@@ -49,8 +46,10 @@ class ConfigDialog(QDialog):
         self.vbin_input.setValidator(QIntValidator(0, 999))
         self.hbin_input = QLineEdit()
         self.hbin_input.setValidator(QIntValidator(0, 999))
-        self.amp_mode_index_input = QLineEdit()
-        self.amp_mode_index_input.setValidator(QIntValidator(0, 999))
+        self.crop_left_input = QLineEdit()
+        self.crop_left_input.setValidator(QIntValidator(0, 9999))
+        self.crop_right_input = QLineEdit()
+        self.crop_right_input.setValidator(QIntValidator(0, 9999))
 
         main_layout = QVBoxLayout()
         main_layout.addWidget(self.create_andor_frame_group())
@@ -68,8 +67,10 @@ class ConfigDialog(QDialog):
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("Selected Pixel Rows (e.g. 4,5,6):"))
         row1.addWidget(self.selected_rows_input)
-        row1.addWidget(QLabel("Amp Mode Index:"))
-        row1.addWidget(self.amp_mode_index_input)
+        row1.addWidget(QLabel("Crop Left Pixels #:"))
+        row1.addWidget(self.crop_left_input)
+        row1.addWidget(QLabel("Crop Right Pixels #:"))
+        row1.addWidget(self.crop_right_input)
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("X Start:"))
@@ -120,7 +121,6 @@ class ConfigDialog(QDialog):
             row.addWidget(input_field)
             layout.addLayout(row)
 
-        # Add Peak Fitting combo at end
         row = QHBoxLayout()
         label = QLabel("Peak Fitting:")
         combo = QComboBox()
@@ -197,7 +197,8 @@ class ConfigDialog(QDialog):
         self.y_end_input.setText(str(andor.y_end))
         self.vbin_input.setText(str(andor.vbin))
         self.hbin_input.setText(str(andor.hbin))
-        self.amp_mode_index_input.setText(str(andor.amp_mode_index))
+        self.crop_left_input.setText(str(andor.n_px_crop_left_side))
+        self.crop_right_input.setText(str(andor.n_px_crop_right_side))
         self.sample_model_combo.setCurrentText(find_peaks_sample_config.get_field("fitting_model"))
         self.reference_model_combo.setCurrentText(find_peaks_reference_config.get_field("fitting_model"))
 
@@ -231,22 +232,20 @@ class ConfigDialog(QDialog):
                 y_end=int(self.y_end_input.text()),
                 vbin=int(self.vbin_input.text()),
                 hbin=int(self.hbin_input.text()),
-                amp_mode_index=int(self.amp_mode_index_input.text())
+                n_px_crop_left_side=int(self.crop_left_input.text()),
+                n_px_crop_right_side=int(self.crop_right_input.text())
             )
 
-            # Sample
             sample_kwargs = {field: self._parse_value(self.sample_inputs[field].text(), field)
                              for field in self.field_names()}
             sample_kwargs["fitting_model"] = self.sample_model_combo.currentText()
             find_peaks_sample_config.update(**sample_kwargs)
 
-            # Reference
             reference_kwargs = {field: self._parse_value(self.reference_inputs[field].text(), field)
                                 for field in self.field_names()}
             reference_kwargs["fitting_model"] = self.reference_model_combo.currentText()
             find_peaks_reference_config.update(**reference_kwargs)
 
-            # Calibration
             if self.left_radio.isChecked():
                 ref = "left"
             elif self.right_radio.isChecked():

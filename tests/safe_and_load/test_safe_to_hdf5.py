@@ -10,8 +10,8 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
 
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 
-TEST_FILE = "test5.pkl"
-HDF5_FILE = "test5.h5"
+TEST_FILE = "plastic_5mW.pkl"
+HDF5_FILE = "plastic_5mW.h5"
 
 
 def deep_equal(a, b, path="root"):

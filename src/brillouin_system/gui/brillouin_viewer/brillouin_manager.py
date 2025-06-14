@@ -4,19 +4,20 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import calibration_config, CalibrationConfig, andor_frame_config
+from brillouin_system.config.config import CalibrationConfig, andor_frame_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
+from brillouin_system.fitting.compute_sample_freqs import compute_freq_shift
 from brillouin_system.fitting.fitting_manager import get_empty_fitting, fit_reference_spectrum, fit_sample_spectrum
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.state_mode import StateMode
 from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
 from brillouin_system.fitting.fit_util import get_sline_from_image
-from brillouin_system.my_dataclasses.calibration import CalibrationData, calibrate, \
-    CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator
+from brillouin_system.my_dataclasses.calibration import CalibrationData, \
+    CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, get_calibration_calculator_from_data
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries, MeasurementSettings
 from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
@@ -298,7 +299,7 @@ class BrillouinManager:
         if self.calibration_data is None:
             self.calibration_calculator = None
         else:
-            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(calibrate(self.calibration_data))
+            self.calibration_calculator: CalibrationCalculator = get_calibration_calculator_from_data(self.calibration_data)
 
     def perform_calibration(self, config: CalibrationConfig, call_update_gui: Callable[[DisplayResults], None]) -> bool:
         """
@@ -384,7 +385,7 @@ class BrillouinManager:
                 measurement_point = MeasurementPoint(
                     frame=frame,
                     zaber_position=self.zaber.get_zaber_position_class(),
-                    mako_image=frame,
+                    mako_image=None,
                 )
                 measurements.append(measurement_point)
 
@@ -400,28 +401,15 @@ class BrillouinManager:
 
 
 
-    def compute_freq_shift(self, fitting: FittedSpectrum) -> float | None:
-        if not fitting.is_success or self.calibration_calculator is None:
-            return None
-
-        config = calibration_config.get()
-
-
-        if config.reference == "left":
-            return self.calibration_calculator.freq_left_peak(fitting.left_peak_center_px)
-        elif config.reference == "right":
-            return self.calibration_calculator.freq_right_peak(fitting.right_peak_center_px)
-        elif config.reference == "distance":
-            return self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance)
-        else:
-            return None
+    def get_freq_shift(self, fitting: FittedSpectrum) -> float | None:
+        return compute_freq_shift(fitting=fitting, calibration_calculator=self.calibration_calculator)
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
         if self.is_reference_mode:
             freq_shift_ghz = self.microwave.get_frequency()
         elif fitting.is_success:
-            freq_shift_ghz = self.compute_freq_shift(fitting)
+            freq_shift_ghz = self.get_freq_shift(fitting)
         else:
             freq_shift_ghz = None
 
@@ -494,7 +482,7 @@ class BrillouinManager:
         return AndorCameraSettings(name=self.camera.get_name(),
                                    exposure_time_s=self.camera.get_exposure_time(),
                                    emccd_gain=self.camera.get_emccd_gain(),
-                                   roi=np.asarray(self.camera.get_roi()),
-                                   binning=np.asarray(self.camera.get_binning()),
+                                   roi=self.camera.get_roi(),
+                                   binning=self.camera.get_binning(),
                                    preamp_gain=self.camera.get_preamp_gain(),
                                    preamp_mode=f"{self.camera.get_amp_mode()}")

@@ -4,7 +4,7 @@ import sys
 import pickle
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
-    QGroupBox, QListWidget, QRadioButton, QButtonGroup, QFileDialog
+    QGroupBox, QListWidget, QRadioButton, QButtonGroup, QFileDialog, QMessageBox
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -12,6 +12,13 @@ import matplotlib.pyplot as plt
 
 from brillouin_system.gui.data_analyzer.analyzer_manager import AnalyzerManager
 from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
+
+from brillouin_system.my_dataclasses.calibration import (
+    CalibrationCalculator,
+    render_calibration_to_pixmap,
+    CalibrationImageDialog, calibrate,
+)
+from brillouin_system.config.config import calibration_config
 
 
 class AnalyzerViewer(QWidget):
@@ -94,6 +101,10 @@ class AnalyzerViewer(QWidget):
 
         self.loaded_calibration_label = QLabel("Loaded Calibration: None")
 
+        self.show_calibration_btn = QPushButton("Show Calibration")
+        self.show_calibration_btn.clicked.connect(self.show_calibration)
+        self.show_calibration_btn.setEnabled(False)
+
         self.radio_no_bg = QRadioButton("No BG Subtraction")
         self.radio_with_bg = QRadioButton("With BG Subtraction")
         self.radio_no_bg.setChecked(True)
@@ -105,10 +116,12 @@ class AnalyzerViewer(QWidget):
         self.config_series_btn = QPushButton("Config")
         self.config_series_btn.clicked.connect(self.open_config_dialog)
 
+        # Add widgets to layout in logical order
         calibration_layout.addWidget(self.radio_use_series)
         calibration_layout.addWidget(self.radio_use_external)
         calibration_layout.addWidget(self.load_calibration_btn)
         calibration_layout.addWidget(self.loaded_calibration_label)
+        calibration_layout.addWidget(self.show_calibration_btn)
         calibration_layout.addWidget(self.radio_no_bg)
         calibration_layout.addWidget(self.radio_with_bg)
         calibration_layout.addWidget(self.config_series_btn)
@@ -128,6 +141,43 @@ class AnalyzerViewer(QWidget):
         if path:
             filename = path.split("/")[-1]
             self.loaded_calibration_label.setText(f"Loaded Calibration: {filename}")
+            self.show_calibration_btn.setEnabled(True)
+
+    def show_calibration(self):
+        use_series = self.radio_use_series.isChecked()
+        calibration_data = None
+
+        if use_series:
+            selected_items = self.series_list_widget.selectedItems()
+            if len(selected_items) != 1:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Selection",
+                    "Please select exactly one series to use its calibration."
+                )
+                return
+
+            index = self.series_list_widget.row(selected_items[0])
+            if 0 <= index < len(self.analyze_manager.stored_measurement_series):
+                calibration_data = self.analyze_manager.stored_measurement_series[index].calibration_data
+            else:
+                print("[AnalyzerViewer] Invalid series index.")
+                return
+        else:
+            calibration_data = self.analyze_manager.external_calibration
+
+        if calibration_data is None:
+            QMessageBox.warning(self, "No Calibration", "No calibration data is available.")
+            return
+
+        try:
+            calculator = CalibrationCalculator(calibrate(calibration_data))
+            reference = calibration_config.get().reference
+            pixmap = render_calibration_to_pixmap(calibration_data, calculator, reference)
+            dialog = CalibrationImageDialog(pixmap, parent=self)
+            dialog.exec_()
+        except Exception as e:
+            print(f"[AnalyzerViewer] Failed to display calibration: {e}")
 
     def load_series_file(self):
         series_info_list = self.analyze_manager.load_measurements_from_file()

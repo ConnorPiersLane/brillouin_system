@@ -4,6 +4,12 @@ from scipy.signal import find_peaks
 from brillouin_system.config.config import find_peaks_reference_config, find_peaks_sample_config, andor_frame_config
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
+from brillouin_system.config.config import andor_frame_config
+
+frame_config = andor_frame_config.get()
+
+import numpy as np
+from brillouin_system.config.config import andor_frame_config
 
 def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
     """
@@ -14,20 +20,28 @@ def get_sline_from_image(frame: np.ndarray) -> np.ndarray:
         frame (np.ndarray): 2D image from the camera
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]: (px, sline) where px is the pixel axis and sline is the summed spectrum.
-
+        np.ndarray: The summed and cropped spectrum.
     """
-    rows = list(andor_frame_config.get().selected_rows)
-
+    config = andor_frame_config.get()
+    rows = list(config.selected_rows)
     height = frame.shape[0]
 
     if not rows or not all(0 <= r < height for r in rows):
-        print("[select_sline_from_image] Warning: Invalid or empty row list — using full image height.")
+        print("[get_sline_from_image] Warning: Invalid or empty row list — using full image height.")
         rows = list(range(height))
 
     sline = frame[rows, :].sum(axis=0)
 
+    left_offset = config.n_px_crop_left_side
+    right_offset = config.n_px_crop_right_side
+
+    if right_offset > 0:
+        sline = sline[left_offset:-right_offset]
+    else:
+        sline = sline[left_offset:]
+
     return sline
+
 
 
 
