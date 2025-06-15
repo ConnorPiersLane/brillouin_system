@@ -21,9 +21,6 @@ class FittedSpectrum:
     inter_peak_distance: float = None
 
 
-
-
-
 @dataclass
 class DisplayResults:
     is_fitting_available: bool

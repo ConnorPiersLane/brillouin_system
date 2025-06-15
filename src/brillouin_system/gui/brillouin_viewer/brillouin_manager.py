@@ -289,11 +289,7 @@ class BrillouinManager:
                 return fit_sample_spectrum(sline=sline, calibration_calculator=self.calibration_calculator)
         except Exception as e:
             print(f"[BrillouinManager] Fitting error: {e}")
-            return FittedSpectrum(
-                is_success=False,
-                x_pixels=np.arange(sline.shape[0]),
-                sline=sline,
-            )
+            return get_empty_fitting(sline)
 
     def update_calibration_calculator(self):
         if self.calibration_data is None:

@@ -2,6 +2,10 @@
 
 import pickle
 from PyQt5.QtWidgets import QFileDialog
+
+from brillouin_system.fitting.fit_util import get_sline_from_image
+from brillouin_system.fitting.fitting_manager import fit_reference_spectrum, fit_sample_spectrum, get_empty_fitting
+from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries, MeasurementPoint
 from brillouin_system.my_dataclasses.calibration import CalibrationData, calibrate, CalibrationCalculator, \
     get_calibration_calculator_from_data
@@ -87,14 +91,12 @@ class AnalyzerManager:
     def run_spectrum_fit_on_measurement_series(self,
                                                measurement: MeasurementSeries,
                                                is_do_bg_subtraction: bool,
-                                               external_calibration_data = None):
-
-
-
+                                               external_calibration_data = None) -> list[FittedSpectrum]:
+        fitted_spectras = []
 
         if external_calibration_data is None and measurement.calibration_data is None:
-            print(" No fitting possible")
-            return
+            print(" No calibration possible: Calibration Data is missing")
+            return fitted_spectras
 
         if external_calibration_data is None:
             calibration_data = measurement.calibration_data
@@ -102,5 +104,23 @@ class AnalyzerManager:
             calibration_data = external_calibration_data
 
         calibration_calculator = get_calibration_calculator_from_data(calibration_data)
+
         for mp in measurement.measurements:
-            pass
+            frame = mp.frame
+            if is_do_bg_subtraction:
+                bg_image = measurement.state_mode.bg_image.mean_image
+                if bg_image is None:
+                    print("No BG Image availalbe")
+                    return fitted_spectras
+                frame = frame - bg_image
+
+            sline = get_sline_from_image(frame)
+
+            try:
+                if measurement.state_mode.is_reference_mode:
+                    fs = fit_reference_spectrum(sline=sline)
+                else:
+                    fs = fit_sample_spectrum(sline=sline, calibration_calculator=calibration_calculator)
+            except Exception as e:
+                print(f"[BrillouinManager] Fitting error: {e}")
+                fs = get_empty_fitting(sline)
