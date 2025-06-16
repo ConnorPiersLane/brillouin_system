@@ -85,8 +85,7 @@ class BrillouinViewer(QWidget):
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
-
-
+    cancel_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -119,6 +118,7 @@ class BrillouinViewer(QWidget):
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
+        self.cancel_requested.connect(self.brillouin_signaller.cancel_operations)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -183,11 +183,8 @@ class BrillouinViewer(QWidget):
 
     def update_gui(self):
         # Update the gui
-        self.brillouin_signaller.emit_is_illumination_continuous()
-        self.brillouin_signaller.emit_is_background_available()
-        self.brillouin_signaller.emit_camera_settings()
-        self.brillouin_signaller.emit_do_background_subtraction()
-        self.brillouin_signaller.emit_do_live_fitting_state()
+        self.brillouin_signaller.update_gui()
+
 
 
 
@@ -338,7 +335,7 @@ class BrillouinViewer(QWidget):
 
         self.config_settings_btn = QPushButton("Configs")
         self.config_settings_btn.clicked.connect(self.on_configs_clicked)
-        layout.addWidget(self.config_settings_btn)  # ✅ Correct method for QVBoxLayout
+        layout.addWidget(self.config_settings_btn)
 
         group.setLayout(layout)
         return group
@@ -446,27 +443,33 @@ class BrillouinViewer(QWidget):
 
         layout.addLayout(form_layout)
 
-        self.measure_btn = QPushButton("Take Measurements")
+        # --- Take + Cancel Buttons
+        self.measure_btn = QPushButton("Take")
         self.measure_btn.clicked.connect(self.take_measurements)
-        layout.addWidget(self.measure_btn)
 
+        self.cancel_event_btn = QPushButton("Cancel")
+        self.cancel_event_btn.clicked.connect(self.on_cancel_event_clicked)
+
+        take_row = QHBoxLayout()
+        take_row.addWidget(self.measure_btn)
+        take_row.addWidget(self.cancel_event_btn)
+        layout.addLayout(take_row)
+
+        # Measurement info label
         self.measurement_series_label = QLabel("Stored Series: 0")
-        # layout.addWidget(self.measurement_series_label)
+        layout.addWidget(self.measurement_series_label)
 
-        row = QHBoxLayout()
-        row.addWidget(self.measurement_series_label)
-        # row.addStretch()
-
-
-        layout.addLayout(row)
-
-        self.save_measurement_series_btn = QPushButton("Save Measurements")
+        # --- Save + Clear Buttons
+        self.save_measurement_series_btn = QPushButton("Save")
         self.save_measurement_series_btn.clicked.connect(self.save_measurements_to_file)
-        layout.addWidget(self.save_measurement_series_btn)
 
-        self.clear_measurement_series_btn = QPushButton("Clear Measurements")
+        self.clear_measurement_series_btn = QPushButton("Clear")
         self.clear_measurement_series_btn.clicked.connect(self.clear_measurements)
-        layout.addWidget(self.clear_measurement_series_btn)
+
+        save_clear_row = QHBoxLayout()
+        save_clear_row.addWidget(self.save_measurement_series_btn)
+        save_clear_row.addWidget(self.clear_measurement_series_btn)
+        layout.addLayout(save_clear_row)
 
         group.setLayout(layout)
         return group
@@ -510,6 +513,9 @@ class BrillouinViewer(QWidget):
             self.illum_label_pulse.setStyleSheet("color: green; font-weight: bold")
             self.snap_once_btn.setEnabled(True)
 
+    def on_cancel_event_clicked(self):
+        print("[BrillouinViewer] Cancel button clicked.")
+        self.cancel_requested.emit()
 
     # ---------------- Toggle ---------------- #
     def toggle_background_subtraction(self):

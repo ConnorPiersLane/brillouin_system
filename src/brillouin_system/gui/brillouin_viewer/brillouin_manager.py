@@ -4,7 +4,7 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import CalibrationConfig, andor_frame_config
+from brillouin_system.config.config import CalibrationConfig, andor_frame_config, calibration_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
@@ -297,6 +297,8 @@ class BrillouinManager:
         else:
             self.calibration_calculator: CalibrationCalculator = get_calibration_calculator_from_data(self.calibration_data)
 
+
+
     def perform_calibration(self, config: CalibrationConfig, call_update_gui: Callable[[DisplayResults], None]) -> bool:
         """
         Perform a calibration measurement series and store the results.
@@ -335,6 +337,16 @@ class BrillouinManager:
             return False
 
 
+    def take_one_measurement(self, zaber_position) -> MeasurementPoint:
+        self.zaber.set_zaber_position_by_class(zaber_position=zaber_position)
+
+        frame = self.get_andor_frame()
+
+        return MeasurementPoint(
+            frame=frame,
+            zaber_position=self.zaber.get_zaber_position_class(),
+            mako_image=None,
+        )
 
     def take_measurement_series(
             self,

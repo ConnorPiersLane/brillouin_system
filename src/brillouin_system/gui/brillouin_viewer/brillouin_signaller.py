@@ -1,7 +1,10 @@
 from contextlib import contextmanager
 
+import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 import time
+
+from PyQt5.QtWidgets import QApplication
 
 from brillouin_system.config.config import calibration_config
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
@@ -9,6 +12,7 @@ from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSettings
+from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
 
 
 class BrillouinSignaller(QObject):
@@ -48,6 +52,7 @@ class BrillouinSignaller(QObject):
         self._thread_active = False
         self._gui_ready = True
         self._camera_shutter_open = True
+        self._is_cancel_operations = False
 
 
 
@@ -72,6 +77,12 @@ class BrillouinSignaller(QObject):
     def on_gui_ready(self):
         self._gui_ready = True
 
+    def update_gui(self):
+        self.emit_is_illumination_continuous()
+        self.emit_is_background_available()
+        self.emit_camera_settings()
+        self.emit_do_background_subtraction()
+        self.emit_do_live_fitting_state()
 
     @pyqtSlot()
     def emit_do_background_subtraction(self):
@@ -299,6 +310,19 @@ class BrillouinSignaller(QObject):
         self._gui_ready = False
         self.frame_and_fit_ready.emit(display_results)
 
+    def _fitting_and_update_gui(self, frame: np.ndarray):
+        fitting = self.manager.get_fitted_spectrum(frame)
+        display_results = self.manager.get_display_results(frame, fitting)
+        self._update_gui(display_results)
+
+    @pyqtSlot()
+    def cancel_operations(self):
+        self._is_cancel_operations = True
+
+    @pyqtSlot()
+    def reset_cancel(self):
+        self._is_cancel_operations = False
+        self.update_gui()
 
     @pyqtSlot()
     def get_calibration_results(self):
@@ -324,29 +348,60 @@ class BrillouinSignaller(QObject):
         except Exception as e:
             self.log_message.emit(f"[Calibration] Exception: {e}")
 
-
     @pyqtSlot(object)
     def take_measurements(self, measurement_settings: MeasurementSettings):
         """
         Generates a series of ZaberPositions using the given axis, n, and step,
         then takes measurements and updates the GUI accordingly.
         """
-        self._gui_ready = True
-
         try:
+            self._gui_ready = True
+            measurements = []
 
+            # Extract axis and movement parameters
+            which_axis = measurement_settings.move_axes
+            start = self.manager.zaber.get_position(which_axis)
+            step = measurement_settings.move_x_rel_um
+            n = measurement_settings.n_measurements
+            fixed_positions = {}
 
-            # Pass the GUI update callback down to the manager
-            measurement_series = self.manager.take_measurement_series(
-                measurement_settings=measurement_settings,
-                call_update_gui=self._update_gui
+            # Generate the list of positions to move to
+            zaber_positions = generate_zaber_positions(
+                axis=which_axis,
+                start=start,
+                step=step,
+                n=n,
+                fixed_positions=fixed_positions
             )
 
-            # Emit the final result
-            self.measurement_result_ready.emit(measurement_series)
+            for i, zaber_pos in enumerate(zaber_positions):
+                QApplication.processEvents()
+                # Check if user requested cancelation
+                if self._is_cancel_operations:
+                    self.reset_cancel()
+                    raise InterruptedError(f"Cancelled at measurement {i}")
 
+                try:
+                    self.log_message.emit(
+                        f"Measurement {i + 1}: "
+                        f"Zaber (x,y,z) = ({zaber_pos.x:.2f},{zaber_pos.y:.2f},{zaber_pos.z:.2f}) µm"
+                    )
+                    # Take single measurement
+                    mp = self.manager.take_one_measurement(zaber_position=zaber_pos)
+                    self._fitting_and_update_gui(frame=mp.frame)
+                    measurements.append(mp)
+
+                except Exception as e:
+                    self.log_message.emit(f"[Measurement] Error at index {i}: {e}")
+
+            # Emit full result list if all measurements completed
+            self.measurement_result_ready.emit(measurements)
+
+        except InterruptedError as e:
+            self.log_message.emit(f"[Measurement] Cancelled by user: {e}")
         except Exception as e:
             self.log_message.emit(f"[Measurement] Exception: {e}")
+
 
     @pyqtSlot()
     def close(self):
