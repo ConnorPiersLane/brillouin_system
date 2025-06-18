@@ -5,7 +5,7 @@ import numpy as np
 def test_ixon_camera():
     print("=== Starting IxonUltra camera test (with cooling) ===")
 
-    cam = IxonUltra(index=0, temperature=-10.0, fan_mode="full")
+    cam = IxonUltra(index=0, temperature=20.0, fan_mode="full")
 
     assert cam.is_opened(), "Camera failed to open."
     print("[OK] Camera is opened.")

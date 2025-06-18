@@ -244,6 +244,12 @@ class IxonUltra(BaseCamera):
             print(f"  Channel: {mode.channel}, Output Amp: {mode.oamp} ({mode.oamp_kind}), "
                   f"HSSpeed: {mode.hsspeed} ({mode.hsspeed_MHz} MHz), Preamp: {mode.preamp} ({mode.preamp_gain} e⁻/count)")
 
+    def get_amp_mode(self) -> object:
+        """
+        Return the current amplifier mode settings object.
+        """
+        return self.cam.get_amp_mode()
+
     def list_amp_modes(self):
         modes = self.cam.get_all_amp_modes()
         for i, m in enumerate(modes):
