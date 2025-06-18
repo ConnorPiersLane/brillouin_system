@@ -5,13 +5,18 @@ from .baseCamera import BaseCamera
 
 class DummyCamera(BaseCamera):
     def __init__(self):
-        # Default settings
         self.exposure_time = 0.3
         self.gain = 1
         self.roi = (0, 160, 0, 20)
         self.binning = (1, 1)
-        self.frame_shape = (20, 160)  # height, width (shorter height, wider image)
+        self.frame_shape = (20, 160)
         self.verbose = True
+
+        # NEW ATTRIBUTES
+        self._flip = False
+        self._pre_amp_mode = 16
+        self._vss_index = 4
+
         if self.verbose:
             print("[DummyCamera] initialized")
 
@@ -27,13 +32,14 @@ class DummyCamera(BaseCamera):
     def snap(self) -> np.ndarray:
         time.sleep(self.exposure_time)
         frame = self._generate_plastic_image()
+        if self._flip:
+            frame = np.fliplr(frame)
         return frame
 
     def _generate_plastic_image(self) -> np.ndarray:
         h, w = self.frame_shape
         image = np.random.normal(loc=150, scale=10, size=(h, w))
 
-        # --- Create synthetic Brillouin spectrum (2 Lorentzian peaks)
         def lorentzian(xx, amp, cen, wid):
             return amp * wid ** 2 / ((xx - cen) ** 2 + wid ** 2)
 
@@ -42,12 +48,10 @@ class DummyCamera(BaseCamera):
         peak2 = lorentzian(x, amp=1000, cen=w // 2 + 30, wid=4)
         spectrum_line = peak1 + peak2 + 200 + np.random.normal(0, 15, size=w)
 
-        # --- Inject this synthetic line into a horizontal band
         band_y = h // 2 + np.random.randint(-2, 2)
-        for offset in [-1, 0, 1]:  # 3-row band
+        for offset in [-1, 0, 1]:
             image[band_y + offset, :] += spectrum_line
 
-        # Smooth the full image for realism
         image = gaussian_filter(image, sigma=1.2)
         return np.clip(image, 0, 65535).astype(np.uint16)
 
@@ -78,18 +82,8 @@ class DummyCamera(BaseCamera):
     def is_opened(self) -> bool:
         return True
 
-    def get_preamp_gain(self) -> int:
-        """Preamp gain (e⁻/count)"""
-        return 1.0
-
-    def get_amp_mode(self) -> tuple:
-        """
-
-        """
-        return "Test Amp Mode: (channel, oamp, hsspeed, preamp)"
-
     def close(self):
-        pass
+        print("[DummyCamera] Closed.")
 
     def get_frame_shape(self) -> tuple[int, int]:
         return self.frame_shape
@@ -100,3 +94,36 @@ class DummyCamera(BaseCamera):
     def set_verbose(self, verbose: bool) -> None:
         self.verbose = verbose
         print(f"[DummyCamera] set to self.verbose={self.verbose}")
+
+    def get_preamp_gain(self) -> int:
+        return 1.0
+
+    def get_amp_mode(self) -> str:
+        return f"DummyAmpMode(preamp_mode={self._pre_amp_mode})"
+
+    # NEW: Flip image horizontally
+    def set_flip_image_horizontally(self, flip: bool):
+        self._flip = flip
+        if self.verbose:
+            print(f"[DummyCamera] Flip image horizontally set to {flip}")
+
+    def get_flip_image_horizontally(self) -> bool:
+        return self._flip
+
+    # NEW: Preamp mode
+    def set_pre_amp_mode(self, index: int):
+        self._pre_amp_mode = index
+        if self.verbose:
+            print(f"[DummyCamera] Preamp mode set to index {index}")
+
+    def get_pre_amp_mode(self) -> int:
+        return self._pre_amp_mode
+
+    # NEW: VSS index
+    def set_vss_index(self, index: int):
+        self._vss_index = index
+        if self.verbose:
+            print(f"[DummyCamera] VSS index set to {index}")
+
+    def get_vss_index(self) -> int:
+        return self._vss_index

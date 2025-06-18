@@ -1,3 +1,4 @@
+# config_dialog.py
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGroupBox,
     QPushButton, QApplication, QFormLayout, QButtonGroup, QRadioButton,
@@ -21,42 +22,34 @@ from brillouin_system.config.config import (
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-
         self.setWindowTitle("Peak Detection Settings")
         self.setMinimumSize(900, 600)
 
         self.sample_inputs = {}
         self.reference_inputs = {}
 
+        # Andor frame inputs
         self.selected_rows_input = QLineEdit()
-        self.n_dark_images_input = QLineEdit()
-        self.n_dark_images_input.setValidator(QIntValidator(0, 999))
+        self.n_dark_images_input = QLineEdit(); self.n_dark_images_input.setValidator(QIntValidator(0, 999))
         self.dark_image_input = QCheckBox()
-        self.n_bg_images_input = QLineEdit()
-        self.n_bg_images_input.setValidator(QIntValidator(0, 999))
-        self.x_start_input = QLineEdit()
-        self.x_start_input.setValidator(QIntValidator(0, 9999))
-        self.x_end_input = QLineEdit()
-        self.x_end_input.setValidator(QIntValidator(0, 9999))
-        self.y_start_input = QLineEdit()
-        self.y_start_input.setValidator(QIntValidator(0, 9999))
-        self.y_end_input = QLineEdit()
-        self.y_end_input.setValidator(QIntValidator(0, 9999))
-        self.vbin_input = QLineEdit()
-        self.vbin_input.setValidator(QIntValidator(0, 999))
-        self.hbin_input = QLineEdit()
-        self.hbin_input.setValidator(QIntValidator(0, 999))
-        self.crop_left_input = QLineEdit()
-        self.crop_left_input.setValidator(QIntValidator(0, 9999))
-        self.crop_right_input = QLineEdit()
-        self.crop_right_input.setValidator(QIntValidator(0, 9999))
+        self.n_bg_images_input = QLineEdit(); self.n_bg_images_input.setValidator(QIntValidator(0, 999))
+        self.x_start_input = QLineEdit(); self.x_start_input.setValidator(QIntValidator(0, 9999))
+        self.x_end_input = QLineEdit(); self.x_end_input.setValidator(QIntValidator(0, 9999))
+        self.y_start_input = QLineEdit(); self.y_start_input.setValidator(QIntValidator(0, 9999))
+        self.y_end_input = QLineEdit(); self.y_end_input.setValidator(QIntValidator(0, 9999))
+        self.vbin_input = QLineEdit(); self.vbin_input.setValidator(QIntValidator(0, 999))
+        self.hbin_input = QLineEdit(); self.hbin_input.setValidator(QIntValidator(0, 999))
+        self.crop_left_input = QLineEdit(); self.crop_left_input.setValidator(QIntValidator(0, 9999))
+        self.crop_right_input = QLineEdit(); self.crop_right_input.setValidator(QIntValidator(0, 9999))
+        self.pre_amp_mode_input = QLineEdit(); self.pre_amp_mode_input.setValidator(QIntValidator(0, 999))
+        self.vss_index_input = QLineEdit(); self.vss_index_input.setValidator(QIntValidator(0, 999))
+        self.flip_image_horizontally_input = QCheckBox()
 
         main_layout = QVBoxLayout()
         main_layout.addWidget(self.create_andor_frame_group())
         main_layout.addWidget(self.create_spectrum_fitting_group())
         main_layout.addWidget(self.create_calibration_group())
         main_layout.addLayout(self.create_save_button())
-
         self.setLayout(main_layout)
         self.load_initial_values()
 
@@ -94,9 +87,18 @@ class ConfigDialog(QDialog):
         row3.addWidget(QLabel("Take Dark Images:"))
         row3.addWidget(self.dark_image_input)
 
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("Pre Amp Mode:"))
+        row4.addWidget(self.pre_amp_mode_input)
+        row4.addWidget(QLabel("VSS Mode:"))
+        row4.addWidget(self.vss_index_input)
+        row4.addWidget(QLabel("Flip Frame Horizontally:"))
+        row4.addWidget(self.flip_image_horizontally_input)
+
         layout.addLayout(row1)
         layout.addLayout(row2)
         layout.addLayout(row3)
+        layout.addLayout(row4)
         group.setLayout(layout)
         return group
 
@@ -141,12 +143,10 @@ class ConfigDialog(QDialog):
         group = QGroupBox("Calibration")
         layout = QFormLayout()
 
-        self.n_per_freq_input = QLineEdit()
-        self.n_per_freq_input.setValidator(QIntValidator(1, 999))
+        self.n_per_freq_input = QLineEdit(); self.n_per_freq_input.setValidator(QIntValidator(1, 999))
         layout.addRow("n_per_freq:", self.n_per_freq_input)
 
-        self.degree_input = QLineEdit()
-        self.degree_input.setValidator(QIntValidator(1, 99))
+        self.degree_input = QLineEdit(); self.degree_input.setValidator(QIntValidator(1, 99))
         layout.addRow("Polynomial Degree:", self.degree_input)
 
         self.calib_freqs_input = QLineEdit()
@@ -177,13 +177,7 @@ class ConfigDialog(QDialog):
         return row
 
     def field_names(self):
-        return [
-            "prominence_fraction",
-            "min_peak_width",
-            "min_peak_height",
-            "rel_height",
-            "wlen_pixels",
-        ]
+        return ["prominence_fraction", "min_peak_width", "min_peak_height", "rel_height", "wlen_pixels"]
 
     def load_initial_values(self):
         andor = andor_frame_config.get()
@@ -199,6 +193,10 @@ class ConfigDialog(QDialog):
         self.hbin_input.setText(str(andor.hbin))
         self.crop_left_input.setText(str(andor.n_px_crop_left_side))
         self.crop_right_input.setText(str(andor.n_px_crop_right_side))
+        self.pre_amp_mode_input.setText(str(andor.pre_amp_mode))
+        self.vss_index_input.setText(str(andor.vss_index))
+        self.flip_image_horizontally_input.setChecked(andor.flip_image_horizontally)
+
         self.sample_model_combo.setCurrentText(find_peaks_sample_config.get_field("fitting_model"))
         self.reference_model_combo.setCurrentText(find_peaks_reference_config.get_field("fitting_model"))
 
@@ -210,11 +208,9 @@ class ConfigDialog(QDialog):
         self.n_per_freq_input.setText(str(calib.n_per_freq))
         self.degree_input.setText(str(calib.degree))
         self.calib_freqs_input.setText(", ".join(f"{f:.3f}" for f in calib.calibration_freqs))
-
-        ref = calib.reference
-        if ref == "left":
+        if calib.reference == "left":
             self.left_radio.setChecked(True)
-        elif ref == "right":
+        elif calib.reference == "right":
             self.right_radio.setChecked(True)
         else:
             self.dist_radio.setChecked(True)
@@ -233,7 +229,10 @@ class ConfigDialog(QDialog):
                 vbin=int(self.vbin_input.text()),
                 hbin=int(self.hbin_input.text()),
                 n_px_crop_left_side=int(self.crop_left_input.text()),
-                n_px_crop_right_side=int(self.crop_right_input.text())
+                n_px_crop_right_side=int(self.crop_right_input.text()),
+                pre_amp_mode=int(self.pre_amp_mode_input.text()),
+                vss_index=int(self.vss_index_input.text()),
+                flip_image_horizontally=self.flip_image_horizontally_input.isChecked()
             )
 
             sample_kwargs = {field: self._parse_value(self.sample_inputs[field].text(), field)
@@ -246,18 +245,12 @@ class ConfigDialog(QDialog):
             reference_kwargs["fitting_model"] = self.reference_model_combo.currentText()
             find_peaks_reference_config.update(**reference_kwargs)
 
-            if self.left_radio.isChecked():
-                ref = "left"
-            elif self.right_radio.isChecked():
-                ref = "right"
-            else:
-                ref = "distance"
-
+            reference_type = "left" if self.left_radio.isChecked() else "right" if self.right_radio.isChecked() else "distance"
             calibration_config.update(
                 degree=int(self.degree_input.text()),
                 n_per_freq=int(self.n_per_freq_input.text()),
                 calibration_freqs=[float(f.strip()) for f in self.calib_freqs_input.text().split(",") if f.strip()],
-                reference=ref
+                reference=reference_type
             )
 
             save_andor_frame_settings(find_peaks_config_toml_path, andor_frame_config)
@@ -274,9 +267,7 @@ class ConfigDialog(QDialog):
         if value.lower() == "none":
             return None
         try:
-            if "fraction" in field or "rel" in field:
-                return float(value)
-            return int(value)
+            return float(value) if "fraction" in field or "rel" in field else int(value)
         except ValueError:
             return None
 

@@ -1,93 +1,79 @@
+# run_ixon_ultra_no_cooling.py
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 import numpy as np
 
 def test_ixon_camera():
-    print("=== Starting IxonUltra camera test ===")
+    print("=== Starting IxonUltra camera test (no cooling) ===")
 
-    # Create camera instance
     cam = IxonUltra(index=0, temperature="off", fan_mode="full")
 
-    cam.list_amp_modes()
-    print('Hello')
-    print(cam.get_amp_mode())
-
-    vsspeeds = cam.cam.get_all_vsspeeds()
-    print("Available VSSpeeds:", vsspeeds)
-
-    device_info = cam.cam.get_device_info()
-    print(device_info)
-    print("Controller Model:", device_info.controller_model)
-    print("Camera Name (Head Model):", device_info.head_model)
-    print("Serial Number:", device_info.serial_number)
-
-    cam.set_emccd_gain(0)
-    print(cam.get_emccd_gain())
-
-    # ---- Check camera is opened
     assert cam.is_opened(), "Camera failed to open."
     print("[OK] Camera is opened.")
 
-    # ---- Set and verify exposure
-    exposure_time = 0.1
-    cam.set_exposure_time(exposure_time)
-    actual_exp = cam.cam.get_exposure()
-    assert abs(actual_exp - exposure_time) < 0.01, f"Exposure mismatch: set {exposure_time}, got {actual_exp}"
-    print(f"[OK] Exposure set and verified: {actual_exp} s")
+    # --- Verbose mode and available info
+    cam.list_amp_modes()
+    print("[INFO] Current amp mode:", cam.get_amp_mode())
 
-    # ---- Set and verify gain
-    gain_value = 100
-    cam.set_emccd_gain(gain_value)
-    actual_gain, _ = cam.cam.get_EMCCD_gain()
-    assert actual_gain == gain_value, f"Gain mismatch: set {gain_value}, got {actual_gain}"
-    print(f"[OK] Gain set and verified: {actual_gain}")
+    print("[INFO] Available VSSpeeds:", cam.cam.get_all_vsspeeds())
+    device_info = cam.cam.get_device_info()
+    print("[INFO] Device Info:", device_info)
 
-    # ---- Set and verify ROI and binning
-    roi_x_start, roi_x_end = 100, 200
-    roi_y_start, roi_y_end = 50, 150
-    hbin, vbin = 1, 1
-    cam.set_roi(roi_x_start, roi_x_end, roi_y_start, roi_y_end)
-    cam.set_binning(hbin, vbin)
-    roi_params = cam.cam.get_image_mode_parameters()
-    expected_roi = (roi_x_start, roi_x_end, roi_y_start, roi_y_end, hbin, vbin)
-    assert roi_params == expected_roi, f"ROI mismatch: set {expected_roi}, got {roi_params}"
-    print(f"[OK] ROI and binning set and verified: {roi_params}")
+    # --- Gain test
+    cam.set_emccd_gain(50)
+    assert cam.get_emccd_gain() == 50
+    print("[OK] Gain verified: 50")
 
-    # ---- Get and verify frame shape
-    expected_width = (roi_x_end - roi_x_start) // hbin
-    expected_height = (roi_y_end - roi_y_start) // vbin
+    # --- Exposure test
+    cam.set_exposure_time(0.1)
+    actual_exp = cam.get_exposure_time()
+    assert abs(actual_exp - 0.1) < 0.01
+    print(f"[OK] Exposure time verified: {actual_exp}s")
+
+    # --- ROI and binning
+    cam.set_roi(100, 200, 50, 150)
+    cam.set_binning(1, 1)
+    assert cam.get_roi() == (100, 200, 50, 150)
+    assert cam.get_binning() == (1, 1)
+    print("[OK] ROI and binning verified.")
+
+    # --- Flip setting test
+    cam.set_flip_image_horizontally(True)
+    assert cam.get_flip_image_horizontally() is True
+    print("[OK] Flip image horizontally enabled.")
+
+    # --- VSS index test
+    cam.set_vss_index(1)
+    assert cam.get_vss_index() == 1
+    print("[OK] VSS index set and verified.")
+
+    # --- Preamp mode test
+    cam.set_pre_amp_mode(4)
+    assert cam.get_pre_amp_mode() == 4
+    print("[OK] Preamp mode set and verified.")
+
+    # --- Snap image test
     shape = cam.get_frame_shape()
-    assert shape == (expected_height, expected_width), f"Shape mismatch: expected {expected_height}x{expected_width}, got {shape}"
-    print(f"[OK] Frame shape verified: {shape}")
-
-    # ---- Open the shutter
-    cam.cam.setup_shutter("open")
-    shutter_state = cam.cam.get_shutter()
-    assert shutter_state == "open", f"Shutter not open, got: {shutter_state}"
-    print("[OK] Shutter opened successfully.")
-
-    # ---- Snap and check output shape/type
     frame = cam.snap()
-    assert isinstance(frame, np.ndarray), "Snap did not return a NumPy array"
-    assert frame.shape == shape, f"Snap shape mismatch. Expected {shape}, got {frame.shape}"
-    assert frame.dtype in [np.uint16, np.uint32, np.float64], f"Unexpected data type: {frame.dtype}"
-    print("[OK] Snap successful and shape matches ROI.")
+    assert isinstance(frame, np.ndarray)
+    assert frame.shape == shape
+    assert frame.dtype in [np.uint16, np.uint32, np.float64]
+    print("[OK] Snap successful with shape:", frame.shape)
 
-    # ---- Close the shutter
-    cam.cam.setup_shutter("closed")
-    shutter_state = cam.cam.get_shutter()
-    assert shutter_state == "closed", f"Shutter not closed, got: {shutter_state}"
-    print("[OK] Shutter closed successfully.")
+    # --- Shutter test
+    cam.open_shutter()
+    assert cam.cam.get_shutter() == "open"
+    cam.close_shutter()
+    assert cam.cam.get_shutter() == "closed"
+    print("[OK] Shutter open/close tested.")
 
-    # ---- Temperature sanity check
-    temp = cam.cam.get_temperature()
-    print(f"[OK] Camera temperature check: {temp:.2f} °C")
+    # --- Final temp check
+    print(f"[INFO] Temperature reading: {cam.cam.get_temperature():.2f} °C")
 
-    # ---- Close and check
     cam.close()
-    assert not cam.is_opened(), "Camera failed to close properly."
+    assert not cam.is_opened()
     print("[OK] Camera closed successfully.")
 
-    print("=== ✅ All IxonUltra camera tests passed ===")
+    print("=== ✅ All IxonUltra tests (no cooling) passed ===")
 
 if __name__ == "__main__":
     test_ixon_camera()

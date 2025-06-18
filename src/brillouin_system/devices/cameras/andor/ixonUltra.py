@@ -18,7 +18,8 @@ class IxonUltra(BaseCamera):
                  gain: int = 0,
                  advanced_gain_option: bool = False,
                  amp_mode_index: int=16,
-                 verbose=True):
+                 verbose: bool =True,
+                 flip_image_horizontally: bool = False):
         """
         Initialize the IxonUltra camera.
 
@@ -61,7 +62,9 @@ class IxonUltra(BaseCamera):
         # Camera Name(Head Model): DU897_BV
         # Serial Number: 9303
 
-        self.verbose = verbose
+        self.verbose: bool = verbose
+
+        self.flip_image_horizontally: bool = flip_image_horizontally
 
         self.cam = AndorSDK2Camera(
             idx=index,
@@ -75,7 +78,7 @@ class IxonUltra(BaseCamera):
         print(f"[IxonUltra] VSSpeed Index: {self.cam.get_vsspeed()}")
         print(f"[IxonUltra] VSSpeed Period: {self.cam.get_vsspeed_period():.2f} μs")
 
-        self.set_amp_mode_by_index(amp_mode_index)
+        self.set_pre_amp_mode(amp_mode_index)
         print("[IxonUltra] Preamp index:", self.cam.get_preamp())
         print("[IxonUltra] Preamp mode", self.get_amp_mode())
         print("[IxonUltra] Preamp gain (e⁻/count):", self.get_preamp_gain())
@@ -84,13 +87,13 @@ class IxonUltra(BaseCamera):
             self.cam.set_temperature(temperature, enable_cooler=True)
             self._wait_for_cooling(target_temp=temperature)
 
-
         self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
         self.set_binning(hbin=hbin, vbin=vbin)
         self.set_emccd_gain_advanced(gain, advanced=advanced_gain_option)
         self.set_exposure_time(seconds=exposure_time)
 
         self.open_shutter()
+
 
     def get_name(self) -> str:
         return "IxonUltra"
@@ -205,6 +208,8 @@ class IxonUltra(BaseCamera):
     def snap(self) -> np.ndarray:
         #with self._lock:
             frame = self.cam.snap()
+            if self.flip_image_horizontally:
+                frame = np.fliplr(frame)
             return frame
 
     def get_frame_shape(self) -> tuple[int, int]:
@@ -214,7 +219,21 @@ class IxonUltra(BaseCamera):
             height = (vend - vstart) // vbin
             return (height, width)
 
-    def set_amp_mode_by_index(self, index: int):
+
+
+    # ---- Flip image horizontally ----
+    def set_flip_image_horizontally(self, flip: bool):
+        """Set whether to flip the frame horizontally."""
+        self.flip_image_horizontally = flip
+        if self.verbose:
+            print(f"[IxonUltra] Flip image horizontally set to {flip}")
+
+    def get_flip_image_horizontally(self) -> bool:
+        """Return whether horizontal flipping is enabled."""
+        return self.flip_image_horizontally
+
+    # ---- Preamp mode index ----
+    def set_pre_amp_mode(self, index: int):
         modes = self.cam.get_all_amp_modes()
         if index < 0 or index >= len(modes):
             raise ValueError(f"Invalid amp mode index: {index}.")
@@ -225,18 +244,36 @@ class IxonUltra(BaseCamera):
             print(f"  Channel: {mode.channel}, Output Amp: {mode.oamp} ({mode.oamp_kind}), "
                   f"HSSpeed: {mode.hsspeed} ({mode.hsspeed_MHz} MHz), Preamp: {mode.preamp} ({mode.preamp_gain} e⁻/count)")
 
-    def get_amp_mode(self) -> object:
-        """
-        """
-        return self.cam.get_amp_mode()
-
-
     def list_amp_modes(self):
         modes = self.cam.get_all_amp_modes()
         for i, m in enumerate(modes):
             print(f"[{i}] Channel={m.channel}, BitDepth={m.channel_bitdepth}, OAmp={m.oamp} ({m.oamp_kind}), "
                   f"HSSpeed={m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp={m.preamp} ({m.preamp_gain} e⁻/count)")
 
+    def get_pre_amp_mode(self) -> int:
+        """Return current amplifier mode index."""
+        # You must track this manually if the SDK does not expose it directly
+        # OR return a match index from the current mode
+        current = self.cam.get_amp_mode()
+        all_modes = self.cam.get_all_amp_modes()
+        for i, mode in enumerate(all_modes):
+            if (mode.channel == current.channel and
+                    mode.oamp == current.oamp and
+                    mode.hsspeed == current.hsspeed and
+                    mode.preamp == current.preamp):
+                return i
+        return -1  # not found
+
+    # ---- Vertical shift speed index ----
+    def set_vss_index(self, index: int):
+        """Set vertical shift speed index."""
+        self.cam.set_vsspeed(index)
+        if self.verbose:
+            print(f"[IxonUltra] VSSpeed index set to {index} (period: {self.cam.get_vsspeed_period():.2f} μs)")
+
+    def get_vss_index(self) -> int:
+        """Return current vertical shift speed index."""
+        return self.cam.get_vsspeed()
 
     def is_opened(self) -> bool:
         return self.cam is not None and self.cam.is_opened()

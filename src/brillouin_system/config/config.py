@@ -73,6 +73,9 @@ class AndorFrameSettings:
     hbin: int
     n_px_crop_left_side: int
     n_px_crop_right_side: int
+    pre_amp_mode: int
+    vss_index: int
+    flip_image_horizontally: bool
 
 # ---------- Load/save helpers ----------
 
@@ -131,8 +134,12 @@ def load_andor_frame_settings(path: Path) -> AndorFrameSettings:
         vbin=raw["vbin"],
         hbin=raw["hbin"],
         n_px_crop_left_side=raw["n_px_crop_left_side"],
-        n_px_crop_right_side=raw["n_px_crop_right_side"]
+        n_px_crop_right_side=raw["n_px_crop_right_side"],
+        pre_amp_mode=raw["pre_amp_mode"],
+        vss_index=raw["vss_index"],
+        flip_image_horizontally=raw["flip_image_horizontally"]
     )
+
 
 def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):
     with path.open("rb") as f:

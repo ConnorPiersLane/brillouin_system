@@ -1,69 +1,72 @@
+# run_ixon_ultra_with_cooling.py
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
-
-
 import numpy as np
 
-# Be aware, the camera will cool down and heat up again. Do not repeat this test if it is not necessary.
-# For simple tests, run the test without cooling
 def test_ixon_camera():
-    print("=== Starting IxonUltra camera test ===")
+    print("=== Starting IxonUltra camera test (with cooling) ===")
 
-    # Create camera instance
     cam = IxonUltra(index=0, temperature=-10.0, fan_mode="full")
 
-    # ---- Check camera is opened
     assert cam.is_opened(), "Camera failed to open."
     print("[OK] Camera is opened.")
 
-    # ---- Set and verify exposure
+    # --- Test exposure
     exposure_time = 0.1
     cam.set_exposure_time(exposure_time)
-    actual_exp = cam.cam.get_exposure()
-    assert abs(actual_exp - exposure_time) < 0.01, f"Exposure mismatch: set {exposure_time}, got {actual_exp}"
-    print(f"[OK] Exposure set and verified: {actual_exp} s")
+    actual_exp = cam.get_exposure_time()
+    assert abs(actual_exp - exposure_time) < 0.01
+    print(f"[OK] Exposure verified: {actual_exp}s")
 
-    # ---- Set and verify gain
+    # --- Test EMCCD gain
     gain_value = 100
     cam.set_emccd_gain(gain_value)
-    actual_gain, _ = cam.cam.get_EMCCD_gain()
-    assert actual_gain == gain_value, f"Gain mismatch: set {gain_value}, got {actual_gain}"
-    print(f"[OK] Gain set and verified: {actual_gain}")
+    assert cam.get_emccd_gain() == gain_value
+    print(f"[OK] Gain verified: {gain_value}")
 
-    # ---- Set and verify ROI and binning
-    roi_x_start, roi_x_end = 100, 200
-    roi_y_start, roi_y_end = 50, 150
-    hbin, vbin = 1, 1
-    cam.set_roi(roi_x_start, roi_x_end, roi_y_start, roi_y_end)
-    cam.set_binning(hbin, vbin)
-    roi_params = cam.cam.get_image_mode_parameters()
-    expected_roi = (roi_x_start, roi_x_end, roi_y_start, roi_y_end, hbin, vbin)
-    assert roi_params == expected_roi, f"ROI mismatch: set {expected_roi}, got {roi_params}"
-    print(f"[OK] ROI and binning set and verified: {roi_params}")
+    # --- Test ROI and binning
+    cam.set_roi(100, 200, 50, 150)
+    cam.set_binning(1, 1)
+    assert cam.get_roi() == (100, 200, 50, 150)
+    assert cam.get_binning() == (1, 1)
+    print("[OK] ROI and binning verified.")
 
-    # ---- Get and verify frame shape
-    expected_width = (roi_x_end - roi_x_start) // hbin
-    expected_height = (roi_y_end - roi_y_start) // vbin
+    # --- Frame shape check
+    expected_shape = ((150 - 50), (200 - 100))
     shape = cam.get_frame_shape()
-    assert shape == (expected_height, expected_width), f"Shape mismatch: expected {expected_height}x{expected_width}, got {shape}"
+    assert shape == expected_shape
     print(f"[OK] Frame shape verified: {shape}")
 
-    # ---- Snap and check output shape/type
+    # --- Flip test
+    cam.set_flip_image_horizontally(True)
+    assert cam.get_flip_image_horizontally() is True
+    print("[OK] Horizontal flip flag verified.")
+
+    # --- VSS index test
+    cam.set_vss_index(2)
+    assert cam.get_vss_index() == 2
+    print("[OK] VSS index verified.")
+
+    # --- Preamp mode test
+    cam.set_pre_amp_mode(5)
+    assert cam.get_pre_amp_mode() == 5
+    print("[OK] Preamp mode index verified.")
+
+    # --- Snap image test
     frame = cam.snap()
-    assert isinstance(frame, np.ndarray), "Snap did not return a NumPy array"
-    assert frame.shape == shape, f"Snap shape mismatch. Expected {shape}, got {frame.shape}"
-    assert frame.dtype in [np.uint16, np.uint32, np.float64], f"Unexpected data type: {frame.dtype}"
-    print("[OK] Snap successful and shape matches ROI.")
+    assert isinstance(frame, np.ndarray)
+    assert frame.shape == shape
+    assert frame.dtype in [np.uint16, np.uint32, np.float64]
+    print("[OK] Snap image test passed.")
 
-    # ---- Temperature sanity check
+    # --- Temp check
     temp = cam.cam.get_temperature()
-    print(f"[OK] Camera temperature check: {temp:.2f} °C")
+    print(f"[OK] Temperature check: {temp:.2f} °C")
 
-    # ---- Close and check
     cam.close()
-    assert not cam.is_opened(), "Camera failed to close properly."
-    print("[OK] Camera closed successfully.")
+    assert not cam.is_opened()
+    print("[OK] Camera closed cleanly.")
 
-    print("=== ✅ All IxonUltra camera tests passed ===")
+    print("=== ✅ All IxonUltra tests (with cooling) passed ===")
 
 if __name__ == "__main__":
     test_ixon_camera()

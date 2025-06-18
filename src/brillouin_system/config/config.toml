@@ -46,3 +46,6 @@ vbin = 1
 hbin = 1
 n_px_crop_left_side = 0
 n_px_crop_right_side = 0
+pre_amp_mode = 16
+vss_index = 4
+flip_image_horizontally = true

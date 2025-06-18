@@ -248,8 +248,7 @@ class BrillouinManager:
     # ---------------- Get Frames  ----------------
     def _get_camera_snap(self) -> np.ndarray:
         """Pull a raw frame from the camera."""
-        frame = self.camera.snap().astype(np.float64)
-        return np.fliplr(frame)
+        return self.camera.snap().astype(np.float64)
 
 
     def get_andor_frame(self) -> np.ndarray:
@@ -468,13 +467,16 @@ class BrillouinManager:
 
         andor_config = andor_frame_config.get()
 
-
         self.camera.set_roi(x_start=andor_config.x_start,
                             x_end=andor_config.x_end,
                             y_start=andor_config.y_start,
                             y_end=andor_config.y_end,)
         self.camera.set_binning(hbin=andor_config.hbin,
                                 vbin=andor_config.vbin)
+
+        self.camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
+        self.camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
+        self.camera.set_vss_index(index=andor_config.vss_index)
 
 
         if self.is_reference_mode:
