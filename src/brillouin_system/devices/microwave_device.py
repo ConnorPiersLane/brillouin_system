@@ -1,10 +1,10 @@
 import serial
 
 class Microwave:
-    def __init__(self, port="COM3", baudrate=115200, timeout=2.0):
-        self.deviceName = "Synth"
+    def __init__(self, port="COM3", baudrate=115200, timeout=10.0):
+        self.deviceName = "SG12000PRO"
         self.badCommand = b'[BADCOMMAND]\r\n'    # response if a command failed (b makes it into bytes)
-        self.port = serial.Serial("COM3", 115200, timeout=10) #Change the COM PORT NUMBER to match your device
+        self.port = serial.Serial(port, baudrate, timeout=timeout) #Change the COM PORT NUMBER to match your device
         if self.port.isOpen():    # make sure port is open
             self.port.write(b'*IDN?\n')   # send the standard SCPI identify command
             result = self.port.readline()
