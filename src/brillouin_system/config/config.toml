@@ -1,12 +1,24 @@
 [calibration]
 degree = 1
-n_per_freq = 3
+n_per_freq = 100
 calibration_freqs = [
     4.0,
     4.25,
     4.5,
     4.75,
     5.0,
+    5.25,
+    5.5,
+    5.75,
+    6.0,
+    6.25,
+    6.5,
+    6.75,
+    7.0,
+    7.25,
+    7.5,
+    7.75,
+    8.0,
 ]
 reference = "distance"
 
