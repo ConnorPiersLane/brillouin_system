@@ -40,12 +40,7 @@ fitting_model = "gaussian"
 
 [andor_frame]
 selected_rows = [
-    4,
-    5,
     6,
-    7,
-    8,
-    9,
 ]
 n_dark_images = 10
 take_dark_image = true
@@ -58,6 +53,7 @@ vbin = 1
 hbin = 1
 n_px_crop_left_side = 0
 n_px_crop_right_side = 0
-pre_amp_mode = 16
+change_andor_settings_on_apply = false
+pre_amp_mode = 18
 vss_index = 4
 flip_image_horizontally = true

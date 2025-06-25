@@ -44,6 +44,7 @@ class ConfigDialog(QDialog):
         self.pre_amp_mode_input = QLineEdit(); self.pre_amp_mode_input.setValidator(QIntValidator(0, 999))
         self.vss_index_input = QLineEdit(); self.vss_index_input.setValidator(QIntValidator(0, 999))
         self.flip_image_horizontally_input = QCheckBox()
+        self.change_andor_settings_on_apply = QCheckBox()
 
         main_layout = QVBoxLayout()
         main_layout.addWidget(self.create_andor_frame_group())
@@ -94,6 +95,8 @@ class ConfigDialog(QDialog):
         row4.addWidget(self.vss_index_input)
         row4.addWidget(QLabel("Flip Frame Horizontally:"))
         row4.addWidget(self.flip_image_horizontally_input)
+        row4.addWidget(QLabel("Change Settings on Apply Button:"))
+        row4.addWidget(self.change_andor_settings_on_apply)
 
         layout.addLayout(row1)
         layout.addLayout(row2)
@@ -196,6 +199,7 @@ class ConfigDialog(QDialog):
         self.pre_amp_mode_input.setText(str(andor.pre_amp_mode))
         self.vss_index_input.setText(str(andor.vss_index))
         self.flip_image_horizontally_input.setChecked(andor.flip_image_horizontally)
+        self.change_andor_settings_on_apply.setChecked(andor.change_andor_settings_on_apply)
 
         self.sample_model_combo.setCurrentText(find_peaks_sample_config.get_field("fitting_model"))
         self.reference_model_combo.setCurrentText(find_peaks_reference_config.get_field("fitting_model"))
@@ -232,7 +236,8 @@ class ConfigDialog(QDialog):
                 n_px_crop_right_side=int(self.crop_right_input.text()),
                 pre_amp_mode=int(self.pre_amp_mode_input.text()),
                 vss_index=int(self.vss_index_input.text()),
-                flip_image_horizontally=self.flip_image_horizontally_input.isChecked()
+                flip_image_horizontally=self.flip_image_horizontally_input.isChecked(),
+                change_andor_settings_on_apply=self.change_andor_settings_on_apply.isChecked()
             )
 
             sample_kwargs = {field: self._parse_value(self.sample_inputs[field].text(), field)

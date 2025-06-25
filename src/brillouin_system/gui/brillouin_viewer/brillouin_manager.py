@@ -9,7 +9,7 @@ from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
-from brillouin_system.devices.zaber_linear_dummy import ZaberLinearDummy
+from brillouin_system.devices.zaber_linear import ZaberLinearDummy
 from brillouin_system.fitting.compute_sample_freqs import compute_freq_shift
 from brillouin_system.fitting.fitting_manager import get_empty_fitting, fit_reference_spectrum, fit_sample_spectrum
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
@@ -462,22 +462,24 @@ class BrillouinManager:
                             exposure_time: float,
                             emccd_gain: int,
                             ):
-        self.camera.set_exposure_time(exposure_time)
-        self.camera.set_emccd_gain(emccd_gain)
 
         andor_config = andor_frame_config.get()
 
-        self.camera.set_roi(x_start=andor_config.x_start,
-                            x_end=andor_config.x_end,
-                            y_start=andor_config.y_start,
-                            y_end=andor_config.y_end,)
-        self.camera.set_binning(hbin=andor_config.hbin,
-                                vbin=andor_config.vbin)
+        if andor_config.change_andor_settings_on_apply:
+            self.camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
+            self.camera.set_vss_index(index=andor_config.vss_index)
 
-        self.camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
-        self.camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
-        self.camera.set_vss_index(index=andor_config.vss_index)
+            self.camera.set_roi(x_start=andor_config.x_start,
+                                x_end=andor_config.x_end,
+                                y_start=andor_config.y_start,
+                                y_end=andor_config.y_end, )
+            self.camera.set_binning(hbin=andor_config.hbin,
+                                    vbin=andor_config.vbin)
 
+            self.camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
+
+        self.camera.set_exposure_time(exposure_time)
+        self.camera.set_emccd_gain(emccd_gain)
 
         if self.is_reference_mode:
             self.reference_state_mode.camera_settings = self.get_andor_camera_settings()

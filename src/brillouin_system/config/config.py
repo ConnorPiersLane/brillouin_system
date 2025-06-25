@@ -73,6 +73,7 @@ class AndorFrameSettings:
     hbin: int
     n_px_crop_left_side: int
     n_px_crop_right_side: int
+    change_andor_settings_on_apply: bool
     pre_amp_mode: int
     vss_index: int
     flip_image_horizontally: bool
@@ -137,7 +138,9 @@ def load_andor_frame_settings(path: Path) -> AndorFrameSettings:
         n_px_crop_right_side=raw["n_px_crop_right_side"],
         pre_amp_mode=raw["pre_amp_mode"],
         vss_index=raw["vss_index"],
-        flip_image_horizontally=raw["flip_image_horizontally"]
+        flip_image_horizontally=raw["flip_image_horizontally"],
+        change_andor_settings_on_apply = raw["change_andor_settings_on_apply"],
+
     )
 
 

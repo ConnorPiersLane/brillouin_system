@@ -4,8 +4,64 @@ import numpy as np
 from pylablib.devices.Andor import AndorSDK2Camera
 from .baseCamera import BaseCamera
 
-class IxonUltra(BaseCamera):
+from collections import namedtuple
 
+# Define the mode object (match your TAmpModeFull if needed)
+AmpMode = namedtuple("AmpMode", ["channel", "oamp", "hsspeed", "preamp"])
+
+
+
+
+
+
+class IxonUltra(BaseCamera):
+    # Fixed index-to-mode mapping (your reference set)
+    FIXED_AMP_MODE_LOOKUP = {
+        0: AmpMode(0, 0, 0, 0),
+        1: AmpMode(0, 0, 0, 1),
+        2: AmpMode(0, 0, 0, 2),
+        3: AmpMode(0, 0, 1, 0),
+        4: AmpMode(0, 0, 1, 1),
+        5: AmpMode(0, 0, 1, 2),
+        6: AmpMode(0, 0, 2, 0),
+        7: AmpMode(0, 0, 2, 1),
+        8: AmpMode(0, 0, 2, 2),
+        9: AmpMode(0, 0, 3, 0),
+        10: AmpMode(0, 0, 3, 1),
+        11: AmpMode(0, 0, 3, 2),
+        12: AmpMode(0, 1, 0, 0),
+        13: AmpMode(0, 1, 0, 1),
+        14: AmpMode(0, 1, 0, 2),
+        15: AmpMode(0, 1, 1, 0),
+        16: AmpMode(0, 1, 1, 1),
+        17: AmpMode(0, 1, 1, 2),
+        18: AmpMode(0, 1, 2, 0),
+        19: AmpMode(0, 1, 2, 1),
+        20: AmpMode(0, 1, 2, 2),
+    }
+    """
+    [0]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=0 (1.0 e⁻/count)
+    [1]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=1 (2.0 e⁻/count)
+    [2]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=2 (3.0 e⁻/count)
+    [3]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz),       Preamp=0 (1.0 e⁻/count)
+    [4]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz),       Preamp=1 (2.0 e⁻/count)
+    [5]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=1 (10.0 MHz),       Preamp=2 (3.0 e⁻/count)
+    [6]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz),        Preamp=0 (1.0 e⁻/count)
+    [7]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz),        Preamp=1 (2.0 e⁻/count)
+    [8]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=2 (5.0 MHz),        Preamp=2 (3.0 e⁻/count)
+    [9]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz),        Preamp=0 (1.0 e⁻/count)
+    [10] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz),        Preamp=1 (2.0 e⁻/count)
+    [11] Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=3 (1.0 MHz),        Preamp=2 (3.0 e⁻/count)
+    [12] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=0 (3.0 MHz),        Preamp=0 (1.0 e⁻/count)
+    [13] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=0 (3.0 MHz),        Preamp=1 (2.0 e⁻/count)
+    [14] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=0 (3.0 MHz),        Preamp=2 (3.0 e⁻/count)
+    [15] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=1 (1.0 MHz),        Preamp=0 (1.0 e⁻/count)
+    [16] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=1 (1.0 MHz),        Preamp=1 (2.0 e⁻/count)
+    [17] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=1 (1.0 MHz),        Preamp=2 (3.0 e⁻/count)
+    [18] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=2 (0.08 MHz),       Preamp=0 (1.0 e⁻/count)
+    [19] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=2 (0.08 MHz),       Preamp=1 (2.0 e⁻/count)
+    [20] Channel=0, BitDepth=16, OAmp=1 (Conventional),          HSSpeed=2 (0.08 MHz),       Preamp=2 (3.0 e⁻/count)
+    """
 
     def __init__(self,
                  index: int = 0,
@@ -17,7 +73,7 @@ class IxonUltra(BaseCamera):
                  exposure_time = 0.21,
                  gain: int = 0,
                  advanced_gain_option: bool = False,
-                 amp_mode_index: int=16,
+                 amp_mode_index: int=18,
                  verbose: bool =True,
                  flip_image_horizontally: bool = False):
         """
@@ -198,12 +254,12 @@ class IxonUltra(BaseCamera):
     def get_roi(self) -> tuple[int, int, int, int]:
         #with self._lock:
             hstart, hend, vstart, vend, hbin, vbin = self.cam.get_roi()
-            return (hstart, hend, vstart, vend)
+            return hstart, hend, vstart, vend
 
     def get_binning(self) -> tuple[int, int]:
         #with self._lock:
             hstart, hend, vstart, vend, hbin, vbin = self.cam.get_roi()
-            return (hbin, vbin)
+            return hbin, vbin
 
     def snap(self) -> np.ndarray:
         #with self._lock:
@@ -217,7 +273,7 @@ class IxonUltra(BaseCamera):
             hstart, hend, vstart, vend, hbin, vbin = self.cam.get_roi()
             width = (hend - hstart) // hbin
             height = (vend - vstart) // vbin
-            return (height, width)
+            return height, width
 
 
 
@@ -232,17 +288,23 @@ class IxonUltra(BaseCamera):
         """Return whether horizontal flipping is enabled."""
         return self.flip_image_horizontally
 
+
     # ---- Preamp mode index ----
     def set_pre_amp_mode(self, index: int):
-        modes = self.cam.get_all_amp_modes()
-        if index < 0 or index >= len(modes):
-            raise ValueError(f"Invalid amp mode index: {index}.")
-        mode = modes[index]
-        self.cam.set_amp_mode(channel=mode.channel, oamp=mode.oamp, hsspeed=mode.hsspeed, preamp=mode.preamp)
+        if index not in self.FIXED_AMP_MODE_LOOKUP:
+            raise ValueError(f"Invalid amp mode index: {index}")
+
+        mode = self.FIXED_AMP_MODE_LOOKUP[index]
+
+        self.cam.set_amp_mode(
+            channel=mode.channel,
+            oamp=mode.oamp,
+            hsspeed=mode.hsspeed,
+            preamp=mode.preamp
+        )
+
         if self.verbose:
-            print(f"[IxonUltra] Amplifier mode set to index {index}:")
-            print(f"  Channel: {mode.channel}, Output Amp: {mode.oamp} ({mode.oamp_kind}), "
-                  f"HSSpeed: {mode.hsspeed} ({mode.hsspeed_MHz} MHz), Preamp: {mode.preamp} ({mode.preamp_gain} e⁻/count)")
+            print(f"[IxonUltra] Amp Mode: {self.get_amp_mode()}")
 
     def get_amp_mode(self) -> object:
         """
@@ -255,6 +317,13 @@ class IxonUltra(BaseCamera):
         for i, m in enumerate(modes):
             print(f"[{i}] Channel={m.channel}, BitDepth={m.channel_bitdepth}, OAmp={m.oamp} ({m.oamp_kind}), "
                   f"HSSpeed={m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp={m.preamp} ({m.preamp_gain} e⁻/count)")
+
+    def list_fixed_amp_modes(self):
+        for idx, mode in self.FIXED_AMP_MODE_LOOKUP.items():
+            oamp_kind = "EM" if mode.oamp == 0 else "Conventional"
+            hsspeed_freq = {0: 17.0, 1: 10.0, 2: 5.0, 3: 1.0, 4: 0.08}.get(mode.hsspeed, "?")
+            preamp_gain = {0: 1.0, 1: 2.0, 2: 3.0}.get(mode.preamp, "?")
+            print(f"[{idx}] {oamp_kind}, {hsspeed_freq} MHz, {preamp_gain} e⁻/count")
 
     def get_pre_amp_mode(self) -> int:
         """Return current amplifier mode index."""
