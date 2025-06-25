@@ -19,6 +19,7 @@ def test_ixon_camera():
     print("[INFO] Device Info:", device_info)
 
     # --- Gain test
+    cam.set_pre_amp_mode(index=0)
     cam.set_emccd_gain(50)
     assert cam.get_emccd_gain() == 50
     print("[OK] Gain verified: 50")

@@ -145,7 +145,7 @@ class IxonUltra(BaseCamera):
 
         self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
         self.set_binning(hbin=hbin, vbin=vbin)
-        self.set_emccd_gain_advanced(gain, advanced=advanced_gain_option)
+        self.set_emccd_gain(gain, advanced=advanced_gain_option)
         self.set_exposure_time(seconds=exposure_time)
 
         self.open_shutter()
@@ -197,27 +197,25 @@ class IxonUltra(BaseCamera):
             if self.verbose:
                 print(f"[IxonUltra] Exposure time set to {self.get_exposure_time():.4f} seconds")
 
-    def set_emccd_gain(self, gain: float | int):
-        #with self._lock:
-        if gain == 1:  # Gain==1 not allowed, switch to gain=0 (deactivate gain in this case)
-            gain = 0
-        actual_gain, adv = self.get_emccd_gain_advanced()
-        if adv:
-            print("[IxonUltra Camera Warning] Advanced gain mode was enabled but is now disabled!")
-        self.cam.set_EMCCD_gain(gain, advanced=False)
+    def set_emccd_gain(self, gain: float | int, advanced: bool = False):
+        """Set EMCCD gain. Only applies when in EM mode. Advanced mode is risky!"""
+        current_mode = self.get_amp_mode()
+        if current_mode.oamp != 0:
+            if self.verbose:
+                print("[IxonUltra Warning] EMCCD gain ignored in Conventional mode (oamp=1).")
+            return
+
+        if gain == 1:
+            gain = 0  # Avoid invalid value
+
+        if advanced:
+            print("[IxonUltra Warning] Advanced gain mode enabled — sensor risk!")
+
+        self.cam.set_EMCCD_gain(gain, advanced=advanced)
+
         if self.verbose:
             actual_gain, adv = self.get_emccd_gain_advanced()
             print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
-
-
-    def set_emccd_gain_advanced(self, gain: float | int, advanced: bool = False):
-        #with self._lock:
-            if advanced:
-                print("[IxonUltra Camera Warning] Advanced gain mode enabled: sensor damage possible!")
-            self.cam.set_EMCCD_gain(gain, advanced=advanced)
-            if self.verbose:
-                actual_gain, adv = self.get_emccd_gain_advanced()
-                print(f"[IxonUltra] Gain set to {actual_gain}, Advanced mode: {adv}")
 
     def set_roi(self, x_start: int, x_end: int, y_start: int, y_end: int):
         #with self._lock:
