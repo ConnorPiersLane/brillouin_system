@@ -1,6 +1,6 @@
 [calibration]
 degree = 1
-n_per_freq = 100
+n_per_freq = 10
 calibration_freqs = [
     4.0,
     4.25,
@@ -25,10 +25,10 @@ reference = "distance"
 [find_peaks.sample]
 prominence_fraction = 0.05
 min_peak_width = 1
-min_peak_height = 10
+min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
-fitting_model = "lorentzian"
+fitting_model = "lorentzian_quad_bg"
 
 [find_peaks.reference]
 prominence_fraction = 0.05
@@ -40,20 +40,27 @@ fitting_model = "lorentzian"
 
 [andor_frame]
 selected_rows = [
+    0,
+    1,
     2,
     3,
     4,
     5,
     6,
     7,
+    8,
+    9,
+    10,
+    11,
+    12,
 ]
 n_dark_images = 10
-take_dark_image = true
+take_dark_image = false
 n_bg_images = 10
 x_start = 45
 x_end = 110
 y_start = 300
-y_end = 315
+y_end = 313
 vbin = 1
 hbin = 1
 n_px_crop_left_side = 0
