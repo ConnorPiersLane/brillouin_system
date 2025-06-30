@@ -5,9 +5,9 @@ from PyQt5.QtWidgets import QFileDialog
 
 from brillouin_system.fitting.fit_util import get_sline_from_image
 from brillouin_system.fitting.fitting_manager import fit_reference_spectrum, fit_sample_spectrum, get_empty_fitting
-from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
-from brillouin_system.my_dataclasses.measurements import MeasurementSeries, MeasurementPoint
-from brillouin_system.my_dataclasses.calibration import CalibrationData, calibrate, CalibrationCalculator, \
+from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, fitting_to_analyzer_result
+from brillouin_system.my_dataclasses.measurements import MeasurementSeries
+from brillouin_system.my_dataclasses.calibration import CalibrationData, CalibrationCalculator, \
     get_calibration_calculator_from_data
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
 
@@ -16,8 +16,10 @@ from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_c
 
 class AnalyzerManager:
     def __init__(self):
+        self.calibration_data_from_file: CalibrationData | None = None
+        self.calibration_calculator_from_file: CalibrationCalculator | None = None
         self.stored_measurement_series = []
-        self.external_calibration: CalibrationData = None
+        self.analyzed_series_lookup: dict[int, list[AnalyzedFrame]] = {}
 
     def load_measurement_series(self, measurement_series: MeasurementSeries):
         self.stored_measurement_series.append(measurement_series)
@@ -26,13 +28,13 @@ class AnalyzerManager:
         if 0 <= index < len(self.stored_measurement_series):
             del self.stored_measurement_series[index]
 
-    def set_calibration(self, calibration: CalibrationData):
-        self.external_calibration = calibration
+    def calibrate_from_file(self, calibration: CalibrationData):
+        self.calibration_calculator_from_file = get_calibration_calculator_from_data(calibration)
 
     def get_current_calibration(self, use_series: bool, selected_index: int):
         if use_series and 0 <= selected_index < len(self.stored_measurement_series):
             return self.stored_measurement_series[selected_index].calibration_data
-        return self.external_calibration
+        return self.calibration_data_from_file
 
     def load_calibration_from_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -48,7 +50,7 @@ class AnalyzerManager:
                 with open(path, "rb") as f:
                     calibration = pickle.load(f)
 
-            self.set_calibration(calibration)
+            self.calibration_data_from_file = calibration
             print(f"[\u2713] Loaded calibration from {path}")
             return path
         except Exception as e:
@@ -88,22 +90,26 @@ class AnalyzerManager:
             print(f"[Analyzer Manager] Failed to load measurement series: {e}")
         return info_strings
 
-    def run_spectrum_fit_on_measurement_series(self,
-                                               measurement: MeasurementSeries,
-                                               is_do_bg_subtraction: bool,
-                                               external_calibration_data = None) -> list[FittedSpectrum]:
-        fitted_spectras = []
 
-        if external_calibration_data is None and measurement.calibration_data is None:
-            print(" No calibration possible: Calibration Data is missing")
-            return fitted_spectras
+    def analyze_frames_in_measurement_series(self,
+                                             measurement: MeasurementSeries,
+                                             is_do_bg_subtraction: bool,
+                                             is_use_own_calibration_data: bool,
+                                             ) -> list[AnalyzedFrame]:
+        analyzed_frames = []
 
-        if external_calibration_data is None:
-            calibration_data = measurement.calibration_data
+        if is_use_own_calibration_data:
+            if measurement.calibration_data is None:
+                print("No Calibration Data available in this measurement series")
+                return []
+            else:
+                calibration_calculator = get_calibration_calculator_from_data(measurement.calibration_data)
         else:
-            calibration_data = external_calibration_data
-
-        calibration_calculator = get_calibration_calculator_from_data(calibration_data)
+            if self.calibration_calculator_from_file is None:
+                print("No Calibration available from file. Load File and Calibrate")
+                return []
+            else:
+                calibration_calculator = self.calibration_calculator_from_file
 
         for mp in measurement.measurements:
             frame = mp.frame
@@ -111,7 +117,7 @@ class AnalyzerManager:
                 bg_image = measurement.state_mode.bg_image.mean_image
                 if bg_image is None:
                     print("No BG Image availalbe")
-                    return fitted_spectras
+                    return analyzed_frames
                 frame = frame - bg_image
 
             sline = get_sline_from_image(frame)
@@ -124,3 +130,41 @@ class AnalyzerManager:
             except Exception as e:
                 print(f"[BrillouinManager] Fitting error: {e}")
                 fs = get_empty_fitting(sline)
+
+            af = fitting_to_analyzer_result(frame=frame, fitting=fs, calibration_calculator=calibration_calculator)
+            analyzed_frames.append(af)
+        return analyzed_frames
+
+    def analyze_selected_series(
+        self,
+        indices: list[int],
+        is_do_bg_subtraction: bool,
+        is_use_own_calibration_data: bool
+    ):
+        """
+        Analyze and cache spectrum fit results for the given series indices.
+
+        Parameters
+        ----------
+        indices : list[int]
+            Indices of series in stored_measurement_series to analyze.
+        is_do_bg_subtraction : bool
+            Whether to subtract the background image.
+        is_use_own_calibration_data : bool
+            Whether to use the series' internal calibration data.
+        """
+        for index in indices:
+            # if index in self.analyzed_series_lookup:
+            #     continue  # already analyzed
+
+            if not (0 <= index < len(self.stored_measurement_series)):
+                print(f"[AnalyzerManager] Invalid index {index}")
+                continue
+
+            series = self.stored_measurement_series[index]
+            analyzed_frames = self.analyze_frames_in_measurement_series(
+                measurement=series,
+                is_do_bg_subtraction=is_do_bg_subtraction,
+                is_use_own_calibration_data=is_use_own_calibration_data
+            )
+            self.analyzed_series_lookup[index] = analyzed_frames

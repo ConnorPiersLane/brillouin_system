@@ -20,6 +20,9 @@ from brillouin_system.my_dataclasses.state_mode import StateMode
 # Headless environment detection
 HEADLESS = os.environ.get("DISPLAY", "") == ""
 
+
+
+
 @dataclass
 class CalibrationMeasurementPoint:
     frame: np.ndarray
@@ -47,40 +50,109 @@ class CalibrationPolyfitParameters:
     freq_left_peak: np.ndarray
     freq_right_peak: np.ndarray
     freq_peak_distance: np.ndarray
-    sigma_left_peak: np.ndarray
-    sigma_right_peak: np.ndarray
+    calibration_width_left_peak: np.ndarray
+    calibration_width_right_peak: np.ndarray
 
 
 class CalibrationCalculator:
+    """
+    A utility class for evaluating calibration polynomial fits that map pixel positions to frequency-domain quantities.
+
+    All methods take pixel coordinates (px) as input and return values in GHz.
+
+    Parameters
+    ----------
+    parameters : CalibrationPolyfitParameters
+        The polynomial fit coefficients for various calibration functions.
+    """
     def __init__(self, parameters: CalibrationPolyfitParameters):
+        """Initialize the calculator with polynomial fit parameters."""
         self.p = parameters
 
     def freq_left_peak(self, px):
+        """Frequency of the left Brillouin peak [GHz] at pixel position px."""
         return np.polyval(self.p.freq_left_peak, px)
 
     def dfreq_dpx_left_peak(self, px):
+        """Slope d(freq)/d(px) for left peak at pixel position px [GHz/pixel]."""
         coeffs = np.polyder(self.p.freq_left_peak, m=1)
         return np.polyval(coeffs, px)
 
     def freq_right_peak(self, px):
+        """Frequency of the right Brillouin peak [GHz] at pixel position px."""
         return np.polyval(self.p.freq_right_peak, px)
 
     def dfreq_dpx_right_peak(self, px):
+        """Slope d(freq)/d(px) for right peak at pixel position px [GHz/pixel]."""
         coeffs = np.polyder(self.p.freq_right_peak, m=1)
         return np.polyval(coeffs, px)
 
     def freq_peak_distance(self, px):
+        """Frequency distance between left and right peaks [GHz] at pixel position px."""
         return np.polyval(self.p.freq_peak_distance, px)
 
     def dfreq_dpx_peak_distance(self, px):
+        """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
         coeffs = np.polyder(self.p.freq_peak_distance, m=1)
         return np.polyval(coeffs, px)
 
-    def sigma_left_peak(self, px):
-        return np.polyval(self.p.sigma_left_peak, px)
+    def df_left_peak(self, px, dpx):
+        """Convert dpx to GHz using local slope of left peak."""
+        slope = self.dfreq_dpx_left_peak(px)
+        return slope * dpx
 
-    def sigma_right_peak(self, px):
-        return np.polyval(self.p.sigma_right_peak, px)
+    def df_right_peak(self, px, dpx):
+        """Convert dpx to GHz using local slope of right peak."""
+        slope = self.dfreq_dpx_right_peak(px)
+        return slope * dpx
+
+    def df_peak_distance(self, px, dpx):
+        """Convert dpx to GHz using local slope of peak distance."""
+        slope = self.dfreq_dpx_peak_distance(px)
+        return slope * dpx
+
+    def calibration_width_left_peak_dpx(self, px):
+        """Ideal FWHM width of the left peak in pixels."""
+        return np.polyval(self.p.calibration_width_left_peak, px)
+
+    def calibration_width_right_peak_dpx(self, px):
+        """Ideal FWHM width of the right peak in pixels."""
+        return np.polyval(self.p.calibration_width_right_peak, px)
+
+    def calibration_width_left_peak_ghz(self, px):
+        """
+        Convert the width (FWHM) of the left Brillouin peak from pixels to GHz.
+
+        Parameters
+        ----------
+        px : float or ndarray
+            Pixel position(s)
+
+        Returns
+        -------
+        float or ndarray
+            Width in GHz
+        """
+        dpx = self.calibration_width_left_peak_dpx(px)
+        return self.df_left_peak(px, dpx)
+
+    def calibration_width_right_peak_ghz(self, px):
+        """
+        Convert the width (FWHM) of the right Brillouin peak from pixels to GHz.
+
+        Parameters
+        ----------
+        px : float or ndarray
+            Pixel position(s)
+
+        Returns
+        -------
+        float or ndarray
+            Width in GHz
+        """
+        dpx = self.calibration_width_right_peak_dpx(px)
+        return self.df_right_peak(px, dpx)
+
 
 
 def get_calibration_calculator_from_data(calibration_data: CalibrationData) -> CalibrationCalculator:
@@ -106,8 +178,8 @@ def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
     left_px = np.array([fs.left_peak_center_px for fs in all_fits])
     right_px = np.array([fs.right_peak_center_px for fs in all_fits])
     inter_px = np.array([fs.inter_peak_distance for fs in all_fits])
-    left_sigmas = np.array([fs.left_peak_width_px for fs in all_fits])
-    right_sigmas = np.array([fs.right_peak_width_px for fs in all_fits])
+    left_width = np.array([fs.left_peak_width_px for fs in all_fits])
+    right_width = np.array([fs.right_peak_width_px for fs in all_fits])
 
     def safe_polyfit(x, y, deg):
         if len(x) <= deg:
@@ -120,8 +192,8 @@ def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
         freq_left_peak=safe_polyfit(left_px, freqs, degree),
         freq_right_peak=safe_polyfit(right_px, freqs, degree),
         freq_peak_distance=safe_polyfit(inter_px, freqs, degree),
-        sigma_left_peak=safe_polyfit(left_px, left_sigmas, degree),
-        sigma_right_peak=safe_polyfit(right_px, right_sigmas, degree),
+        calibration_width_left_peak=safe_polyfit(left_px, left_width, degree),
+        calibration_width_right_peak=safe_polyfit(right_px, right_width, degree),
     )
 
     return params

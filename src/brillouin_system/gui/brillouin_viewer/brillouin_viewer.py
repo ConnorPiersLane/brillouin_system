@@ -37,32 +37,32 @@ from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 
-# ## Testing
-# brillouin_manager = BrillouinManager(
-#         camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber=ZaberLinearDummy(),
-#     is_sample_illumination_continuous=True
-# )
-
-
-# # # Real
+## Testing
 brillouin_manager = BrillouinManager(
-        camera=IxonUltra(
-            index = 0,
-            temperature = -20, #"off"
-            fan_mode = "full",
-            x_start = 40, x_end  = 120,
-            y_start= 300, y_end  = 315,
-            vbin= 1, hbin  = 1,
-            verbose = True,
-        ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
+        camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
     zaber=ZaberLinearDummy(),
     is_sample_illumination_continuous=True
 )
+
+
+# # # Real
+# brillouin_manager = BrillouinManager(
+#         camera=IxonUltra(
+#             index = 0,
+#             temperature = -20, #"off"
+#             fan_mode = "full",
+#             x_start = 40, x_end  = 120,
+#             y_start= 300, y_end  = 315,
+#             vbin= 1, hbin  = 1,
+#             verbose = True,
+#         ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber=ZaberLinearDummy(),
+#     is_sample_illumination_continuous=True
+# )
 
 
 class BrillouinViewer(QWidget):

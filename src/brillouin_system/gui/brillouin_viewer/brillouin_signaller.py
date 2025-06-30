@@ -11,7 +11,7 @@ from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinMan
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
-from brillouin_system.my_dataclasses.measurements import MeasurementSettings
+from brillouin_system.my_dataclasses.measurements import MeasurementSettings, MeasurementSeries
 from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
 
 
@@ -394,8 +394,15 @@ class BrillouinSignaller(QObject):
                 except Exception as e:
                     self.log_message.emit(f"[Measurement] Error at index {i}: {e}")
 
+            series = MeasurementSeries(
+                measurements=measurements,
+                state_mode=self.manager.get_current_state_mode(),
+                calibration_data=self.manager.calibration_data,
+                settings=measurement_settings,
+            )
+
             # Emit full result list if all measurements completed
-            self.measurement_result_ready.emit(measurements)
+            self.measurement_result_ready.emit(series)
 
         except InterruptedError as e:
             self.log_message.emit(f"[Measurement] Cancelled by user: {e}")

@@ -33,7 +33,7 @@ def fit_reference_spectrum(sline: np.ndarray) -> FittedSpectrum:
         return get_empty_fitting(sline)
 
 
-def fit_sample_spectrum(sline: np.ndarray, calibration_calculator: CalibrationCalculator) -> FittedSpectrum:
+def fit_sample_spectrum(sline: np.ndarray, calibration_calculator: CalibrationCalculator=None) -> FittedSpectrum:
     config = find_peaks_sample_config.get()
 
     if 'voigt' in config.fitting_model and calibration_calculator is None:
@@ -46,24 +46,24 @@ def fit_sample_spectrum(sline: np.ndarray, calibration_calculator: CalibrationCa
         return get_fitted_spectrum_lorentzian(sline=sline, is_reference_mode=False)
     elif config.fitting_model == 'voigt':
         return get_fitted_spectrum_voigt(sline=sline, is_reference_mode=False,
-                                         sigma_func_left=calibration_calculator.sigma_left_peak,
-                                         sigma_func_right=calibration_calculator.sigma_right_peak)
+                                         sigma_func_left=calibration_calculator.calibration_width_left_peak_ghz,
+                                         sigma_func_right=calibration_calculator.calibration_width_right_peak_ghz)
     elif config.fitting_model == 'lorentzian_quad_bg':
         return get_fitted_spectrum_quadratic_bg(sline=sline, is_reference_mode=False,
                                                 peak_model='lorentzian')
     elif config.fitting_model == 'voigt_quad_bg':
         return get_fitted_spectrum_quadratic_bg(sline=sline, is_reference_mode=False,
                                                 peak_model='voigt',
-                                                sigma_func_left = calibration_calculator.sigma_left_peak,
-                                                sigma_func_right = calibration_calculator.sigma_right_peak)
+                                                sigma_func_left = calibration_calculator.calibration_width_left_peak_ghz,
+                                                sigma_func_right = calibration_calculator.calibration_width_right_peak_ghz)
     elif config.fitting_model == 'lorentzian_log_quad_bg':
         return get_fitted_spectrum_llq(sline=sline, is_reference_mode=False,
                                                 peak_model='lorentzian')
     elif config.fitting_model == 'voigt_log_quad_bg':
         return get_fitted_spectrum_llq(sline=sline, is_reference_mode=False,
-                                                peak_model='voigt',
-                                                sigma_func_left=calibration_calculator.sigma_left_peak,
-                                                sigma_func_right=calibration_calculator.sigma_right_peak)
+                                       peak_model='voigt',
+                                       sigma_func_left=calibration_calculator.calibration_width_left_peak_ghz,
+                                       sigma_func_right=calibration_calculator.calibration_width_right_peak_ghz)
     else:
         print(f'[fitting_manager]: unknown fitting_model={config.fitting_model}, fitting failed.')
         return get_empty_fitting(sline)

@@ -1,7 +1,7 @@
 import numpy as np
 
 from brillouin_system.config.config import calibration_config
-from brillouin_system.my_dataclasses.analyzer_results import AnalyzerResults
+from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame
 from brillouin_system.my_dataclasses.calibration import CalibrationCalculator
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
@@ -24,7 +24,7 @@ def compute_freq_shift(fitting: FittedSpectrum, calibration_calculator: Calibrat
 def compute_analyzer_results_from_fitted_spectrum_for_sample(
         frame: np.ndarray,
         fitting: FittedSpectrum,
-        calibration_calculator: CalibrationCalculator) -> AnalyzerResults:
+        calibration_calculator: CalibrationCalculator) -> AnalyzedFrame:
     pass
     # if fitting.is_success:
     #
