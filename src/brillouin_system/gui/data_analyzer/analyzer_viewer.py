@@ -12,7 +12,9 @@ import numpy as np
 
 from brillouin_system.gui.data_analyzer.analyzer_manager import AnalyzerManager
 from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
-from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame
+from brillouin_system.gui.data_analyzer.analyzer_utils import numpy_array_to_pixmap
+from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, PhotonsCounts, \
+    photon_counts_from_fitted_spectrum
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.my_dataclasses.calibration import (
     CalibrationCalculator, render_calibration_to_pixmap,
@@ -233,6 +235,12 @@ class AnalyzerViewer(QWidget):
 
     def display_result(self, analyzed_frame: AnalyzedFrame):
         frame = analyzed_frame.frame
+
+        pixmap = numpy_array_to_pixmap(frame)
+        self.frame_label.setPixmap(pixmap.scaled(
+            self.frame_label.width(), self.frame_label.height(), Qt.KeepAspectRatio
+        ))
+
         x_px = analyzed_frame.fitted_spectrum.x_pixels
         spectrum = analyzed_frame.fitted_spectrum.sline
 
@@ -263,6 +271,12 @@ class AnalyzerViewer(QWidget):
         self.ax.set_xlabel("Pixel (X)")
         self.ax.set_ylabel("Intensity")
         self.canvas.draw()
+
+        photons: PhotonsCounts = photon_counts_from_fitted_spectrum(analyzed_frame.fitted_spectrum)
+        print(f"Photons left peak: {photons.left_peak_photons}")
+        print(f"Photons right peak: {photons.right_peak_photons}")
+        print(f"Photons both peak: {photons.total_photons}")
+
 
     def go_left(self):
         if self.current_measurement_index > 0:

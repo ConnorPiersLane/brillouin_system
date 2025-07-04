@@ -5,6 +5,21 @@ import numpy as np
 from brillouin_system.my_dataclasses.calibration import CalibrationCalculator
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
+@dataclass
+class AnalyzedFrame:
+    frame: np.ndarray
+    fitted_spectrum: FittedSpectrum
+    freq_shift_left_peak_ghz: float | None
+    freq_shift_right_peak_ghz: float | None
+    freq_shift_peak_distance_ghz: float | None
+    fwhm_left_peak_ghz: float | None
+    fwhm_right_peak_ghz: float | None
+
+@dataclass
+class PhotonsCounts:
+    left_peak_photons: float | None
+    right_peak_photons: float | None
+    total_photons: float | None
 
 def fitting_to_analyzer_result(frame: np.ndarray,
                                calibration_calculator: CalibrationCalculator,
@@ -32,12 +47,16 @@ def fitting_to_analyzer_result(frame: np.ndarray,
         )
 
 
-@dataclass
-class AnalyzedFrame:
-    frame: np.ndarray
-    fitted_spectrum: FittedSpectrum
-    freq_shift_left_peak_ghz: float | None
-    freq_shift_right_peak_ghz: float | None
-    freq_shift_peak_distance_ghz: float | None
-    fwhm_left_peak_ghz: float | None
-    fwhm_right_peak_ghz: float | None
+def photon_counts_from_fitted_spectrum(fs: FittedSpectrum) -> PhotonsCounts:
+    amp_l = fs.left_peak_amplitude
+    amp_r = fs.right_peak_amplitude
+    width_l = fs.left_peak_width_px
+    width_r = fs.right_peak_width_px
+    left_peak_photons = np.pi * amp_l * width_l
+    right_peak_photons = np.pi * amp_r * width_r
+    return PhotonsCounts(
+        left_peak_photons=left_peak_photons,
+        right_peak_photons=right_peak_photons,
+        total_photons=left_peak_photons + right_peak_photons,
+    )
+
