@@ -14,7 +14,7 @@ from brillouin_system.gui.data_analyzer.analyzer_manager import AnalyzerManager
 from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 from brillouin_system.gui.data_analyzer.analyzer_utils import numpy_array_to_pixmap
 from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, PhotonsCounts, \
-    photon_counts_from_fitted_spectrum
+    calculate_photon_counts_from_fitted_spectrum
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.my_dataclasses.calibration import (
     CalibrationCalculator, render_calibration_to_pixmap,
@@ -272,7 +272,7 @@ class AnalyzerViewer(QWidget):
         self.ax.set_ylabel("Intensity")
         self.canvas.draw()
 
-        photons: PhotonsCounts = photon_counts_from_fitted_spectrum(analyzed_frame.fitted_spectrum)
+        photons: PhotonsCounts = calculate_photon_counts_from_fitted_spectrum(analyzed_frame.fitted_spectrum)
         print(f"Photons left peak: {photons.left_peak_photons}")
         print(f"Photons right peak: {photons.right_peak_photons}")
         print(f"Photons both peak: {photons.total_photons}")

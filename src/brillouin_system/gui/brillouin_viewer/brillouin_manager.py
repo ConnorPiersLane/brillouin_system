@@ -87,12 +87,18 @@ class BrillouinManager:
 
     def init_camera_settings(self):
         andor_config = andor_frame_config.get()
+
+        self.camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
+        self.camera.set_vss_index(index=andor_config.vss_index)
+
         self.camera.set_roi(x_start=andor_config.x_start,
                             x_end=andor_config.x_end,
                             y_start=andor_config.y_start,
-                            y_end=andor_config.y_end,)
+                            y_end=andor_config.y_end, )
         self.camera.set_binning(hbin=andor_config.hbin,
                                 vbin=andor_config.vbin)
+
+        self.camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
 
 
     def init_state_mode(self, is_reference_mode: bool) -> StateMode:

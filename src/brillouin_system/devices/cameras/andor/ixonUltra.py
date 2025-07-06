@@ -181,10 +181,10 @@ class IxonUltra(BaseCamera):
     def set_emccd_gain(self, gain: float | int, advanced: bool = False):
         """Set EMCCD gain. Only applies when in EM mode. Advanced mode is risky!"""
         current_mode = self.get_amp_mode()
-        if current_mode.oamp != 0:
+        if current_mode.oamp == 1:
             if self.verbose:
                 print("[IxonUltra Warning] EMCCD gain ignored in Conventional mode (oamp=1).")
-            return
+            gain = 0
 
         if gain == 1:
             gain = 0  # Avoid invalid value
@@ -220,6 +220,12 @@ class IxonUltra(BaseCamera):
 
     def get_emccd_gain(self) -> int:
         #with self._lock:
+        current_mode = self.get_amp_mode()
+        if current_mode.oamp == 1:
+            if self.verbose:
+                print("[IxonUltra Warning] No Gain used in Conventional mode (oamp=1).")
+            return 0
+        else:
             return self.cam.get_EMCCD_gain()[0]
 
     def get_preamp_gain(self) -> float:

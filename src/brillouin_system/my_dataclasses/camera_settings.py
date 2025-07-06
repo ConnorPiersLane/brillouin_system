@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-
-import numpy as np
+import re
 
 
 @dataclass
@@ -36,3 +35,29 @@ class AndorCameraSettings:
     binning: tuple[int, int]
     preamp_gain: int | float
     preamp_mode: str
+
+
+
+
+
+def is_electron_multiplying_camera_mode(andor_camera_settings: AndorCameraSettings) -> bool:
+    s = andor_camera_settings.preamp_mode
+
+    if not isinstance(s, str):
+        raise TypeError("preamp_mode must be a string")
+
+    match = re.search(r'\boamp\s*=\s*(\d+)', s)
+    if match:
+        oamp_value = int(match.group(1))
+        if oamp_value == 1:
+            return False  # Conventional
+        elif oamp_value == 0:
+            return True   # EM mode
+        else:
+            raise ValueError(f"OAmp has unexpected value: {oamp_value}")
+    else:
+        raise ValueError("oamp field not found")
+
+
+def is_conventional_camera_mode(andor_camera_settings: AndorCameraSettings) -> bool:
+    return not is_electron_multiplying_camera_mode(andor_camera_settings)

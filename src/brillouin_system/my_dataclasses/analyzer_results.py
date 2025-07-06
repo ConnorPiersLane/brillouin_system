@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.my_dataclasses.calibration import CalibrationCalculator
+from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings, is_electron_multiplying_camera_mode, \
+    is_conventional_camera_mode
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
 
 @dataclass
@@ -20,6 +22,11 @@ class PhotonsCounts:
     left_peak_photons: float | None
     right_peak_photons: float | None
     total_photons: float | None
+
+@dataclass
+class AnalyzedSeriesStatistics:
+    mean_
+
 
 def fitting_to_analyzer_result(frame: np.ndarray,
                                calibration_calculator: CalibrationCalculator,
@@ -47,7 +54,19 @@ def fitting_to_analyzer_result(frame: np.ndarray,
         )
 
 
-def photon_counts_from_fitted_spectrum(fs: FittedSpectrum) -> PhotonsCounts:
+def calculate_photon_counts_from_fitted_spectrum(fs: FittedSpectrum, camera_settings: AndorCameraSettings) -> PhotonsCounts:
+
+    if is_conventional_camera_mode(camera_settings):
+        gain_factor = 1
+    else:
+        gain_factor = camera_settings.emccd_gain
+        if gain_factor == 0:
+            gain_factor = 1
+
+    preamp_gain = camera_settings.preamp_gain
+
+    count_to_electron_factor = preamp_gain / gain_factor
+
     amp_l = fs.left_peak_amplitude
     amp_r = fs.right_peak_amplitude
     width_l = fs.left_peak_width_px
@@ -55,8 +74,8 @@ def photon_counts_from_fitted_spectrum(fs: FittedSpectrum) -> PhotonsCounts:
     left_peak_photons = np.pi * amp_l * width_l
     right_peak_photons = np.pi * amp_r * width_r
     return PhotonsCounts(
-        left_peak_photons=left_peak_photons,
-        right_peak_photons=right_peak_photons,
-        total_photons=left_peak_photons + right_peak_photons,
+        left_peak_photons=left_peak_photons*count_to_electron_factor,
+        right_peak_photons=right_peak_photons*count_to_electron_factor,
+        total_photons=(left_peak_photons + right_peak_photons)*count_to_electron_factor,
     )
 

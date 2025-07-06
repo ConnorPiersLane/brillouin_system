@@ -32,8 +32,11 @@ class AnalyzerManager:
         self.calibration_calculator_from_file = get_calibration_calculator_from_data(calibration)
 
     def get_current_calibration(self, use_series: bool, selected_index: int):
-        if use_series and 0 <= selected_index < len(self.stored_measurement_series):
-            return self.stored_measurement_series[selected_index].calibration_data
+        if use_series:
+            if 0 <= selected_index < len(self.stored_measurement_series):
+                return self.stored_measurement_series[selected_index].calibration_data
+            else:
+                raise ValueError(f"index out of range: {selected_index} from {len(self.stored_measurement_series)}")
         return self.calibration_data_from_file
 
     def load_calibration_from_file(self):
