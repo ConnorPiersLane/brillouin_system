@@ -36,6 +36,30 @@ class PlotWindow(QDialog):
 
         self.setLayout(layout)
 
+    def closeEvent(self, event):
+        # Notify parent that the window is gone
+        if self.parent():
+            self.parent().plot_window = None
+        event.accept()
+
+class HistogramWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Histogram Plot")
+        self.setMinimumSize(640, 480)
+
+        layout = QVBoxLayout(self)
+        self.fig, self.ax = plt.subplots()
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+        self.setLayout(layout)
+
+    def closeEvent(self, event):
+        # Notify parent that the window is gone
+        if self.parent():
+            self.parent().histogram_window = None
+        event.accept()
+
 
 
 class AnalyzerViewer(QWidget):
@@ -51,6 +75,7 @@ class AnalyzerViewer(QWidget):
         self.analyzed_series_lookup = {}
 
         self.plot_window = None
+        self.histogram_window = None
 
         self.init_ui()
 
@@ -210,8 +235,10 @@ class AnalyzerViewer(QWidget):
         self.single_series_group.setLayout(layout)
 
         self.plot_series_btn = QPushButton("Plot Series")
-
         layout.addWidget(self.plot_series_btn)
+
+        self.plot_histogram_btn = QPushButton("Plot Histogram")
+        layout.addWidget(self.plot_histogram_btn)
 
         self.show_stats_checkbox = QCheckBox("Show Mean ± Std")
         layout.addWidget(self.show_stats_checkbox)
@@ -230,6 +257,7 @@ class AnalyzerViewer(QWidget):
         self.left_btn.clicked.connect(self.go_left)
         self.right_btn.clicked.connect(self.go_right)
         self.plot_series_btn.clicked.connect(self.plot_selected_series)
+        self.plot_histogram_btn.clicked.connect(self.plot_histogram)
 
     def open_config_dialog(self):
         dialog = ConfigDialog(self)
@@ -473,6 +501,64 @@ class AnalyzerViewer(QWidget):
 
         self.plot_window_ax.legend()
         self.plot_window.canvas.draw()
+
+    def plot_histogram(self):
+        index = self.analyzed_series_dropdown.currentData()
+        if index is None:
+            QMessageBox.warning(self, "Selection Error", "No analyzed series selected.")
+            return
+
+        self.current_fitted_results = self.analyze_manager.analyzed_series_lookup[index]
+        y_axis = self.y_axis_dropdown.currentText()
+
+        y_values = [
+            getattr(af, y_axis)
+            for af in self.current_fitted_results
+            if getattr(af, y_axis) is not None
+        ]
+
+        if not y_values:
+            QMessageBox.warning(self, "No Data", f"No valid data found for '{y_axis}'.")
+            return
+
+        y_array = np.array(y_values)
+
+        # Create the histogram window if it doesn't exist
+        if self.histogram_window is None:
+            self.histogram_window = HistogramWindow(self)
+            self.histogram_ax = self.histogram_window.ax
+            self.histogram_ax.set_title("Histogram")
+            self.histogram_ax.set_xlabel(y_axis)
+            self.histogram_ax.set_ylabel("Frequency")
+            self.histogram_window.show()
+        else:
+            self.histogram_ax = self.histogram_window.ax
+
+        # Plot histogram
+        color = np.random.rand(3, )  # generate a random color
+        n, bins, patches = self.histogram_ax.hist(y_array, bins=20, alpha=0.5, label=y_axis, color=color,
+                                                  edgecolor='black')
+
+        # Plot Gaussian overlay if enabled
+        if self.show_stats_checkbox.isChecked():
+            from brillouin_system.my_dataclasses.analyzer_results import analyze_frame_statistics
+            stats = analyze_frame_statistics(self.current_fitted_results)
+
+            mean_attr = f"mean_{y_axis}"
+            std_attr = f"std_{y_axis}"
+
+            mean_val = getattr(stats, mean_attr, None)
+            std_val = getattr(stats, std_attr, None)
+
+            if mean_val is not None and std_val is not None:
+                from scipy.stats import norm
+                x = np.linspace(min(y_array), max(y_array), 200)
+                pdf = norm.pdf(x, loc=mean_val, scale=std_val)
+                scaled_pdf = pdf * len(y_array) * (bins[1] - bins[0])
+                self.histogram_ax.plot(x, scaled_pdf, '--', color=color, label=f"Gaussian ({y_axis})")
+
+        self.histogram_ax.legend()
+        self.histogram_window.canvas.draw()
 
 
 if __name__ == "__main__":
