@@ -3,7 +3,7 @@ import pickle
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
     QGroupBox, QListWidget, QRadioButton, QButtonGroup, QFileDialog,
-    QMessageBox, QCheckBox
+    QMessageBox, QCheckBox, QComboBox, QListView, QDialog
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -14,13 +14,28 @@ from brillouin_system.gui.data_analyzer.analyzer_manager import AnalyzerManager
 from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
 from brillouin_system.gui.data_analyzer.analyzer_utils import numpy_array_to_pixmap
 from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, PhotonsCounts, \
-    calculate_photon_counts_from_fitted_spectrum
+    calculate_photon_counts_from_fitted_spectrum, print_analyzed_frame_summary
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.my_dataclasses.calibration import (
     CalibrationCalculator, render_calibration_to_pixmap,
     CalibrationImageDialog, calibrate,
 )
 from brillouin_system.config.config import calibration_config
+
+class PlotWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Series Plot")
+        self.setMinimumSize(640, 480)
+
+        layout = QVBoxLayout(self)
+
+        self.fig, self.ax = plt.subplots()
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        self.setLayout(layout)
+
 
 
 class AnalyzerViewer(QWidget):
@@ -31,18 +46,35 @@ class AnalyzerViewer(QWidget):
         self.analyze_manager = AnalyzerManager()
 
         self.current_measurement_index = 0
-        self.current_fitted_results = []
+        self.current_fitted_results: list[AnalyzedFrame] = []
         self.current_series = None
         self.analyzed_series_lookup = {}
 
+        self.plot_window = None
+
         self.init_ui()
 
-    def init_ui(self):
-        outer_layout = QVBoxLayout()
-        self.setLayout(outer_layout)
 
-        # Top display: frame + spectrum
-        display_row = QHBoxLayout()
+
+    def init_ui(self):
+        self.setup_main_layout()
+        self.setup_display_area()
+        self.setup_series_controls()
+        self.setup_calibration_controls()
+        self.setup_single_series_controls()
+        self.setup_connections()
+
+    def setup_main_layout(self):
+        self.outer_layout = QVBoxLayout()
+        self.setLayout(self.outer_layout)
+
+        self.display_row = QHBoxLayout()
+        self.outer_layout.addLayout(self.display_row)
+
+        self.bottom_row = QHBoxLayout()
+        self.outer_layout.addLayout(self.bottom_row)
+
+    def setup_display_area(self):
         left_display_col = QVBoxLayout()
 
         self.frame_label = QLabel("No Frame")
@@ -65,15 +97,11 @@ class AnalyzerViewer(QWidget):
         self.mako_label.setStyleSheet("background-color: black; color: white;")
         self.mako_label.setFixedSize(576, 432)
 
-        display_row.addLayout(left_display_col)
-        display_row.addWidget(self.mako_label)
-        outer_layout.addLayout(display_row)
+        self.display_row.addLayout(left_display_col)
+        self.display_row.addWidget(self.mako_label)
 
-        # Bottom control layout
-        bottom_row = QHBoxLayout()
-
-        # --- Series Control ---
-        series_group = QGroupBox("Series Controls")
+    def setup_series_controls(self):
+        self.series_group = QGroupBox("Series Controls")
         series_layout = QVBoxLayout()
 
         self.series_list_widget = QListWidget()
@@ -85,11 +113,12 @@ class AnalyzerViewer(QWidget):
         series_layout.addWidget(self.series_list_widget)
         series_layout.addWidget(self.add_series_btn)
         series_layout.addWidget(self.remove_series_btn)
-        series_group.setLayout(series_layout)
-        bottom_row.addWidget(series_group)
+        self.series_group.setLayout(series_layout)
 
-        # --- Calibration & Fitting ---
-        calibration_group = QGroupBox("Calibration and Fitting")
+        self.bottom_row.addWidget(self.series_group)
+
+    def setup_calibration_controls(self):
+        self.calibration_group = QGroupBox("Calibration and Fitting")
         calibration_layout = QVBoxLayout()
 
         self.radio_use_calibration_in_series = QRadioButton("Use Series Calibration")
@@ -101,22 +130,14 @@ class AnalyzerViewer(QWidget):
         self.calibration_button_group.addButton(self.radio_use_external)
 
         self.load_calibration_btn = QPushButton("Load Calibration")
-        self.load_calibration_btn.clicked.connect(self.load_calibration_file)
-
         self.loaded_calibration_label = QLabel("Loaded Calibration: None")
-
         self.show_calibration_btn = QPushButton("Show Calibration")
-        self.show_calibration_btn.clicked.connect(self.show_calibration)
-
         self.config_series_btn = QPushButton("Config")
-        self.config_series_btn.clicked.connect(self.open_config_dialog)
-
         self.bg_sub_checkbox = QCheckBox("Do BG Subtraction")
         self.bg_sub_checkbox.setChecked(False)
         self.bg_sub_checkbox.setToolTip("Enable background subtraction before spectrum fitting.")
-
         self.analyze_series_btn = QPushButton("Analyze Selected Series")
-        self.analyze_series_btn.clicked.connect(self.analyze_selected_series)
+        self.clear_analysis_btn = QPushButton("Clear Analyzed")
 
         calibration_layout.addWidget(self.radio_use_calibration_in_series)
         calibration_layout.addWidget(self.radio_use_external)
@@ -126,16 +147,29 @@ class AnalyzerViewer(QWidget):
         calibration_layout.addWidget(self.config_series_btn)
         calibration_layout.addWidget(self.bg_sub_checkbox)
         calibration_layout.addWidget(self.analyze_series_btn)
+        calibration_layout.addWidget(self.clear_analysis_btn)
 
-        calibration_group.setLayout(calibration_layout)
-        bottom_row.addWidget(calibration_group)
+        self.calibration_group.setLayout(calibration_layout)
+        self.bottom_row.addWidget(self.calibration_group)
 
-        # --- One Series Navigation ---
+    def setup_single_series_controls(self):
         self.single_series_group = QGroupBox("One Measurement Series")
-        single_series_layout = QVBoxLayout()
+        layout = QVBoxLayout()
 
         self.series_status_label = QLabel("Show Series: No series selected.")
-        single_series_layout.addWidget(self.series_status_label)
+        layout.addWidget(self.series_status_label)
+
+        self.analyzed_series_dropdown = QComboBox()
+        self.analyzed_series_dropdown.setFixedWidth(250)
+        self.analyzed_series_dropdown.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.analyzed_series_dropdown.setView(QListView())
+        self.analyzed_series_dropdown.view().setMinimumWidth(600)
+
+        layout.addWidget(QLabel("Analyzed Series:"))
+        layout.addWidget(self.analyzed_series_dropdown)
+
+        self.show_selected_btn = QPushButton("Show")
+        layout.addWidget(self.show_selected_btn)
 
         nav_layout = QHBoxLayout()
         self.left_btn = QPushButton("Left")
@@ -144,19 +178,58 @@ class AnalyzerViewer(QWidget):
         nav_layout.addWidget(self.left_btn)
         nav_layout.addWidget(self.right_btn)
         nav_layout.addWidget(self.index_label)
-        single_series_layout.addLayout(nav_layout)
+        layout.addLayout(nav_layout)
 
-        self.left_btn.clicked.connect(self.go_left)
-        self.right_btn.clicked.connect(self.go_right)
+        # X/Y axis selection
+        xy_layout = QHBoxLayout()
+        self.x_axis_label = QLabel("X:")
+        self.x_axis_dropdown = QComboBox()
+        self.x_axis_dropdown.addItem("index")
+        self.y_axis_label = QLabel("Y:")
+        self.y_axis_dropdown = QComboBox()
 
-        self.single_series_group.setLayout(single_series_layout)
-        bottom_row.addWidget(self.single_series_group)
+        y_axis_options = [
+            "freq_shift_left_peak_ghz",
+            "freq_shift_right_peak_ghz",
+            "freq_shift_peak_distance_ghz",
+            "fwhm_left_peak_ghz",
+            "fwhm_right_peak_ghz",
+            "left_peak_photons",
+            "right_peak_photons",
+            "total_photons"
+        ]
+        for opt in y_axis_options:
+            self.y_axis_dropdown.addItem(opt)
 
-        bottom_row.addStretch()
-        outer_layout.addLayout(bottom_row)
+        xy_layout.addWidget(self.x_axis_label)
+        xy_layout.addWidget(self.x_axis_dropdown)
+        xy_layout.addWidget(self.y_axis_label)
+        xy_layout.addWidget(self.y_axis_dropdown)
 
+        layout.addLayout(xy_layout)
+        self.single_series_group.setLayout(layout)
+
+        self.plot_series_btn = QPushButton("Plot Series")
+
+        layout.addWidget(self.plot_series_btn)
+
+        self.show_stats_checkbox = QCheckBox("Show Mean ± Std")
+        layout.addWidget(self.show_stats_checkbox)
+
+        self.bottom_row.addWidget(self.single_series_group)
+
+    def setup_connections(self):
         self.add_series_btn.clicked.connect(self.load_series_file)
         self.remove_series_btn.clicked.connect(self.remove_selected_series)
+        self.load_calibration_btn.clicked.connect(self.load_calibration_file)
+        self.show_calibration_btn.clicked.connect(self.show_calibration)
+        self.config_series_btn.clicked.connect(self.open_config_dialog)
+        self.analyze_series_btn.clicked.connect(self.analyze_selected_series)
+        self.clear_analysis_btn.clicked.connect(self.clear_analyzed_series)
+        self.show_selected_btn.clicked.connect(self.show_selected_analyzed_series)
+        self.left_btn.clicked.connect(self.go_left)
+        self.right_btn.clicked.connect(self.go_right)
+        self.plot_series_btn.clicked.connect(self.plot_selected_series)
 
     def open_config_dialog(self):
         dialog = ConfigDialog(self)
@@ -211,13 +284,9 @@ class AnalyzerViewer(QWidget):
 
     def analyze_selected_series(self):
         selected_items = self.series_list_widget.selectedItems()
-        if len(selected_items) != 1:
-            QMessageBox.warning(self, "Invalid Selection", "Please select exactly one series.")
-            self.series_status_label.setText("Show Series: Please select exactly one series.")
-            return
 
-        index = self.series_list_widget.row(selected_items[0])
-        indices = [index]
+        indices = [self.series_list_widget.row(item) for item in selected_items]
+
         use_series_calibration = self.radio_use_calibration_in_series.isChecked()
         do_bg_sub = self.bg_sub_checkbox.isChecked()
 
@@ -226,6 +295,39 @@ class AnalyzerViewer(QWidget):
             is_do_bg_subtraction=do_bg_sub,
             is_use_own_calibration_data=use_series_calibration
         )
+
+        self.series_status_label.setText(f"Analyzed {len(indices)} series.")
+        self.refresh_analyzed_dropdown()
+
+    def refresh_analyzed_dropdown(self):
+        existing_indices = {
+            self.analyzed_series_dropdown.itemData(i)
+            for i in range(self.analyzed_series_dropdown.count())
+        }
+
+        for index in sorted(self.analyze_manager.analyzed_series_lookup):
+            if index not in existing_indices:
+                series = self.analyze_manager.stored_measurement_series[index]
+                filename = self.analyze_manager.series_filenames.get(index, "Unknown")
+                label = self.analyze_manager.displayed_series_info(series, file_name=filename)
+
+                self.analyzed_series_dropdown.addItem(label, userData=index)
+                self.analyzed_series_dropdown.setItemData(
+                    self.analyzed_series_dropdown.count() - 1,
+                    label,
+                    Qt.ToolTipRole  # 👈 Tooltip on hover
+                )
+
+    def clear_analyzed_series(self):
+        self.analyze_manager.analyzed_series_lookup.clear()
+        self.analyzed_series_dropdown.clear()
+        self.series_status_label.setText("Cleared analyzed series.")
+
+    def show_selected_analyzed_series(self):
+        index = self.analyzed_series_dropdown.currentData()
+        if index is None:
+            QMessageBox.warning(self, "Selection Error", "No analyzed series selected.")
+            return
 
         self.current_series = self.analyze_manager.stored_measurement_series[index]
         self.current_fitted_results = self.analyze_manager.analyzed_series_lookup[index]
@@ -272,11 +374,6 @@ class AnalyzerViewer(QWidget):
         self.ax.set_ylabel("Intensity")
         self.canvas.draw()
 
-        photons: PhotonsCounts = calculate_photon_counts_from_fitted_spectrum(analyzed_frame.fitted_spectrum)
-        print(f"Photons left peak: {photons.left_peak_photons}")
-        print(f"Photons right peak: {photons.right_peak_photons}")
-        print(f"Photons both peak: {photons.total_photons}")
-
 
     def go_left(self):
         if self.current_measurement_index > 0:
@@ -293,7 +390,89 @@ class AnalyzerViewer(QWidget):
             self.index_label.setText("0 of 0")
             return
         self.index_label.setText(f"{self.current_measurement_index + 1} of {len(self.current_fitted_results)}")
-        self.display_result(self.current_fitted_results[self.current_measurement_index])
+        analyzed_frame_to_be_displayed = self.current_fitted_results[self.current_measurement_index]
+        self.display_result(analyzed_frame_to_be_displayed)
+        print(f"Index: {self.current_measurement_index}")
+        print_analyzed_frame_summary(analyzed_frame_to_be_displayed)
+
+    def plot_selected_series(self):
+        index = self.analyzed_series_dropdown.currentData()
+        if index is None:
+            QMessageBox.warning(self, "Selection Error", "No analyzed series selected.")
+            return
+
+        self.current_fitted_results = self.analyze_manager.analyzed_series_lookup[index]
+
+        x_axis = self.x_axis_dropdown.currentText()
+        y_axis = self.y_axis_dropdown.currentText()
+
+        if x_axis != "index":
+            QMessageBox.warning(self, "Unsupported X Axis", "Only 'index' is currently supported for X.")
+            return
+
+        # Extract Y values
+        y_values = [
+            getattr(af, y_axis)
+            for af in self.current_fitted_results
+            if getattr(af, y_axis) is not None
+        ]
+
+        if not y_values:
+            QMessageBox.warning(self, "No Data", f"No valid data found for '{y_axis}'.")
+            return
+
+        x_values = list(range(len(y_values)))
+
+        # Determine plot category
+        if "photon" in y_axis.lower():
+            current_category = "photons"
+        else:
+            current_category = "ghz"
+
+        # Create new plot window if switching categories
+        if (
+                self.plot_window is None or
+                self.last_y_axis_category != current_category
+        ):
+            if self.plot_window is not None:
+                self.plot_window.close()
+                self.plot_window = None
+
+            self.plot_window = PlotWindow(self)
+            self.plot_window_ax = self.plot_window.ax
+            self.plot_window_ax.set_title("Series Plot")
+            self.plot_window_ax.set_xlabel(x_axis)
+            self.plot_window_ax.set_ylabel("Photons" if current_category == "photons" else "GHz")
+            self.plot_window.show()
+            self.last_y_axis_category = current_category
+        else:
+            self.plot_window_ax = self.plot_window.ax
+
+        # Plot the data
+        line, = self.plot_window_ax.plot(x_values, y_values, 'o--', label=y_axis)
+
+        # Show stats overlay if checkbox is checked
+        if self.show_stats_checkbox.isChecked():
+            from brillouin_system.my_dataclasses.analyzer_results import analyze_frame_statistics
+            stats = analyze_frame_statistics(self.current_fitted_results)
+
+            # Get corresponding mean and std field dynamically
+            mean_attr = f"mean_{y_axis}"
+            std_attr = f"std_{y_axis}"
+
+            mean_val = getattr(stats, mean_attr, None)
+            std_val = getattr(stats, std_attr, None)
+
+            if mean_val is not None and std_val is not None:
+                ymin = mean_val - std_val
+                ymax = mean_val + std_val
+                color = line.get_color()
+
+                self.plot_window_ax.axhline(mean_val, color=color, linestyle='--', alpha=0.5, label=f"Mean: {round(mean_val,ndigits=3)}")
+                self.plot_window_ax.fill_between(x_values, ymin, ymax, color=color, alpha=0.2, label=f"±1 STD: {round(std_val,ndigits=3)}")
+
+        self.plot_window_ax.legend()
+        self.plot_window.canvas.draw()
 
 
 if __name__ == "__main__":

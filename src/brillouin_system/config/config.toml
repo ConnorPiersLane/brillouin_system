@@ -28,7 +28,7 @@ min_peak_width = 1
 min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
-fitting_model = "lorentzian_quad_bg"
+fitting_model = "lorentzian"
 
 [find_peaks.reference]
 prominence_fraction = 0.05

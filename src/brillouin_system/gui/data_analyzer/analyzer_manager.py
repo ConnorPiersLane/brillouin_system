@@ -19,6 +19,8 @@ class AnalyzerManager:
         self.calibration_data_from_file: CalibrationData | None = None
         self.calibration_calculator_from_file: CalibrationCalculator | None = None
         self.stored_measurement_series = []
+        self.series_filenames: dict[int, str] = {}  # Maps series index to filename
+
         self.analyzed_series_lookup: dict[int, list[AnalyzedFrame]] = {}
 
     def load_measurement_series(self, measurement_series: MeasurementSeries):
@@ -85,10 +87,16 @@ class AnalyzerManager:
 
             if isinstance(loaded, list):
                 self.stored_measurement_series.extend(loaded)
+                filename = path.split("/")[-1]
                 for series in loaded:
-                    info_str = self.displayed_series_info(series, file_name=path.split("/")[-1])
+                    self.stored_measurement_series.append(series)
+                    series_index = len(self.stored_measurement_series) - 1
+                    self.series_filenames[series_index] = filename
+
+                    info_str = self.displayed_series_info(series, file_name=filename)
                     info_strings.append(info_str)
                     print(f"[\u2713] Loaded: {info_str}")
+
         except Exception as e:
             print(f"[Analyzer Manager] Failed to load measurement series: {e}")
         return info_strings
@@ -134,9 +142,14 @@ class AnalyzerManager:
                 print(f"[BrillouinManager] Fitting error: {e}")
                 fs = get_empty_fitting(sline)
 
-            af = fitting_to_analyzer_result(frame=frame, fitting=fs, calibration_calculator=calibration_calculator)
+            af = fitting_to_analyzer_result(frame=frame, fitting=fs, calibration_calculator=calibration_calculator,
+                                            camera_settings=measurement.state_mode.camera_settings)
             analyzed_frames.append(af)
         return analyzed_frames
+
+
+
+
 
     def analyze_selected_series(
         self,
