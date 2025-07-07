@@ -3,7 +3,7 @@ import numpy as np
 from .base_mako import BaseMakoCamera
 
 class AlliedVisionCamera(BaseMakoCamera):
-    def __init__(self):
+    def __init__(self, index=0):
         print("[AVCamera] Connecting to Allied Vision Camera...")
         self.vimba = Vimba.get_instance()
         self.vimba.__enter__()
@@ -13,9 +13,18 @@ class AlliedVisionCamera(BaseMakoCamera):
         cameras = self.vimba.get_all_cameras()
         if not cameras:
             raise RuntimeError("No Allied Vision camera found.")
-        self.camera = cameras[0]
+        self.camera = cameras[index]
         self.camera.__enter__()
         print(f"[AVCamera] ...Found camera: {self.camera.get_id()}")
+        self.set_freerun_mode()
+
+    def set_freerun_mode(self):
+        try:
+            self.camera.AcquisitionMode.set("Continuous")
+            self.camera.TriggerMode.set("Off")
+            print("[AVCamera] Camera set to Freerun mode.")
+        except VimbaFeatureError as e:
+            print(f"[AVCamera] Failed to set Freerun mode: {e}")
 
     def set_exposure(self, exposure_us):
         feat = self.camera.get_feature_by_name("ExposureTimeAbs")
@@ -131,7 +140,7 @@ class AlliedVisionCamera(BaseMakoCamera):
 
         self._last_callback = frame_callback
 
-        # ✅ Set to continuous mode
+        # Set to continuous mode
         self.set_acquisition_mode(mode="Continuous")
 
         def stream_handler(cam, frame):

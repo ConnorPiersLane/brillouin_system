@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from brillouinDAQ.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
-import time
+from brillouin_system.devices.cameras.allied.allied_vision_camera import AlliedVisionCamera
+
 
 def main():
     print("[DEBUG] Initializing Allied Vision camera...")
@@ -10,7 +10,7 @@ def main():
     try:
         # Optional: set ROI or exposure
         cam.set_exposure(5000)  # µs
-        cam.set_emccd_gain(10)
+        cam.set_gain(10)
 
         print("[DEBUG] Capturing one image...")
         image = cam.snap()

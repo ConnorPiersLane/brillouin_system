@@ -51,6 +51,7 @@ class BrillouinManager:
         self.camera: BaseCamera | DummyCamera = camera
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
         self.microwave: Microwave | MicrowaveDummy = microwave
+        self.microwave.set_power(power_dbm=-20)
         self.zaber = zaber
 
         # State

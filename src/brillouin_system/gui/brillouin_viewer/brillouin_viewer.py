@@ -47,22 +47,23 @@ brillouin_manager = BrillouinManager(
 )
 
 
-# # # Real
-# brillouin_manager = BrillouinManager(
-#         camera=IxonUltra(
-#             index = 0,
-#             temperature = -20, #"off"
-#             fan_mode = "full",
-#             x_start = 40, x_end  = 120,
-#             y_start= 300, y_end  = 315,
-#             vbin= 1, hbin  = 1,
-#             verbose = True,
-#         ),
-#     shutter_manager=ShutterManager('human_interface'),
-#     microwave=Microwave(),
-#     zaber=ZaberLinearDummy(),
-#     is_sample_illumination_continuous=True
-# )
+# # Real
+brillouin_manager = BrillouinManager(
+        camera=IxonUltra(
+            index = 0,
+            temperature = -80, #"off"
+            fan_mode = "full",
+            x_start = 40, x_end  = 120,
+            y_start= 300, y_end  = 315,
+            vbin= 1, hbin  = 1,
+            verbose = True,
+            advanced_gain_option=False
+        ),
+    shutter_manager=ShutterManager('human_interface'),
+    microwave=Microwave(),
+    zaber=ZaberLinearController(),
+    is_sample_illumination_continuous=True
+)
 
 
 class BrillouinViewer(QWidget):

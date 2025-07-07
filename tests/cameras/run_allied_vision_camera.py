@@ -1,6 +1,6 @@
 import time
 
-from brillouinDAQ.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
+from brillouin_system.devices.cameras.allied.allied_vision_camera import AlliedVisionCamera
 
 
 # Replace with actual import path
@@ -16,8 +16,8 @@ def main():
 
     # ---- Test Gain ----
     expected_gain = 10
-    cam.set_emccd_gain(expected_gain)
-    actual_gain = cam.get_emccd_gain()
+    cam.set_gain(expected_gain)
+    actual_gain = cam.get_gain()
     print(f"[TEST] Set gain: {expected_gain} dB | Read gain: {actual_gain} dB")
     if abs(expected_gain - actual_gain) > 0.1:
         print("❌ [ERROR] Gain mismatch!")

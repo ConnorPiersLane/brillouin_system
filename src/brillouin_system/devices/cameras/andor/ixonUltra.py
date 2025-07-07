@@ -103,6 +103,8 @@ class IxonUltra(BaseCamera):
 
         self.flip_image_horizontally: bool = flip_image_horizontally
 
+        self._advanced_gain = advanced_gain_option
+
         self.cam = AndorSDK2Camera(
             idx=index,
             temperature=temperature,
@@ -178,8 +180,11 @@ class IxonUltra(BaseCamera):
             if self.verbose:
                 print(f"[IxonUltra] Exposure time set to {self.get_exposure_time():.4f} seconds")
 
-    def set_emccd_gain(self, gain: float | int, advanced: bool = False):
+    def set_emccd_gain(self, gain: float | int, advanced: bool = None):
         """Set EMCCD gain. Only applies when in EM mode. Advanced mode is risky!"""
+        if advanced is None:
+            advanced = self._advanced_gain
+
         current_mode = self.get_amp_mode()
         if current_mode.oamp == 1:
             if self.verbose:

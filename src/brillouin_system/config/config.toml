@@ -28,7 +28,7 @@ min_peak_width = 1
 min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
-fitting_model = "lorentzian"
+fitting_model = "lorentzian_quad_bg"
 
 [find_peaks.reference]
 prominence_fraction = 0.05
@@ -40,8 +40,6 @@ fitting_model = "lorentzian"
 
 [andor_frame]
 selected_rows = [
-    0,
-    1,
     2,
     3,
     4,
@@ -50,22 +48,19 @@ selected_rows = [
     7,
     8,
     9,
-    10,
-    11,
-    12,
 ]
-n_dark_images = 10
-take_dark_image = false
-n_bg_images = 10
+n_dark_images = 20
+take_dark_image = true
+n_bg_images = 20
 x_start = 45
 x_end = 110
 y_start = 300
 y_end = 313
 vbin = 1
 hbin = 1
-n_px_crop_left_side = 0
-n_px_crop_right_side = 0
+n_px_crop_left_side = 10
+n_px_crop_right_side = 10
 change_andor_settings_on_apply = false
-pre_amp_mode = 18
+pre_amp_mode = 9
 vss_index = 4
-flip_image_horizontally = true
+flip_image_horizontally = false

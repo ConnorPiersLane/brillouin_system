@@ -66,11 +66,17 @@ Camera 1 (DEV_000F315BC084) I/O features:
 """
 
 
+import threading
+import time
+import queue
+from .allied_vision_camera import AlliedVisionCamera
+
+
 class DualAlliedVisionCameras:
     def __init__(self):
         print("[DualCamera] Initializing two Allied Vision cameras...")
-        self.cam0 = AlliedVisionCamera()
-        self.cam1 = AlliedVisionCamera()
+        self.cam0 = AlliedVisionCamera(index=0)
+        self.cam1 = AlliedVisionCamera(index=1)
 
         self.q0 = queue.Queue()
         self.q1 = queue.Queue()
@@ -91,18 +97,15 @@ class DualAlliedVisionCameras:
 
     def start_synchronized_stream(self, dual_callback):
         self.configure_software_triggered(mode="Continuous")
-        self.running = True
-
         self.cam0.start_stream(self._frame_callback0)
         self.cam1.start_stream(self._frame_callback1)
+        self.running = True
 
         def sync_watcher():
             while self.running:
                 try:
                     t0, f0 = self.q0.get(timeout=1)
                     t1, f1 = self.q1.get(timeout=1)
-                    delta = abs(t1 - t0)
-                    print(f"Inter-frame arrival difference: {delta * 1000:.2f} ms")
                     dual_callback(f0, f1)
                 except queue.Empty:
                     print("[DualCamera] Warning: Frame timeout.")
@@ -139,7 +142,11 @@ class DualAlliedVisionCameras:
         def snap_cam(cam, out):
             barrier.wait()
             cam.camera.get_feature_by_name("TriggerSoftware").run()
-            out[0] = cam.snap()
+            try:
+                out[0] = cam.camera.get_frame()
+            except Exception as e:
+                print(f"[DualCamera] Snap error on {cam}: {e}")
+                out[0] = None
 
         t0 = threading.Thread(target=snap_cam, args=(self.cam0, image0))
         t1 = threading.Thread(target=snap_cam, args=(self.cam1, image1))
@@ -148,6 +155,8 @@ class DualAlliedVisionCameras:
         t0.join()
         t1.join()
 
+        if image0[0] is None or image1[0] is None:
+            print("[DualCamera] Error: One or both snap results are None.")
         return image0[0], image1[0]
 
     def stop(self):
@@ -161,3 +170,5 @@ class DualAlliedVisionCameras:
         self.stop()
         self.cam0.close()
         self.cam1.close()
+
+

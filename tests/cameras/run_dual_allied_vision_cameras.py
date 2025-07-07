@@ -1,5 +1,5 @@
 import time
-from your_module.dual_allied_vision_cameras import DualAlliedVisionCameras  # Update path as needed
+from brillouin_system.devices.cameras.allied.dual_allied_vision_cameras import DualAlliedVisionCameras  # Update path as needed
 
 def dual_callback(frame0, frame1):
     print("Received synchronized frames:")
