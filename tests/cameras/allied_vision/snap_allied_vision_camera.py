@@ -13,7 +13,11 @@ def main():
         cam.set_gain(10)
 
         print("[DEBUG] Capturing one image...")
-        image = cam.snap()
+        frame = cam.snap()
+        frame.convert_pixel_format(frame.get_pixel_format())
+        image = frame.as_numpy_ndarray()
+        if image.ndim == 3 and image.shape[-1] == 1:
+            image = image[..., 0]
 
         if image.ndim == 3 and image.shape[-1] == 1:
             image = image[..., 0]

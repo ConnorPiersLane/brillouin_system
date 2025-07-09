@@ -6,7 +6,8 @@ from brillouin_system.devices.cameras.allied.allied_vision_camera import AlliedV
 # Replace with actual import path
 def frame_handler(frame):
     try:
-        print(f"Frame received | Shape: {frame.shape}")
+        image = frame.as_numpy_ndarray()
+        print(f"Frame received | Shape: {image.shape}")
     except Exception as e:
         print(f"Frame handler error: {e}")
 
@@ -76,7 +77,7 @@ def main():
     # ---- Snap Test ----
     print("[TEST] Capturing a single frame (snap)...")
     img = cam.snap()
-    print(f"[TEST] Snap image shape: {img.shape}")
+    print(f"[TEST] Snap image shape: {img}")
 
     # ---- Clean up ----
     cam.stop_stream()

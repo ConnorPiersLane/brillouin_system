@@ -1,27 +1,48 @@
-from vimba import Vimba, VimbaFeatureError
-import numpy as np
-from .base_mako import BaseMakoCamera
+from contextlib import ExitStack
+
+from vimba import Vimba, VimbaFeatureError, VimbaCameraError
+from brillouin_system.devices.cameras.allied.base_mako import BaseMakoCamera
 
 class AlliedVisionCamera(BaseMakoCamera):
-    def __init__(self, index=0):
+    def __init__(self, id="DEV_000F315BC084"):
         print("[AVCamera] Connecting to Allied Vision Camera...")
-        self.vimba = Vimba.get_instance()
-        self.vimba.__enter__()
+        self.stack = ExitStack()
+        self.vimba = self.stack.enter_context(Vimba.get_instance())
         self.camera = None
         self.streaming = False
+        self._last_callback = None
 
         cameras = self.vimba.get_all_cameras()
         if not cameras:
-            raise RuntimeError("No Allied Vision camera found.")
-        self.camera = cameras[index]
-        self.camera.__enter__()
+            raise RuntimeError("[AVCamera] No Allied Vision cameras found.")
+
+        try:
+            self.camera = self.stack.enter_context(self.vimba.get_camera_by_id(id))
+        except VimbaCameraError:
+            print(f"[AVCamera] Camera with ID '{id}' not found.")
+            print("[AVCamera] Available cameras:")
+            for cam in cameras:
+                print(f"  - {cam.get_id()}")
+            raise RuntimeError("[AVCamera] Cannot continue without valid camera.")
+
         print(f"[AVCamera] ...Found camera: {self.camera.get_id()}")
         self.set_freerun_mode()
 
     def set_freerun_mode(self):
         try:
-            self.camera.AcquisitionMode.set("Continuous")
+            self.camera.TriggerSelector.set("FrameStart")
             self.camera.TriggerMode.set("Off")
+            self.camera.AcquisitionMode.set("Continuous")
+            print("[AVCamera] Camera set to Freerun mode.")
+        except VimbaFeatureError as e:
+            print(f"[AVCamera] Failed to set Freerun mode: {e}")
+
+    def set_software_trigger(self):
+        try:
+            self.camera.TriggerSelector.set("FrameStart")
+            self.camera.TriggerSource.set("Software")
+            self.camera.TriggerMode.set("On")
+            self.camera.AcquisitionMode.set("Continuous")
             print("[AVCamera] Camera set to Freerun mode.")
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set Freerun mode: {e}")
@@ -112,16 +133,12 @@ class AlliedVisionCamera(BaseMakoCamera):
         self.set_acquisition_mode("SingleFrame")
 
         frame = self.camera.get_frame()
-        frame.convert_pixel_format(frame.get_pixel_format())
-        image = frame.as_numpy_ndarray()
-        if image.ndim == 3 and image.shape[-1] == 1:
-            image = image[..., 0]
 
         if was_streaming:
             self.set_acquisition_mode("Continuous")
             self.start_stream(self._last_callback)
 
-        return image
+        return frame
 
     def set_acquisition_mode(self, mode="Continuous"):
         """
@@ -144,13 +161,13 @@ class AlliedVisionCamera(BaseMakoCamera):
         self.set_acquisition_mode(mode="Continuous")
 
         def stream_handler(cam, frame):
-            frame_callback(frame.as_numpy_ndarray())
+            frame_callback(frame)
             cam.queue_frame(frame)
 
-        # Allocate and queue initial frames
-        self.frames = [self.camera.get_frame() for _ in range(buffer_count)]
-        for frame in self.frames:
-            self.camera.queue_frame(frame)
+        # # Allocate and queue initial frames
+        # self.frames = [self.camera.get_frame() for _ in range(buffer_count)]
+        # for frame in self.frames:
+        #     self.camera.queue_frame(frame)
 
         self.camera.start_streaming(stream_handler)
         self.streaming = True
@@ -164,10 +181,9 @@ class AlliedVisionCamera(BaseMakoCamera):
         self.streaming = False
         print("[AVCamera] Stopped streaming.")
 
-
     def close(self):
         if self.streaming:
             self.stop_stream()
-        self.camera.__exit__(None, None, None)
-        self.vimba.__exit__(None, None, None)
+        self.stack.close()
         print("[AVCamera] Camera and Vimba shut down.")
+
