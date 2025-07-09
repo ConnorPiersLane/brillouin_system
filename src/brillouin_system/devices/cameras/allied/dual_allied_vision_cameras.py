@@ -42,7 +42,7 @@ class DualAlliedVisionCameras:
         """Start streaming once and keep queues ready."""
         self.cam0.camera.start_streaming(_handler0)
         self.cam1.camera.start_streaming(_handler1)
-        time.sleep(0.2)  # Let the queues settle
+        # time.sleep(0.2)  # Let the queues settle
 
     def stop_stream(self):
         self.cam0.camera.stop_streaming()
@@ -72,21 +72,39 @@ class DualAlliedVisionCameras:
 
 if __name__ == "__main__":
     cams = DualAlliedVisionCameras()
+
     try:
+        # First snap
         f0, f1 = cams.snap_once()
+        t0_0 = f0.get_timestamp()
+        t0_1 = f1.get_timestamp()
         img0 = f0.as_numpy_ndarray()
         img1 = f1.as_numpy_ndarray()
+        print("First Snap:")
+        print("  Cam0 Frame shape:", img0.shape)
+        print("  Cam1 Frame shape:", img1.shape)
+        print(t0_0)
+        print(t0_1)
+        print(f"  Time delta between cams: {(abs(t0_0 - t0_1)) / 1e6:.3f} ms")
 
-        print("Cam0 Frame shape:", img0.shape)
-        print("Cam1 Frame shape:", img1.shape)
-
+        # Second snap
         f0, f1 = cams.snap_once()
+        t1_0 = f0.get_timestamp()
+        t1_1 = f1.get_timestamp()
         img0 = f0.as_numpy_ndarray()
         img1 = f1.as_numpy_ndarray()
+        print("Second Snap:")
+        print("  Cam0 Frame shape:", img0.shape)
+        print("  Cam1 Frame shape:", img1.shape)
+        print(t1_0)
+        print(t1_1)
+        print(f"  Time delta between cams: {(abs(t1_0 - t1_1)) / 1e6:.3f} ms")
 
-        print("Cam0 Frame shape:", img0.shape)
-        print("Cam1 Frame shape:", img1.shape)
-
+        # Time delta between snaps (based on cam0)
+        print(f"Time between first and second snap (cam0): {(t1_0 - t0_0) / 1e6:.3f} ms")
+        print(f"Time between first and second snap (cam1): {(t1_1 - t0_1) / 1e6:.3f} ms")
 
     finally:
+
         cams.close()
+
