@@ -6,6 +6,14 @@ from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 
 
 class ZaberMicroscope:
+    """
+    (MVR100E025AC-ENG3119-MLR3B-T13A-C-LCA4-KC15C) Inverted Microscope, Zeiss optics, reflected light illuminator (385, white, 625 nm),
+    4-channel LED controller, accessory kit, custom junction block for 780 nm laser input, custom supports, and custom tube lens
+Zeiss optics: Most likely working distance 120.6 mm
+Custom tube Lens: most likely corresponding to Zeiss
+Chroma ZT775sp-2p-UF3
+
+    """
     def __init__(self, port="COM4"):
         Library.enable_device_db_store()
         self._connection = Connection.open_serial_port(port)
