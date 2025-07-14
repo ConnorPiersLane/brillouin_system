@@ -24,7 +24,9 @@ class DualAlliedVisionCameras:
         print("[DualCamera] Initializing two Allied Vision cameras...")
 
         self.cam0 = AlliedVisionCamera(id=id0)
+        self.cam0.que_buffer()
         self.cam1 = AlliedVisionCamera(id=id1)
+        self.cam1.que_buffer()
 
         self._setup_snap_mode()
         self.start_stream()

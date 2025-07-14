@@ -150,6 +150,13 @@ class AlliedVisionCamera(BaseMakoCamera):
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set AcquisitionMode to {mode}: {e}")
 
+
+    def que_buffer(self, buffer_count=5):
+        # Allocate and queue initial frames
+        frames = [self.camera.get_frame() for _ in range(buffer_count)]
+        for frame in frames:
+            self.camera.queue_frame(frame)
+
     def start_stream(self, frame_callback, buffer_count=5):
         if self.streaming:
             print("[AVCamera] Already streaming.")
@@ -165,9 +172,7 @@ class AlliedVisionCamera(BaseMakoCamera):
             cam.queue_frame(frame)
 
         # Allocate and queue initial frames
-        self.frames = [self.camera.get_frame() for _ in range(buffer_count)]
-        for frame in self.frames:
-            self.camera.queue_frame(frame)
+        self.que_buffer()
 
         self.camera.start_streaming(stream_handler)
         self.streaming = True
