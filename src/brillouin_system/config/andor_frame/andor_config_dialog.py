@@ -78,9 +78,11 @@ class AndorConfigDialog(QDialog):
                 vss_index=int(self.inputs["vss_index"].text()),
                 temperature=self._parse_temperature(self.inputs["temperature"].text()),
                 flip_image_horizontally=self.inputs["flip_image_horizontally"].isChecked(),
-                verbose=self.inputs["verbose"].isChecked()
+                verbose=self.inputs["verbose"].isChecked(),
+                reload=True,
             )
             save_andor_frame_settings(andor_config_toml_path, andor_frame_config)
+            print("Settings saved successfully.")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save: {e}")

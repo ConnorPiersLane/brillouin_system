@@ -13,7 +13,10 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 
+from brillouin_system.config.andor_frame.andor_config_dialog import AndorConfigDialog
+from brillouin_system.config.calibration.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.config.config import calibration_config
+from brillouin_system.config.peak_fitting.find_peaks_config_gui import FindPeaksConfigDialog
 from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -106,7 +109,6 @@ class BrillouinViewer(QWidget):
         self.start_live_requested.connect(self.brillouin_signaller.start_live_view)
         self.stop_live_requested.connect(self.brillouin_signaller.stop_live_view)
         self.update_microwave_freq_requested.connect(self.brillouin_signaller.set_microwave_frequency)
-        self.toggle_illumination_requested.connect(self.brillouin_signaller.toggle_illumination_mode)
         self.toggle_bg_subtraction_requested.connect(self.brillouin_signaller.toggle_background_subtraction)
         self.snap_requested.connect(self.brillouin_signaller.snap_and_fit)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
@@ -125,7 +127,6 @@ class BrillouinViewer(QWidget):
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
         self.brillouin_signaller.background_subtraction_state.connect(self.update_bg_subtraction)
         self.brillouin_signaller.background_available_state.connect(self.handle_is_bg_available)
-        self.brillouin_signaller.illumination_mode_state.connect(self.update_illumination_ui)
         self.brillouin_signaller.reference_mode_state.connect(self.update_reference_ui)
         self.brillouin_signaller.camera_settings_ready.connect(self.populate_camera_ui)
         self.brillouin_signaller.camera_shutter_state_changed.connect(self.update_camera_shutter_button)
@@ -150,37 +151,37 @@ class BrillouinViewer(QWidget):
 
 
     def init_ui(self):
-        outer_layout = QVBoxLayout()
+        outer_layout = QHBoxLayout()  # MAIN HORIZONTAL: Left (controls) | Right (plot + display)
         self.setLayout(outer_layout)
 
-        # --- Plot area + Main Display area (side-by-side) ---
+        # ---------------- LEFT COLUMN: Settings ----------------
+        left_column_layout = QVBoxLayout()
+        left_column_layout.addWidget(self.create_andor_camera_group())
+        left_column_layout.addWidget(self.create_fitting_group())
+        left_column_layout.addWidget(self.create_reference_group())
+        left_column_layout.addWidget(self.create_background_group())
+        left_column_layout.addStretch()
+        outer_layout.addLayout(left_column_layout, 0)
+
+        # ---------------- RIGHT: Plots + Main Display ----------------
+        right_layout = QVBoxLayout()
+
         plot_row_layout = QHBoxLayout()
 
         self.fig, (self.ax_img, self.ax_fit) = plt.subplots(2, 1, figsize=(8, 6))
         self.fig.subplots_adjust(hspace=0.9)
         self.canvas = FigureCanvas(self.fig)
-        plot_row_layout.addWidget(self.canvas)
+        plot_row_layout.addWidget(self.create_andor_display_group())
 
-        # Placeholder for Allied Vision camera
-        self.main_display = QLabel("Diplay area")
+        self.main_display = QLabel("Display area")
         self.main_display.setFixedSize(int(640 * 0.9), int(480 * 0.9))
         self.main_display.setStyleSheet("background-color: black; color: white;")
         self.main_display.setAlignment(Qt.AlignCenter)
         plot_row_layout.addWidget(self.main_display)
 
-        outer_layout.addLayout(plot_row_layout)
+        right_layout.addLayout(plot_row_layout)
+        outer_layout.addLayout(right_layout, 1)
 
-        # --- Bottom control row: all widgets in one horizontal line ---
-        control_row_layout = QHBoxLayout()
-        control_row_layout.addWidget(self.create_background_group())
-        control_row_layout.addWidget(self.create_camera_group())
-        control_row_layout.addWidget(self.create_illumination_group())
-        control_row_layout.addWidget(self.create_reference_group())
-        control_row_layout.addWidget(self.create_config_group())
-        control_row_layout.addWidget(self.create_zaber_group())
-        control_row_layout.addWidget(self.create_measurement_group())
-
-        outer_layout.addLayout(control_row_layout)
 
     def update_gui(self):
         # Update the gui
@@ -191,6 +192,148 @@ class BrillouinViewer(QWidget):
 
     # ---------------- UI Sections ---------------- #
 
+
+    def create_andor_camera_group(self):
+        self.exposure_input = QLineEdit()
+        self.exposure_input.setValidator(QDoubleValidator(0.001, 60.0, 3))
+
+        self.gain_input = QLineEdit()
+        self.gain_input.setValidator(QIntValidator(0, 1000))
+
+        self.config_camera_btn = QPushButton("Config")
+        self.config_camera_btn.clicked.connect(self.on_andor_configs_clicked)
+
+        self.toggle_camera_shutter_btn = QPushButton("Close")
+        self.toggle_camera_shutter_btn.clicked.connect(self.toggle_camera_shutter_requested.emit)
+
+        self.apply_camera_btn = QPushButton("Apply")
+        self.apply_camera_btn.clicked.connect(self.apply_camera_settings)
+
+        # Horizontal layout for the buttons
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.config_camera_btn)
+        btn_row.addWidget(self.toggle_camera_shutter_btn)
+        btn_row.addWidget(self.apply_camera_btn)
+
+        # Main layout
+        layout = QFormLayout()
+        layout.addRow("Exp. Time (s):", self.exposure_input)
+        layout.addRow("Gain:", self.gain_input)
+        layout.addRow(btn_row)
+
+        group = QGroupBox("Andor Camera")
+        group.setLayout(layout)
+
+        return group
+
+    def create_fitting_group(self):
+        self.fitting_config_btn = QPushButton("Config")
+        self.fitting_config_btn.clicked.connect(self.on_fitting_configs_clicked)
+
+        self.do_live_fitting_checkbox = QCheckBox("Do Live Fitting")
+        self.do_live_fitting_checkbox.stateChanged.connect(self.on_do_live_fitting_toggled)
+
+        # Horizontal layout for button + checkbox
+        row_layout = QHBoxLayout()
+        row_layout.addWidget(self.fitting_config_btn)
+        row_layout.addWidget(self.do_live_fitting_checkbox)
+
+        # Vertical layout for the group box
+        layout = QVBoxLayout()
+        layout.addLayout(row_layout)
+
+        group = QGroupBox("Fitting")
+        group.setLayout(layout)
+
+        return group
+
+    def create_reference_group(self):
+        # Mode labels
+        self.calib_label_meas = QLabel("● Meas.")
+        self.calib_label_calib = QLabel("○ Ref.")
+        self.calib_label_meas.setStyleSheet("color: green; font-weight: bold")
+        self.calib_label_calib.setStyleSheet("color: gray")
+
+        self.toggle_calib_btn = QPushButton("Switch")
+        self.toggle_calib_btn.setFixedWidth(60)
+        self.toggle_calib_btn.clicked.connect(self.toggle_reference_mode)
+
+        mode_column = QVBoxLayout()
+        mode_column.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        mode_column.addWidget(self.calib_label_meas, alignment=Qt.AlignHCenter)
+        mode_column.addWidget(self.calib_label_calib, alignment=Qt.AlignHCenter)
+        mode_column.addSpacing(4)
+        mode_column.addWidget(self.toggle_calib_btn, alignment=Qt.AlignHCenter)
+
+        # Frequency row
+        self.ref_freq_input = QLineEdit()
+        self.ref_freq_input.setFixedWidth(50)
+        self.ref_freq_input.setValidator(QDoubleValidator(0.0, 100.0, 4))
+        self.ref_freq_input.setText("5.5")
+
+        self.set_ref_btn = QPushButton("Set")
+        self.set_ref_btn.setFixedWidth(40)
+        self.set_ref_btn.clicked.connect(self.set_reference_freq)
+
+        freq_row = QHBoxLayout()
+        freq_row.addWidget(QLabel("Ref. Freq. (GHz):"))
+        freq_row.addWidget(self.ref_freq_input)
+        freq_row.addWidget(self.set_ref_btn)
+        freq_row.addStretch()
+
+        # Config + Cal. all
+        self.config_ref_btn = QPushButton("Config")
+        self.config_ref_btn.setFixedWidth(60)
+        self.config_ref_btn.clicked.connect(self.on_reference_configs_clicked)
+
+        self.calibrate_btn = QPushButton("Cal. all")
+        self.calibrate_btn.setFixedWidth(70)
+        self.calibrate_btn.clicked.connect(self.run_calibration)
+
+        config_row = QHBoxLayout()
+        config_row.addWidget(self.config_ref_btn)
+        config_row.addWidget(self.calibrate_btn)
+        config_row.addStretch()
+
+        # Show + Save
+        self.show_calib_btn = QPushButton("Show")
+        self.show_calib_btn.setFixedWidth(60)
+        self.show_calib_btn.clicked.connect(self.show_calibration_results)
+        self.show_calib_btn.setEnabled(False)
+
+        self.save_calib_btn = QPushButton("Save")
+        self.save_calib_btn.setFixedWidth(60)
+        self.save_calib_btn.clicked.connect(self.save_calibration_results)
+        self.save_calib_btn.setEnabled(False)
+
+        save_row = QHBoxLayout()
+        save_row.addWidget(self.show_calib_btn)
+        save_row.addWidget(self.save_calib_btn)
+        save_row.addStretch()
+
+        # Right side layout (all rows stacked)
+        right_column = QVBoxLayout()
+        right_column.setAlignment(Qt.AlignTop)
+        right_column.addLayout(freq_row)
+        right_column.addLayout(config_row)
+        right_column.addLayout(save_row)
+
+        # Combine left and right in fixed container layout
+        content_layout = QHBoxLayout()
+        content_layout.setAlignment(Qt.AlignLeft)
+        content_layout.addLayout(mode_column)
+        content_layout.addSpacing(15)
+        content_layout.addLayout(right_column)
+
+        # Wrap in main vertical layout to avoid stretching
+        outer_layout = QVBoxLayout()
+        outer_layout.setAlignment(Qt.AlignTop)
+        outer_layout.addLayout(content_layout)
+
+        group = QGroupBox("Reference")
+        group.setLayout(outer_layout)
+        return group
+
     def create_background_group(self):
         self.bg_label_off = QLabel("● No BG Subtraction")
         self.bg_label_on = QLabel("○ With BG Subtraction")
@@ -199,281 +342,46 @@ class BrillouinViewer(QWidget):
         self.bg_label_on.setStyleSheet("color: gray")
 
         self.btn_take_bg = QPushButton("Take BG")
+        self.btn_take_bg.setFixedWidth(70)
         self.btn_take_bg.clicked.connect(self.take_background_image)
 
         self.toggle_bg_btn = QPushButton("Switch")
+        self.toggle_bg_btn.setFixedWidth(60)
         self.toggle_bg_btn.clicked.connect(self.toggle_background_subtraction)
 
         self.btn_save_bg = QPushButton("Save BG")
+        self.btn_save_bg.setFixedWidth(70)
         self.btn_save_bg.clicked.connect(self.save_background_image)
 
+        # Row layout for the buttons
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_take_bg)
+        btn_row.addWidget(self.toggle_bg_btn)
+        btn_row.addWidget(self.btn_save_bg)
+        btn_row.addStretch()
+
+        # Main layout
         layout = QVBoxLayout()
         layout.addWidget(self.bg_label_off)
         layout.addWidget(self.bg_label_on)
         layout.addSpacing(5)
-        layout.addWidget(self.btn_take_bg)
-        layout.addWidget(self.toggle_bg_btn)
-        layout.addWidget(self.btn_save_bg)
+        layout.addLayout(btn_row)
 
         group = QGroupBox("Background")
         group.setLayout(layout)
         return group
 
-    def create_camera_group(self):
-        self.exposure_input = QLineEdit()
-        self.exposure_input.setValidator(QDoubleValidator(0.001, 60.0, 3))
 
-        self.gain_input = QLineEdit()
-        self.gain_input.setValidator(QIntValidator(0, 1000))
-
-        self.apply_camera_btn = QPushButton("Apply")
-        self.apply_camera_btn.clicked.connect(self.apply_camera_settings)
-
-        self.toggle_camera_shutter_btn = QPushButton("Close")
-        self.toggle_camera_shutter_btn.clicked.connect(self.toggle_camera_shutter_requested.emit)
-
-        self.do_live_fitting_checkbox = QCheckBox("Do Live Fitting")
-        self.do_live_fitting_checkbox.stateChanged.connect(self.on_do_live_fitting_toggled)
-
-        layout = QFormLayout()
-        layout.addRow("Exp. Time (s):", self.exposure_input)
-        layout.addRow("Gain:", self.gain_input)
-        layout.addRow(self.toggle_camera_shutter_btn, self.apply_camera_btn)
-        layout.addRow(self.do_live_fitting_checkbox)
-
-        # btn_row = QHBoxLayout()
-        # btn_row.addWidget(self.toggle_camera_shutter_btn)
-        # btn_row.addWidget(self.apply_camera_btn)
-        # layout.addRow("", btn_row)
-
-        group = QGroupBox("Andor Camera")
-        group.setLayout(layout)
-
-        return group
-
-    def create_illumination_group(self):
-        self.illum_label_cont = QLabel("● Cont.")
-        self.illum_label_pulse = QLabel("○ Pulsed")
-
-        self.illum_label_cont.setStyleSheet("color: gray")
-        self.illum_label_pulse.setStyleSheet("color: gray")
-
-        self.toggle_illum_btn = QPushButton("Switch")
-        self.toggle_illum_btn.clicked.connect(self.toggle_illumination)
-
-        self.snap_once_btn = QPushButton("Take Snap")
-        self.snap_once_btn.clicked.connect(self.run_one_gui_update)
-
+    def create_andor_display_group(self):
+        group = QGroupBox("Andor Frame and Fitting")
 
         layout = QVBoxLayout()
-        layout.addWidget(self.illum_label_cont)
-        layout.addWidget(self.illum_label_pulse)
-        layout.addSpacing(5)
-        layout.addWidget(self.toggle_illum_btn)
-        layout.addWidget(self.snap_once_btn)
-
-        group = QGroupBox("Illumination")
-        group.setLayout(layout)
-        return group
-
-
-    def create_reference_group(self):
-        # Mode labels stacked vertically
-        self.calib_label_meas = QLabel("● Meas.")
-        self.calib_label_calib = QLabel("○ Ref.")
-        self.calib_label_meas.setStyleSheet("color: green; font-weight: bold")
-        self.calib_label_calib.setStyleSheet("color: gray")
-
-        label_col = QVBoxLayout()
-        label_col.addWidget(self.calib_label_meas)
-        label_col.addWidget(self.calib_label_calib)
-
-        # Mode switch button
-        self.toggle_calib_btn = QPushButton("Switch")
-        self.toggle_calib_btn.clicked.connect(self.toggle_reference_mode)
-
-        mode_row = QHBoxLayout()
-        mode_row.addLayout(label_col)
-        mode_row.addWidget(self.toggle_calib_btn)
-
-        # Ref. Freq input
-        self.ref_freq_input = QLineEdit()
-        self.ref_freq_input.setValidator(QDoubleValidator(0.0, 100.0, 4))
-        self.ref_freq_input.setText("5.5")  # Default value
-
-        # NEW: Set button
-        self.set_ref_btn = QPushButton("Set freq")
-        self.set_ref_btn.clicked.connect(self.set_reference_freq)
-
-        self.calibrate_btn = QPushButton("Cal. all")
-        self.calibrate_btn.clicked.connect(self.run_calibration)
-
-        self.show_calib_btn = QPushButton("Show")
-        self.show_calib_btn.clicked.connect(self.show_calibration_results)
-        self.show_calib_btn.setEnabled(False)
-
-        self.save_calib_btn = QPushButton("Save")
-        self.save_calib_btn.clicked.connect(self.save_calibration_results)
-        self.save_calib_btn.setEnabled(False)
-
-        # Input and button layout
-        form_layout = QFormLayout()
-        form_layout.addRow("Ref. Freq. (GHz):", self.ref_freq_input)
-        form_layout.addRow(self.calibrate_btn, self.set_ref_btn)
-        form_layout.addRow(self.show_calib_btn, self.save_calib_btn)
-
-        layout = QVBoxLayout()
-        layout.addLayout(mode_row)
-        layout.addLayout(form_layout)
-
-        group = QGroupBox("Reference")
-        group.setLayout(layout)
-        return group
-
-    def create_config_group(self):
-        group = QGroupBox("More Configs")
-        layout = QVBoxLayout()
-
-        self.config_settings_btn = QPushButton("Configs")
-        self.config_settings_btn.clicked.connect(self.on_configs_clicked)
-        layout.addWidget(self.config_settings_btn)
+        layout.addWidget(self.canvas)
 
         group.setLayout(layout)
+        group.setMinimumWidth(700)
         return group
 
-    def create_zaber_group(self):
-        self.zaber_step_input = QLineEdit("100")
-        self.zaber_step_input.setValidator(QDoubleValidator(0.1, 100000.0, 3))
-        self.zaber_step_input.setFixedWidth(60)
-
-        self.pos_display = QLabel("0.00 µm")
-        self.pos_display.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.pos_display.setStyleSheet("font-weight: bold; padding-left: 8px;")
-
-        # --- New Axis Dropdown ---
-        self.zaber_axis_selector = QComboBox()
-        self.zaber_axis_selector.setFixedWidth(60)
-        self.zaber_axis_selector.currentIndexChanged.connect(self.on_zaber_axis_changed)
-        # Request initial position display
-        if self.zaber_axis_selector.count() > 0:
-            default_axis = self.zaber_axis_selector.currentData()
-            self.request_zaber_position.emit(default_axis)
-
-        # Populate axis selector from controller
-        try:
-            available_axes = self.brillouin_signaller.manager.zaber.get_available_axes()  # ['x', 'y']
-            for axis in available_axes:
-                self.zaber_axis_selector.addItem(axis.upper(), axis)  # Display 'X', 'Y'; store 'x', 'y'
-        except Exception as e:
-            print(f"[Zaber] Failed to populate axis selector: {e}")
-
-        # --- Arrow buttons ---
-        self.left_btn = QPushButton("←")
-        self.right_btn = QPushButton("→")
-        self.left_btn.setFixedWidth(50)
-        self.right_btn.setFixedWidth(50)
-        self.left_btn.clicked.connect(lambda: self.move_zaber(-1))
-        self.right_btn.clicked.connect(lambda: self.move_zaber(+1))
-
-        # --- Movement direction ---
-        self.move_direction_box = QComboBox()
-        self.move_direction_box.addItems(["Forward", "Backward"])
-        self.move_direction_box.setFixedWidth(100)
-
-        self.move_stage_checkbox = QCheckBox("Move Zaber between measurements")
-
-        # --- Layouts ---
-
-        # Row 1: Axis selector + arrows
-        row0 = QHBoxLayout()
-        row0.addWidget(self.zaber_axis_selector)
-        row0.addWidget(self.left_btn)
-        row0.addWidget(self.right_btn)
-        row0.addStretch()
-
-        # Row 2: Step size
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Step Size (µm):"))
-        row1.addWidget(self.zaber_step_input)
-        row1.addStretch()
-
-        # Row 3: Position
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Position (µm):"))
-        row2.addWidget(self.pos_display)
-        row2.addStretch()
-
-        # Row 4: Direction
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Direction:"))
-        row3.addWidget(self.move_direction_box)
-        row3.addStretch()
-
-        # Final layout
-        layout = QVBoxLayout()
-        layout.addLayout(row0)
-        layout.addLayout(row1)
-        layout.addLayout(row2)
-        layout.addSpacing(5)
-        layout.addLayout(row3)
-        layout.addWidget(self.move_stage_checkbox)
-
-        group = QGroupBox("Zaber Motion")
-        group.setLayout(layout)
-        return group
-
-    def create_measurement_group(self):
-        group = QGroupBox("Measurement Settings")
-        layout = QVBoxLayout()
-
-        form_layout = QFormLayout()
-
-        # Number of Measurements
-        self.num_images_input = QLineEdit("10")
-        self.num_images_input.setValidator(QIntValidator(1, 9999))
-        form_layout.addRow("Number of Measurements:", self.num_images_input)
-
-        # Name of Series
-        self.series_name_input = QLineEdit()
-        form_layout.addRow("Name:", self.series_name_input)
-
-        # Power input
-        self.power_input = QLineEdit()
-        self.power_input.setValidator(QDoubleValidator(0.0, 1000.0, 2))
-        form_layout.addRow("Power [mW]:", self.power_input)
-
-        layout.addLayout(form_layout)
-
-        # --- Take + Cancel Buttons
-        self.measure_btn = QPushButton("Take")
-        self.measure_btn.clicked.connect(self.take_measurements)
-
-        self.cancel_event_btn = QPushButton("Cancel")
-        self.cancel_event_btn.clicked.connect(self.on_cancel_event_clicked)
-
-        take_row = QHBoxLayout()
-        take_row.addWidget(self.measure_btn)
-        take_row.addWidget(self.cancel_event_btn)
-        layout.addLayout(take_row)
-
-        # Measurement info label
-        self.measurement_series_label = QLabel("Stored Series: 0")
-        layout.addWidget(self.measurement_series_label)
-
-        # --- Save + Clear Buttons
-        self.save_measurement_series_btn = QPushButton("Save")
-        self.save_measurement_series_btn.clicked.connect(self.save_measurements_to_file)
-
-        self.clear_measurement_series_btn = QPushButton("Clear")
-        self.clear_measurement_series_btn.clicked.connect(self.clear_measurements)
-
-        save_clear_row = QHBoxLayout()
-        save_clear_row.addWidget(self.save_measurement_series_btn)
-        save_clear_row.addWidget(self.clear_measurement_series_btn)
-        layout.addLayout(save_clear_row)
-
-        group.setLayout(layout)
-        return group
 
     # ---------------- Signal Handles ---------------- #
     def update_bg_subtraction(self, enabled: bool):
@@ -525,11 +433,19 @@ class BrillouinViewer(QWidget):
     def toggle_illumination(self):
         self.toggle_illumination_requested.emit()
 
-    def on_configs_clicked(self):
-        dialog = ConfigDialog(self)
+    def on_andor_configs_clicked(self):
+        dialog = AndorConfigDialog(self)
         if dialog.exec_():
             settings = dialog.get_settings()
             print("[Brillouin Viewer] Received Configs:", settings)
+
+    def on_reference_configs_clicked(self):
+        dialog = CalibrationConfigDialog(self)
+        dialog.exec_()
+
+    def on_fitting_configs_clicked(self):
+        dialog = FindPeaksConfigDialog(self)
+        dialog.exec_()
 
     # ---------------- GUI Update Loop ---------------- #
 

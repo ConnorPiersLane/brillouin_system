@@ -1,7 +1,7 @@
 # find_peaks_config_dialog.py
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QGroupBox, QApplication
+    QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from brillouin_system.config.peak_fitting.find_peaks_config import (
@@ -86,7 +86,7 @@ class FindPeaksConfigDialog(QDialog):
         save_config_section(FIND_PEAKS_TOML_PATH, "sample", find_peaks_sample_config)
         save_config_section(FIND_PEAKS_TOML_PATH, "reference", find_peaks_reference_config)
 
-        print("[FindPeaksConfigDialog] Saved.")
+        QMessageBox.information(self, "Saved", "Settings saved successfully.")
 
     def create_save_button(self):
         button = QPushButton("Save")

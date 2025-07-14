@@ -11,3 +11,4 @@ vss_index = 4
 temperature = -80.0
 flip_image_horizontally = false
 verbose = true
+reload = true

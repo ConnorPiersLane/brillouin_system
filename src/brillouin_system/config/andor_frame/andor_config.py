@@ -22,6 +22,7 @@ class AndorConfig:
     temperature: float | str
     flip_image_horizontally: bool
     verbose: bool
+    reload: bool
 
 # ---------- Load/save helpers ----------
 
@@ -45,7 +46,8 @@ def load_andor_frame_settings(path: Path) -> AndorConfig:
         vss_index=raw["vss_index"],
         temperature=raw["temperature"],
         flip_image_horizontally=raw["flip_image_horizontally"],
-        verbose=raw["verbose"]
+        verbose=raw["verbose"],
+        reload=raw['reload'],
     )
 
 
