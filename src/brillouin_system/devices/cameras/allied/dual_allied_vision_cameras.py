@@ -7,12 +7,16 @@ frame_q0 = queue.Queue()
 frame_q1 = queue.Queue()
 
 def _handler0(cam, frame):
-    frame_q0.put(frame)
+    if frame.get_status() != "Complete":
+        print("Cam0: Incomplete frame!")
+    frame_q0.put(frame.as_numpy_ndarray().copy())
     cam.queue_frame(frame)
 
 
 def _handler1(cam, frame):
-    frame_q1.put(frame)
+    if frame.get_status() != "Complete":
+        print("Cam0: Incomplete frame!")
+    frame_q1.put(frame.as_numpy_ndarray().copy())
     cam.queue_frame(frame)
 
 class DualAlliedVisionCameras:
@@ -23,6 +27,7 @@ class DualAlliedVisionCameras:
         self.cam1 = AlliedVisionCamera(id=id1)
 
         self._setup_snap_mode()
+        self.start_stream()
 
     def _setup_snap_mode(self):
         """Configure both cameras for software-triggered snap mode."""
@@ -53,18 +58,17 @@ class DualAlliedVisionCameras:
         while not frame_q1.empty(): frame_q1.get_nowait()
 
     def snap_once(self, timeout=5.0):
-        self.start_stream()
         self.clear_queues()
         self.trigger_both()
 
         f0 = frame_q0.get(timeout=timeout)
         f1 = frame_q1.get(timeout=timeout)
 
-        self.stop_stream()
         return f0, f1
 
     def close(self):
         """Close both cameras cleanly."""
+        self.stop_stream()
         self.cam0.close()
         self.cam1.close()
         print("[DualCamera] Cameras closed.")

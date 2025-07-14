@@ -164,10 +164,10 @@ class AlliedVisionCamera(BaseMakoCamera):
             frame_callback(frame)
             cam.queue_frame(frame)
 
-        # # Allocate and queue initial frames
-        # self.frames = [self.camera.get_frame() for _ in range(buffer_count)]
-        # for frame in self.frames:
-        #     self.camera.queue_frame(frame)
+        # Allocate and queue initial frames
+        self.frames = [self.camera.get_frame() for _ in range(buffer_count)]
+        for frame in self.frames:
+            self.camera.queue_frame(frame)
 
         self.camera.start_streaming(stream_handler)
         self.streaming = True
