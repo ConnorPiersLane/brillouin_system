@@ -1,0 +1,15 @@
+[sample]
+prominence_fraction = 0.15
+min_peak_width = 3
+min_peak_height = 20
+rel_height = 0.6
+wlen_pixels = 8
+fitting_model = "lorentzian"
+
+[reference]
+prominence_fraction = 0.2
+min_peak_width = 4
+min_peak_height = 18
+rel_height = 0.5
+wlen_pixels = 7
+fitting_model = "lorentzian"

@@ -34,7 +34,7 @@ from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 
 ###
 # Add other guis
-from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
+from brillouin_system.config.config_dialog import ConfigDialog
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 
 ## Testing

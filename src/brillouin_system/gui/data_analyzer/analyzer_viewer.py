@@ -1,9 +1,7 @@
 import sys
-import pickle
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
-    QGroupBox, QListWidget, QRadioButton, QButtonGroup, QFileDialog,
-    QMessageBox, QCheckBox, QComboBox, QListView, QDialog
+    QGroupBox, QListWidget, QRadioButton, QButtonGroup, QMessageBox, QCheckBox, QComboBox, QListView, QDialog
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -11,11 +9,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from brillouin_system.gui.data_analyzer.analyzer_manager import AnalyzerManager
-from brillouin_system.gui.brillouin_viewer.config_dialog import ConfigDialog
+from brillouin_system.config.config_dialog import ConfigDialog
 from brillouin_system.gui.data_analyzer.analyzer_utils import numpy_array_to_pixmap
-from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, PhotonsCounts, \
-    calculate_photon_counts_from_fitted_spectrum, print_analyzed_frame_summary
-from brillouin_system.my_dataclasses.fitted_results import DisplayResults
+from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, print_analyzed_frame_summary
 from brillouin_system.my_dataclasses.calibration import (
     CalibrationCalculator, render_calibration_to_pixmap,
     CalibrationImageDialog, calibrate,

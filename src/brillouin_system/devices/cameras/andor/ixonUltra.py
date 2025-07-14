@@ -2,6 +2,8 @@
 import time
 import numpy as np
 from pylablib.devices.Andor import AndorSDK2Camera
+
+from brillouin_system.config.andor_frame.andor_config import AndorConfig
 from .baseCamera import BaseCamera
 
 from collections import namedtuple
@@ -349,6 +351,47 @@ class IxonUltra(BaseCamera):
     def get_vss_index(self) -> int:
         """Return current vertical shift speed index."""
         return self.cam.get_vsspeed()
+
+    def set_from_config_file(self, config: AndorConfig) -> None:
+        if self.verbose:
+            print("[IxonUltra] Applying settings from config...")
+
+        self._advanced_gain = config.advanced_gain_option
+
+        self.set_verbose(config.verbose)
+        self.set_flip_image_horizontally(config.flip_image_horizontally)
+
+        self.set_roi(
+            x_start=config.x_start,
+            x_end=config.x_end,
+            y_start=config.y_start,
+            y_end=config.y_end
+        )
+
+        self.set_binning(
+            hbin=config.hbin,
+            vbin=config.vbin
+        )
+
+        self.set_pre_amp_mode(config.pre_amp_mode)
+        self.set_vss_index(config.vss_index)
+
+        if config.temperature == "off":
+            if not self.cam.get_temperature() > 0:
+                print("[IxonUltra] Warming up to 0°C before turning off cooler...")
+                self.cam.set_temperature(0, enable_cooler=True)
+                self._wait_for_warmup(target_temp=0)
+                print("[IxonUltra] Turning off cooler...")
+                self.cam.set_cooler(False)
+            else:
+                self.cam.set_cooler(False)
+        else:
+            self.cam.set_temperature(config.temperature, enable_cooler=True)
+            self._wait_for_cooling(target_temp=config.temperature)
+
+
+        if self.verbose:
+            print("[IxonUltra] Configuration applied.")
 
     def is_opened(self) -> bool:
         return self.cam is not None and self.cam.is_opened()
