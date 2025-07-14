@@ -3,6 +3,7 @@ from vimba import *
 
 def handler(cam, frame):
     print(f'Frame acquired: ID={frame.get_id()}', flush=True)
+    print(f'Frame status = {frame.get_status()}')
     cam.queue_frame(frame)
 
 def main():

@@ -39,13 +39,13 @@ class AlliedVisionCamera(BaseMakoCamera):
 
     def set_software_trigger(self):
         try:
-            self.camera.TriggerSelector.set("FrameStart")
-            self.camera.TriggerSource.set("Software")
-            self.camera.TriggerMode.set("On")
-            self.camera.AcquisitionMode.set("Continuous")
-            print("[AVCamera] Camera set to Freerun mode.")
+            self.camera.get_feature_by_name('TriggerSelector').set('FrameStart')
+            self.camera.get_feature_by_name('TriggerMode').set('On')
+            self.camera.get_feature_by_name('TriggerSource').set('Software')
+            self.camera.get_feature_by_name('AcquisitionMode').set('Continuous')
+            print("[AVCamera] Camera set to Software Trigger.")
         except VimbaFeatureError as e:
-            print(f"[AVCamera] Failed to set Freerun mode: {e}")
+            print(f"[AVCamera] Failed to set Software Trigger: {e}")
 
     def set_exposure(self, exposure_us):
         feat = self.camera.get_feature_by_name("ExposureTimeAbs")
@@ -124,6 +124,20 @@ class AlliedVisionCamera(BaseMakoCamera):
             print(f"[AVCamera] Failed to get max ROI: {e}")
             return None
 
+    def set_max_roi(self):
+        """Set the camera to use the maximum allowable ROI."""
+        max_roi = self.get_max_roi()
+        if max_roi:
+            self.set_roi(
+                OffsetX=max_roi["OffsetX"],
+                OffsetY=max_roi["OffsetY"],
+                Width=max_roi["Width"],
+                Height=max_roi["Height"]
+            )
+            print("[AVCamera] Set to max ROI.")
+        else:
+            print("[AVCamera] Could not retrieve max ROI to set.")
+
     def snap(self):
         """Capture a single frame. Temporarily stops streaming if needed."""
         was_streaming = self.streaming
@@ -151,12 +165,6 @@ class AlliedVisionCamera(BaseMakoCamera):
             print(f"[AVCamera] Failed to set AcquisitionMode to {mode}: {e}")
 
 
-    def que_buffer(self, buffer_count=5):
-        # Allocate and queue initial frames
-        frames = [self.camera.get_frame() for _ in range(buffer_count)]
-        for frame in frames:
-            self.camera.queue_frame(frame)
-
     def start_stream(self, frame_callback, buffer_count=5):
         if self.streaming:
             print("[AVCamera] Already streaming.")
@@ -172,9 +180,8 @@ class AlliedVisionCamera(BaseMakoCamera):
             cam.queue_frame(frame)
 
         # Allocate and queue initial frames
-        self.que_buffer()
 
-        self.camera.start_streaming(stream_handler)
+        self.camera.start_streaming(stream_handler, buffer_count=buffer_count)
         self.streaming = True
         print("[AVCamera] Started streaming.")
 

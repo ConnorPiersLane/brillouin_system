@@ -8,6 +8,7 @@ def frame_handler(frame):
     try:
         image = frame.as_numpy_ndarray()
         print(f"Frame received | Shape: {image.shape}")
+        print(f"{frame.get_status()}")
     except Exception as e:
         print(f"Frame handler error: {e}")
 
