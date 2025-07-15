@@ -6,12 +6,13 @@ import numpy as np
 from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
-    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox
+    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QSlider
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
+from pyqt_switch import PyQtSwitch
 
 from brillouin_system.config.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.config.calibration.calibration_config_gui import CalibrationConfigDialog
@@ -160,6 +161,9 @@ class BrillouinViewer(QWidget):
         left_column_layout.addWidget(self.create_fitting_group())
         left_column_layout.addWidget(self.create_reference_group())
         left_column_layout.addWidget(self.create_background_group())
+        left_column_layout.addWidget(self.create_objective_lens_group())
+        left_column_layout.addWidget(self.create_leds_group())
+
         left_column_layout.addStretch()
         outer_layout.addLayout(left_column_layout, 0)
 
@@ -370,6 +374,85 @@ class BrillouinViewer(QWidget):
         group = QGroupBox("Background")
         group.setLayout(layout)
         return group
+
+    def create_objective_lens_group(self):
+        group = QGroupBox("Objective Lens")
+        layout = QFormLayout()
+
+        # Working Distance (ComboBox)
+        self.eff_focal_length_combo = QComboBox()
+        self.eff_focal_length_combo.addItems([
+            "165mm (Zeiss)",
+            "180mm (Olympus)"
+        ])
+        layout.addRow("EFL:", self.eff_focal_length_combo)
+
+        # Magnification (LineEdit for float/int input)
+        self.magnification_combo = QComboBox()
+        self.magnification_combo.addItems([
+            "1X",
+            "2X",
+            "4X",
+            "7.5X",
+            "10X",
+            "15X",
+            "20X",
+            "40X",
+            "50X",
+            "60X",
+        ])
+        layout.addRow("Magnification:", self.magnification_combo)
+
+        group.setLayout(layout)
+        return group
+
+
+# LED------------------------------------
+    def create_leds_group(self):
+
+        group = QGroupBox("LEDs")
+        layout = QVBoxLayout()
+
+        self._led_controls = {}
+
+        led_names = [
+            'white_below',
+            'blue_385_below',
+            'red_625_below',
+            'white_top'
+        ]
+
+        for name in led_names:
+            row = QHBoxLayout()
+
+            label = QLabel(name.replace('_', ' ').title())
+            label.setFixedWidth(120)
+
+            # Switch
+            switch = PyQtSwitch()
+            switch.checked = False
+            switch.toggled.connect(lambda checked, n=name: print(f"[LED] {n} turned {'ON' if checked else 'OFF'}"))
+
+            # Slider
+            slider = QSlider(Qt.Horizontal)
+            slider.setMinimum(0)
+            slider.setMaximum(100)
+            slider.setValue(100)
+            slider.setTickInterval(10)
+            slider.setTickPosition(QSlider.TicksBelow)
+            slider.valueChanged.connect(lambda value, n=name: print(f"[LED] {n} intensity set to {value}%"))
+
+            row.addWidget(label)
+            row.addWidget(switch)
+            row.addWidget(slider)
+            layout.addLayout(row)
+
+            self._led_controls[name] = {'switch': switch, 'slider': slider}
+
+        group.setLayout(layout)
+        return group
+
+    # Frames
 
 
     def create_andor_display_group(self):
