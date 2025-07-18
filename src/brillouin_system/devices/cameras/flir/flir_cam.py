@@ -2,7 +2,7 @@
 
 import PySpin
 import cv2
-import numpy as np
+
 
 
 class FLIRCamera:
@@ -11,9 +11,17 @@ class FLIRCamera:
 
         Args:
             index:
-            width: max 3216
-            height: max 2208
+            width: max 3208
+            height: max 2200
         '''
+
+        self._max_width = 3208
+        self._max_height = 2200
+
+        # Mode
+        self._is_software_stream = False
+        self._is_single_frame_mode = False
+
         self.system = PySpin.System.GetInstance()
         self.cam_list = self.system.GetCameras()
 
@@ -56,6 +64,9 @@ class FLIRCamera:
         }
 
     def set_resolution(self, width, height):
+        width = min(width, self._max_width)
+        height = min(height, self._max_height)
+
         sensor_width = self.cam.SensorWidth.GetValue()
         sensor_height = self.cam.SensorHeight.GetValue()
 
@@ -76,16 +87,17 @@ class FLIRCamera:
         return self.cam.SensorWidth.GetValue(), self.cam.SensorHeight.GetValue()
 
     def set_max_roi(self):
-        """Set ROI to maximum full sensor size, centered."""
-        max_width = self.cam.SensorWidth.GetValue()
-        max_height = self.cam.SensorHeight.GetValue()
-        self.set_roi(max_width, max_height)
+        """Set ROI to maximum allowed size."""
+        self.set_roi_native(0, 0, self._max_width, self._max_height)
 
     def set_roi_native(self, offset_x, offset_y, width, height):
         """
         Set ROI using native-style arguments: offset and width/height.
         All values are aligned to the camera's required increment steps.
         """
+        width = min(width, self._max_width)
+        height = min(height, self._max_height)
+
         sensor_width = self.cam.SensorWidth.GetValue()
         sensor_height = self.cam.SensorHeight.GetValue()
 
@@ -118,13 +130,13 @@ class FLIRCamera:
         self.cam.Width.SetValue(aligned_width)
         self.cam.Height.SetValue(aligned_height)
 
-        def get_roi_native(self):
-            """Return current ROI as (offset_x, offset_y, width, height)."""
-            offset_x = self.cam.OffsetX.GetValue()
-            offset_y = self.cam.OffsetY.GetValue()
-            width = self.cam.Width.GetValue()
-            height = self.cam.Height.GetValue()
-            return offset_x, offset_y, width, height
+    def get_roi_native(self):
+        """Return current ROI as (offset_x, offset_y, width, height)."""
+        offset_x = self.cam.OffsetX.GetValue()
+        offset_y = self.cam.OffsetY.GetValue()
+        width = self.cam.Width.GetValue()
+        height = self.cam.Height.GetValue()
+        return offset_x, offset_y, width, height
 
     def set_gain(self, value_dB):
         """Set manual gain in dB (auto gain must be off)."""
@@ -183,20 +195,77 @@ class FLIRCamera:
         """Return current pixel format as a string."""
         return self.cam.PixelFormat.GetCurrentEntry().GetSymbolic()
 
+    def set_pixel_format(self, format_str):
+        """
+        Set the camera's pixel format.
+
+        This method sets the camera's PixelFormat node to one of the supported symbolic values.
+        You must provide a format string that matches one of the entries returned by
+        `get_available_pixel_formats()`.
+
+        Args:
+            format_str (str): The symbolic name of the desired pixel format (e.g., 'Mono8', 'Mono16').
+
+        Raises:
+            ValueError: If the format is not available or the PixelFormat node is not writable.
+            RuntimeError: If the PixelFormat node is not accessible.
+
+        Example:
+            cam = FLIRCamera()
+            print(cam.get_available_pixel_formats())
+            # Available: ['Mono8', 'Mono16', 'Mono10Packed', 'Mono12Packed', 'Mono10p', 'Mono12p']
+            cam.set_pixel_format('Mono8')
+            print(cam.get_pixel_format())
+            cam.shutdown()
+        """
+        node_map = self.cam.GetNodeMap()
+        pixel_format_enum = PySpin.CEnumerationPtr(node_map.GetNode("PixelFormat"))
+
+        if not PySpin.IsAvailable(pixel_format_enum) or not PySpin.IsWritable(pixel_format_enum):
+            raise RuntimeError("PixelFormat node is not available or writable.")
+
+        # Validate against available formats
+        available = self.get_available_pixel_formats()
+        if format_str not in available:
+            raise ValueError(f"'{format_str}' is not an available pixel format. Available options: {available}")
+
+        # Set the format
+        target_entry = pixel_format_enum.GetEntryByName(format_str)
+        if not PySpin.IsAvailable(target_entry) or not PySpin.IsReadable(target_entry):
+            raise ValueError(f"Pixel format entry '{format_str}' is not readable.")
+
+        pixel_format_enum.SetIntValue(target_entry.GetValue())
+
+
+
+    def start_single_frame_mode(self):
+        self.cam.TriggerMode.SetValue(PySpin.TriggerMode_Off)
+        self.cam.AcquisitionMode.SetValue(PySpin.AcquisitionMode_SingleFrame)
+        self._is_single_frame_mode = True
+
+
     def acquire_image(self, timeout=1000):
+        if not self._is_single_frame_mode:
+            self.start_single_frame_mode()
+
         self.cam.BeginAcquisition()
-        image_result = self.cam.GetNextImage(timeout)
+        try:
+            image_result = self.cam.GetNextImage(timeout)
 
-        if image_result.IsIncomplete():
+            if image_result.IsIncomplete():
+                status = image_result.GetImageStatus()
+                image_result.Release()
+                raise RuntimeError(f"Image incomplete with status {status}")
+
+            img_array = image_result.GetNDArray()
             image_result.Release()
-            raise RuntimeError("Image incomplete with status {}".format(image_result.GetImageStatus()))
+            return img_array
 
-        img_array = image_result.GetNDArray()
-        image_result.Release()
-        self.cam.EndAcquisition()
-        return img_array
+        finally:
+            self.cam.EndAcquisition()
 
     def start_software_stream(self):
+
         # Set trigger mode to software
         self.cam.TriggerMode.SetValue(PySpin.TriggerMode_Off)
         self.cam.TriggerSource.SetValue(PySpin.TriggerSource_Software)
@@ -208,15 +277,12 @@ class FLIRCamera:
         # Start acquisition
         self.cam.BeginAcquisition()
 
+        self._is_single_frame_mode = False
+        self._is_software_stream = True
+
     def software_snap_while_stream(self, timeout=1000):
         self.cam.TriggerSoftware.Execute()
         image_result = self.cam.GetNextImage(timeout)
-
-        if image_result.IsIncomplete():
-            status = image_result.GetImageStatus()
-            image_result.Release()
-            raise RuntimeError(f"Incomplete image: status {status}")
-
         img = image_result.GetNDArray()
         image_result.Release()
         return img
@@ -224,6 +290,7 @@ class FLIRCamera:
     def end_software_stream(self):
         if self.cam.IsStreaming():
             self.cam.EndAcquisition()
+        self._is_software_stream = False
 
     def shutdown(self):
         if self.cam.IsStreaming():
@@ -236,16 +303,38 @@ class FLIRCamera:
 
     def __del__(self):
         try:
-            self.shutdown()
+            if hasattr(self, 'cam'):
+                self.shutdown()
         except Exception as e:
             print(f"[FLIRCamera] Shutdown exception ignored: {e}")
 
+    def get_available_pixel_formats(self):
+        """Returns a list of supported pixel format symbolic names."""
+        node_map = self.cam.GetNodeMap()
+        pixel_format_enum = PySpin.CEnumerationPtr(node_map.GetNode("PixelFormat"))
 
-cam = FLIRCamera()
-try:
-    img = cam.acquire_image()
-    cv2.imshow("FLIR Image", img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-finally:
-    cam.shutdown()
+        if not PySpin.IsAvailable(pixel_format_enum) or not PySpin.IsReadable(pixel_format_enum):
+            raise RuntimeError("PixelFormat node is not available or readable.")
+
+        entry_nodes = pixel_format_enum.GetEntries()
+        available_formats = []
+
+        for node in entry_nodes:
+            entry = PySpin.CEnumEntryPtr(node)  # 🔁 CAST to CEnumEntryPtr
+            if PySpin.IsAvailable(entry) and PySpin.IsReadable(entry):
+                symbolic = entry.GetSymbolic()
+                available_formats.append(symbolic)
+
+        return available_formats
+
+
+if __name__ == "__main__":
+    cam = FLIRCamera()
+    try:
+        print(cam.get_available_pixel_formats())
+        img = cam.acquire_image()
+        cv2.imshow("FLIR Image", img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+    finally:
+        cam.shutdown()

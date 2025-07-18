@@ -46,9 +46,11 @@ def test_all():
             print("Gamma not supported:", e)
 
         print("\n=== Acquire Image ===")
+        # Reset acquisition mode and trigger to default (SingleFrame, trigger off)
+        cam.start_single_frame_mode()
         img = cam.acquire_image()
         print("Image shape:", img.shape)
-        cv2.imshow("Single Frame", cv2.convertScaleAbs(img, alpha=255.0/65535.0))
+        cv2.imshow("Single Frame", cv2.convertScaleAbs(img, alpha=255.0 / 65535.0))
         cv2.waitKey(500)
         cv2.destroyAllWindows()
 
@@ -56,15 +58,35 @@ def test_all():
         cam.start_software_stream()
         for i in range(3):
             img = cam.software_snap_while_stream()
-            print(f"Frame {i+1} shape:", img.shape)
-            cv2.imshow("Stream Frame", cv2.convertScaleAbs(img, alpha=255.0/65535.0))
+            print(f"Frame {i + 1} shape:", img.shape)
+            cv2.imshow("Stream Frame", cv2.convertScaleAbs(img, alpha=255.0 / 65535.0))
             cv2.waitKey(100)
         cam.end_software_stream()
         cv2.destroyAllWindows()
 
+        print("\n=== Pixel Format Change Test ===")
+        available_formats = cam.get_available_pixel_formats()
+        print("Available formats:", available_formats)
+
+        for fmt in available_formats:
+            try:
+                print(f"Setting pixel format to: {fmt}")
+                cam.set_pixel_format(fmt)
+                current = cam.get_pixel_format()
+                if current == fmt:
+                    print(f"✔️  Confirmed pixel format: {current}")
+                else:
+                    print(f"⚠️  Mismatch! Expected '{fmt}', got '{current}'")
+            except Exception as e:
+                print(f"❌ Failed to set format '{fmt}': {e}")
+
     finally:
         print("\n=== Shutting down ===")
         cam.shutdown()
+
+
+
+
 
 if __name__ == "__main__":
     test_all()
