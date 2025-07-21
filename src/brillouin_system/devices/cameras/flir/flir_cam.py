@@ -188,8 +188,16 @@ class FLIRCamera:
         """Return current manual exposure time in microseconds."""
         return self.cam.ExposureTime.GetValue()
 
+    def min_max_gain(self):
+        return self.cam.Gain.GetMin(), self.cam.Gain.GetMax()
 
+    def min_max_exposure_time(self):
+        return self.cam.ExposureTime.GetMin(), self.cam.ExposureTime.GetMax()
 
+    def min_max_gamma(self):
+        if not PySpin.IsAvailable(self.cam.Gamma) or not PySpin.IsReadable(self.cam.Gamma):
+            raise RuntimeError("Gamma control not available")
+        return self.cam.Gamma.GetMin(), self.cam.Gamma.GetMax()
 
     def get_pixel_format(self):
         """Return current pixel format as a string."""

@@ -23,6 +23,18 @@ def test_all():
         cam.set_max_roi()
         print("Set max ROI:", cam.get_roi_native())
 
+        print("\n=== Gain Range ===")
+        print("Gain range:", cam.min_max_gain())
+
+        print("\n=== Exposure Range ===")
+        print("Exposure range (µs):", cam.min_max_exposure_time())
+
+        print("\n=== Gamma Range ===")
+        try:
+            print("Gamma range:", cam.min_max_gamma())
+        except Exception as e:
+            print("Gamma range not available:", e)
+
         print("\n=== ROI Native ===")
         sensor_w, sensor_h = cam.get_sensor_size()
         cam.set_roi_native(0, 0, sensor_w // 2, sensor_h // 2)
