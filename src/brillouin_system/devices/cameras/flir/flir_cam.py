@@ -195,8 +195,6 @@ class FLIRCamera:
         return self.cam.ExposureTime.GetMin(), self.cam.ExposureTime.GetMax()
 
     def min_max_gamma(self):
-        if not PySpin.IsAvailable(self.cam.Gamma) or not PySpin.IsReadable(self.cam.Gamma):
-            raise RuntimeError("Gamma control not available")
         return self.cam.Gamma.GetMin(), self.cam.Gamma.GetMax()
 
     def get_pixel_format(self):

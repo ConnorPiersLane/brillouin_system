@@ -45,6 +45,11 @@ def test_all():
         cam.set_gain(gain_value + 1.0 if gain_value + 1.0 < 10 else gain_value)
         print("New gain:", cam.get_gain())
 
+        print("\n=== Gain ===")
+        gain_value = cam.get_gain()
+        cam.set_gain(0)
+        print("New gain:", cam.get_gain())
+
         print("\n=== Exposure ===")
         exposure_value = cam.get_exposure_time()
         cam.set_exposure_time(exposure_value + 5000 if exposure_value + 5000 < 1000000 else exposure_value)
@@ -52,10 +57,15 @@ def test_all():
 
         print("\n=== Gamma ===")
         try:
-            cam.set_gamma(1.0)
+            cam.set_gamma(3.0)
             print("Gamma:", cam.get_gamma())
         except Exception as e:
             print("Gamma not supported:", e)
+        print("\n=== Gamma Range ===")
+        try:
+            print("Gamma range:", cam.min_max_gamma())
+        except Exception as e:
+            print("Gamma range not available:", e)
 
         print("\n=== Acquire Image ===")
         # Reset acquisition mode and trigger to default (SingleFrame, trigger off)

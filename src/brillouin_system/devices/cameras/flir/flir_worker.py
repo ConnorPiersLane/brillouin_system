@@ -41,6 +41,7 @@ class FlirWorker(QObject):
         if self._state == FlirState.STREAMING:
             print("[FLIRWorker] Stream already running.")
             return
+        self.disable_software_snap_mode()
 
         self._frame_handler = frame_handler
         self._fps = fps
@@ -99,6 +100,11 @@ class FlirWorker(QObject):
         except Exception as e:
             print(f"[FLIRWorker] Snap error: {e}")
             return None
+
+    def disable_software_snap_mode(self):
+        if self._state == FlirState.SNAP_MODE:
+            self.cam.end_software_stream()
+            self._state = FlirState.IDLE
 
     def shutdown(self):
         if self._state == FlirState.STREAMING:
