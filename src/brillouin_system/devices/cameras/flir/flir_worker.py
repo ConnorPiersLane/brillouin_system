@@ -3,6 +3,9 @@ from enum import Enum
 import time
 import numpy as np
 
+# from brillouin_system.devices.cameras.flir.flir_cam import FLIRCamera
+from brillouin_system.devices.cameras.flir.flir_dummy import DummyFLIRCamera
+
 
 class FlirState(Enum):
     IDLE = 0
@@ -18,19 +21,20 @@ class FlirWorker(QObject):
     """
     finished = pyqtSignal()
 
-    def __init__(self, flir_camera):
+    def __init__(self, flir_camera, fps=10):
         super().__init__()
-        self.cam = flir_camera
+        self.cam: DummyFLIRCamera = flir_camera
         self._state = FlirState.IDLE
+        self._previous_state = FlirState.IDLE
         self._thread = QThread()
         self.moveToThread(self._thread)
         self._frame_handler = None
-        self._fps = 10
+        self._fps = fps
 
         self._thread.started.connect(self._stream_loop)
         self.finished.connect(self._thread.quit)
 
-    def start_stream(self, frame_handler: callable, fps: int = 10):
+    def start_stream(self, frame_handler: callable):
         """
         Start FLIR streaming in its own thread.
 
@@ -44,7 +48,6 @@ class FlirWorker(QObject):
         self.disable_software_snap_mode()
 
         self._frame_handler = frame_handler
-        self._fps = fps
         self._state = FlirState.STREAMING
         self._thread.start()
 
@@ -68,11 +71,74 @@ class FlirWorker(QObject):
                         self._frame_handler(frame)
                 except Exception as e:
                     print(f"[FLIRWorker] Frame error: {e}")
-                time.sleep(max(0, delay - (time.time() - t0)))
+                elapsed = time.time() - t0
+                sleep_time = delay - elapsed
+
+                if sleep_time < 0:
+                    max_fps = 1.0 / elapsed
+                    print(f"[FLIRWorker ⚠] Frame processing too slow: {elapsed:.3f}s "
+                          f"(max achievable FPS ≈ {max_fps:.2f}) vs requested {self._fps} FPS")
+
+                time.sleep(max(0, sleep_time))
+
         finally:
             self.cam.end_software_stream()
             self.finished.emit()
             print("[FLIRWorker] Streaming loop ended.")
+
+    def update_fps(self, new_fps: float):
+        """
+        Safely update the FPS. Restarts streaming if needed.
+
+        Args:
+            new_fps: float, desired frames per second
+        """
+        if new_fps <= 0:
+            raise ValueError("FPS must be > 0")
+
+        self.pause_start()
+        # Update fps
+        self._fps = new_fps
+        print(f"[FLIRWorker] FPS updated to {new_fps}")
+        self.pause_end()
+
+
+    def pause_start(self):
+        # Save current state
+        self._previous_state = self._state
+
+        # Step 1: Pause acquisition
+        if self._state == FlirState.STREAMING:
+            self.stop_stream()
+            self._stop_thread_safely()
+        elif self._state == FlirState.SNAP_MODE:
+            self.cam.end_software_stream()
+
+        self._state = FlirState.IDLE
+
+    def pause_end(self):
+        # Resume stream if previously running
+        # Step 3: Resume previous state
+        if self._previous_state == FlirState.STREAMING:
+            if not self._thread.isRunning():
+                self._thread.start()
+            self._state = FlirState.STREAMING
+        elif self._previous_state == FlirState.SNAP_MODE:
+            self.cam.start_software_stream()
+            self._state = FlirState.SNAP_MODE
+        else:
+            pass
+
+
+    def set_pixel_format(self, format_str):
+        self.pause_start()
+        self.cam.set_pixel_format(format_str=format_str)
+        self.pause_end()
+
+    def set_roi_native(self, offset_x, offset_y, width, height):
+        self.pause_start()
+        self.cam.set_roi_native(offset_x, offset_y, width, height)
+        self.pause_end()
 
     def _stop_thread_safely(self):
         if self._thread.isRunning():
@@ -115,3 +181,49 @@ class FlirWorker(QObject):
         self._state = FlirState.IDLE
         self.cam.shutdown()
         print("[FLIRWorker] Fully shutdown.")
+
+    def update_exposure_gain_gamma(self, exposure_time=None, gain=None, gamma=None):
+        """
+        Safely update gain, exposure time, and gamma from any state.
+        Restores previous state after changes.
+
+        Args:
+            gain: float, desired gain (or None to leave unchanged)
+            exposure_time: float, desired exposure in microseconds (or None)
+            gamma: float, desired gamma (or None)
+        """
+        self.pause_start()
+
+        # Step 2: Apply settings
+        try:
+            if exposure_time is not None:
+                self.cam.set_exposure_time(exposure_time)
+            if gain is not None:
+                self.cam.set_gain(gain)
+            if gamma is not None:
+                self.cam.set_gamma(gamma)
+        except Exception as e:
+            print(f"[FLIRWorker] Failed to update settings: {e}")
+
+        #
+        self.pause_end()
+
+
+    def min_max_exposure_time(self):
+        # self.pause_start()
+        min, max = self.cam.min_max_exposure_time()
+        # self.pause_end()
+        return min, max
+
+    def min_max_gain(self):
+        # self.pause_start()
+        min, max = self.cam.min_max_gain()
+        # self.pause_end()
+        return min, max
+
+
+    def min_max_gamma(self):
+        # self.pause_start()
+        min, max = self.cam.min_max_gamma()
+        # self.pause_end()
+        return min, max

@@ -104,3 +104,7 @@ class BaseCamera(ABC):
     @abstractmethod
     def get_vss_index(self) -> int:
         pass
+
+    @abstractmethod
+    def set_from_config_file(self, config) -> None:
+        pass

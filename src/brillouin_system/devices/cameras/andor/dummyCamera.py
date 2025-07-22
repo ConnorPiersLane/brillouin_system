@@ -1,6 +1,8 @@
 import time
 import numpy as np
 from scipy.ndimage import gaussian_filter
+
+from brillouin_system.config.andor_frame.andor_config import AndorConfig
 from .baseCamera import BaseCamera
 
 class DummyCamera(BaseCamera):
@@ -127,3 +129,34 @@ class DummyCamera(BaseCamera):
 
     def get_vss_index(self) -> int:
         return self._vss_index
+
+    def set_from_config_file(self, config: AndorConfig) -> None:
+
+        if self.verbose:
+            print("[IxonUltra] Applying settings from config...")
+
+
+        self.set_verbose(config.verbose)
+        self.set_flip_image_horizontally(config.flip_image_horizontally)
+
+        self.set_roi(
+            x_start=config.x_start,
+            x_end=config.x_end,
+            y_start=config.y_start,
+            y_end=config.y_end
+        )
+
+        self.set_binning(
+            hbin=config.hbin,
+            vbin=config.vbin
+        )
+
+        self.set_pre_amp_mode(config.pre_amp_mode)
+        self.set_vss_index(config.vss_index)
+
+
+        print(f'Temperature is {config.temperature}')
+
+
+        if self.verbose:
+            print("[IxonUltra] Configuration applied.")

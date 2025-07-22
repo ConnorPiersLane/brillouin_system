@@ -79,7 +79,6 @@ class AndorConfigDialog(QDialog):
                 temperature=self._parse_temperature(self.inputs["temperature"].text()),
                 flip_image_horizontally=self.inputs["flip_image_horizontally"].isChecked(),
                 verbose=self.inputs["verbose"].isChecked(),
-                reload=True,
             )
             save_andor_frame_settings(andor_config_toml_path, andor_frame_config)
             print("Settings saved successfully.")

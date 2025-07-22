@@ -7,7 +7,7 @@ import time
 from PyQt5.QtWidgets import QApplication
 
 from brillouin_system.config.config import calibration_config
-from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
+from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
@@ -43,9 +43,10 @@ class BrillouinSignaller(QObject):
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
 
+    # Flir Camera Signals, from Backend to Frontend
 
 
-    def __init__(self, manager: BrillouinManager):
+    def __init__(self, manager: BrillouinBackend):
         super().__init__()
         self.manager = manager
         self._running = False
@@ -159,7 +160,7 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def emit_camera_settings(self):
-        cam = self.manager.camera
+        cam = self.manager.andor_camera
         settings = {
             "exposure": round(cam.get_exposure_time(),ndigits=4),
             "gain": cam.get_emccd_gain(),
@@ -185,10 +186,15 @@ class BrillouinSignaller(QObject):
             self.background_subtraction_state.emit(False)
             self.background_available_state.emit(False)
 
+
+    @pyqtSlot()
+    def reload_andor_config(self):
+        self.manager.reload_andor_config()
+
     @pyqtSlot()
     def toggle_camera_shutter(self):
         try:
-            cam = self.manager.camera
+            cam = self.manager.andor_camera
 
             if self._camera_shutter_open:
                 cam.close_shutter()
@@ -410,6 +416,14 @@ class BrillouinSignaller(QObject):
             self.log_message.emit(f"[Measurement] Exception: {e}")
 
 
+    # Flir Camera
+    @pyqtSlot()
+    def update_flir_exposure_gain_gamma(self, exposure_time, gain, gamma):
+        pass
+
+
+
+
     @pyqtSlot()
     def close(self):
         print("Stopping BrillouinWorker and closing hardware...")
@@ -423,7 +437,7 @@ class BrillouinSignaller(QObject):
 
         def _shutdown_devices():
             try:
-                self.manager.camera.close()
+                self.manager.andor_camera.close()
                 print("Camera closed.")
             except Exception as e:
                 print(f"Error closing camera: {e}")

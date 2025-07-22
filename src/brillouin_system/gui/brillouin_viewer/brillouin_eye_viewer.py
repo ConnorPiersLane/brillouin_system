@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from brillouin_system.config.config import calibration_config
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.zaber_linear import ZaberLinearController
-from brillouin_system.gui.brillouin_viewer.brillouin_manager import BrillouinManager
+from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
@@ -38,7 +38,7 @@ from brillouin_system.config.config_dialog import ConfigDialog
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 
 ## Testing
-brillouin_manager = BrillouinManager(
+brillouin_manager = BrillouinBackend(
         camera=DummyCamera(),
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
@@ -48,7 +48,7 @@ brillouin_manager = BrillouinManager(
 
 
 # # Real
-brillouin_manager = BrillouinManager(
+brillouin_manager = BrillouinBackend(
         camera=IxonUltra(
             index = 0,
             temperature = -80, #"off"

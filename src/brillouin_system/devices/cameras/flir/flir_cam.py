@@ -1,7 +1,19 @@
-# flir_wrapper.py
+from dataclasses import dataclass
 
 import PySpin
 import cv2
+
+
+
+@dataclass
+class FlirCameraInfo:
+    model: str
+    serial: str
+    sensor_size: tuple[int, int]
+    roi: tuple[int, int, int, int]
+    gain: float
+    exposure: float
+    pixel_format: str
 
 
 
@@ -62,6 +74,18 @@ class FLIRCamera:
             "exposure": self.get_exposure_time(),
             "pixel_format": self.get_pixel_format()
         }
+
+    def get_camera_info_dataclass(self) -> FlirCameraInfo:
+        info = self.get_camera_info()
+        return FlirCameraInfo(
+            model=info["model"],
+            serial=info["serial"],
+            sensor_size=info["sensor_size"],
+            roi=info["roi"],
+            gain=info["gain"],
+            exposure=info["exposure"],
+            pixel_format=info["pixel_format"]
+        )
 
     def set_resolution(self, width, height):
         width = min(width, self._max_width)

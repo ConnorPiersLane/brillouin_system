@@ -4,7 +4,8 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.config import CalibrationConfig, andor_frame_config, calibration_config
+from brillouin_system.config.andor_frame.andor_config import andor_frame_config
+from brillouin_system.config.config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
@@ -33,7 +34,7 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
     return img.astype(np.uint8)
 
 
-class BrillouinManager:
+class BrillouinBackend:
 
     @staticmethod
     def log_message(msg: str):
@@ -48,7 +49,7 @@ class BrillouinManager:
                  is_sample_illumination_continuous: bool = False,
                  ):
         # Devices
-        self.camera: BaseCamera | DummyCamera = camera
+        self.andor_camera: BaseCamera | DummyCamera = camera
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
         self.microwave: Microwave | MicrowaveDummy = microwave
         self.microwave.set_power(power_dbm=-20)
@@ -89,17 +90,17 @@ class BrillouinManager:
     def init_camera_settings(self):
         andor_config = andor_frame_config.get()
 
-        self.camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
-        self.camera.set_vss_index(index=andor_config.vss_index)
+        self.andor_camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
+        self.andor_camera.set_vss_index(index=andor_config.vss_index)
 
-        self.camera.set_roi(x_start=andor_config.x_start,
-                            x_end=andor_config.x_end,
-                            y_start=andor_config.y_start,
-                            y_end=andor_config.y_end, )
-        self.camera.set_binning(hbin=andor_config.hbin,
-                                vbin=andor_config.vbin)
+        self.andor_camera.set_roi(x_start=andor_config.x_start,
+                                  x_end=andor_config.x_end,
+                                  y_start=andor_config.y_start,
+                                  y_end=andor_config.y_end, )
+        self.andor_camera.set_binning(hbin=andor_config.hbin,
+                                      vbin=andor_config.vbin)
 
-        self.camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
+        self.andor_camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
 
 
     def init_state_mode(self, is_reference_mode: bool) -> StateMode:
@@ -205,7 +206,7 @@ class BrillouinManager:
         print(f"[BrillouinManager] Taking {n_bg_images} Background Images...")
         n_images = self.take_n_images(n_bg_images)
 
-        if isinstance(self.camera, DummyCamera):
+        if isinstance(self.andor_camera, DummyCamera):
             n_images = n_images * 0.8
 
 
@@ -229,15 +230,15 @@ class BrillouinManager:
         n_dark_images = andor_config.n_dark_images
         print(f"[BrillouinManager] Starting dark image acquisition, images to capture: {n_dark_images}")
 
-        self.camera.close_shutter()
+        self.andor_camera.close_shutter()
         time.sleep(0.1)
 
         n_images = self.take_n_images(n_dark_images)
 
-        if isinstance(self.camera, DummyCamera):
+        if isinstance(self.andor_camera, DummyCamera):
             n_images = n_images * 0.01
 
-        self.camera.open_shutter()
+        self.andor_camera.open_shutter()
         time.sleep(0.05)
 
         print(f"[BrillouinManager] {n_dark_images} dark images acquired with: {self.get_andor_camera_settings()}")
@@ -255,7 +256,7 @@ class BrillouinManager:
     # ---------------- Get Frames  ----------------
     def _get_camera_snap(self) -> np.ndarray:
         """Pull a raw frame from the camera."""
-        return self.camera.snap().astype(np.float64)
+        return self.andor_camera.snap().astype(np.float64)
 
 
     def get_andor_frame(self) -> np.ndarray:
@@ -470,23 +471,8 @@ class BrillouinManager:
                             emccd_gain: int,
                             ):
 
-        andor_config = andor_frame_config.get()
-
-        if andor_config.change_andor_settings_on_apply:
-            self.camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
-            self.camera.set_vss_index(index=andor_config.vss_index)
-
-            self.camera.set_roi(x_start=andor_config.x_start,
-                                x_end=andor_config.x_end,
-                                y_start=andor_config.y_start,
-                                y_end=andor_config.y_end, )
-            self.camera.set_binning(hbin=andor_config.hbin,
-                                    vbin=andor_config.vbin)
-
-            self.camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
-
-        self.camera.set_exposure_time(exposure_time)
-        self.camera.set_emccd_gain(emccd_gain)
+        self.andor_camera.set_exposure_time(exposure_time)
+        self.andor_camera.set_emccd_gain(emccd_gain)
 
         if self.is_reference_mode:
             self.reference_state_mode.camera_settings = self.get_andor_camera_settings()
@@ -494,14 +480,15 @@ class BrillouinManager:
             self.sample_state_mode.camera_settings = self.get_andor_camera_settings()
 
 
-
+    def reload_andor_config(self):
+        self.andor_camera.set_from_config_file(andor_frame_config.get())
 
 
     def get_andor_camera_settings(self) -> AndorCameraSettings:
-        return AndorCameraSettings(name=self.camera.get_name(),
-                                   exposure_time_s=self.camera.get_exposure_time(),
-                                   emccd_gain=self.camera.get_emccd_gain(),
-                                   roi=self.camera.get_roi(),
-                                   binning=self.camera.get_binning(),
-                                   preamp_gain=self.camera.get_preamp_gain(),
-                                   preamp_mode=f"{self.camera.get_amp_mode()}")
+        return AndorCameraSettings(name=self.andor_camera.get_name(),
+                                   exposure_time_s=self.andor_camera.get_exposure_time(),
+                                   emccd_gain=self.andor_camera.get_emccd_gain(),
+                                   roi=self.andor_camera.get_roi(),
+                                   binning=self.andor_camera.get_binning(),
+                                   preamp_gain=self.andor_camera.get_preamp_gain(),
+                                   preamp_mode=f"{self.andor_camera.get_amp_mode()}")

@@ -16,11 +16,15 @@ def test_flir_worker_lifecycle():
 
     print("\n[TEST] Initializing camera and worker...")
     cam = FLIRCamera()
-    worker = FlirWorker(cam)
+    worker = FlirWorker(cam, fps=5)
 
     # 1. Start streaming
     print("\n[TEST] Starting stream...")
-    worker.start_stream(dummy_frame_handler, fps=5)
+    worker.start_stream(dummy_frame_handler)
+    print(worker.min_max_exposure_time())
+    print(worker.min_max_gain())
+    print(worker.min_max_gamma())
+    worker.update_exposure_gain_gamma(gamma=1)
     time.sleep(3)
 
     # 2. Stop stream
