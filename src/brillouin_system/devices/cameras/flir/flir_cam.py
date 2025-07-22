@@ -25,10 +25,18 @@ class FLIRCamera:
             index:
             width: max 3208
             height: max 2200
+
         '''
 
         self._max_width = 3208
         self._max_height = 2200
+
+        self._max_gain = 47.99
+        self._min_gain = 0.0
+        self._max_exposure_time = 29999998.0
+        self._min_exposure_time = 9
+        self._max_gamma = 4.0
+        self._min_gamma = 0.25
 
         # Mode
         self._is_software_stream = False
@@ -228,6 +236,7 @@ class FLIRCamera:
     def set_pixel_format(self, format_str):
         """
         Set the camera's pixel format.
+        ['Mono8', 'Mono16', 'Mono10Packed', 'Mono12Packed', 'Mono10p', 'Mono12p']
 
         This method sets the camera's PixelFormat node to one of the supported symbolic values.
         You must provide a format string that matches one of the entries returned by

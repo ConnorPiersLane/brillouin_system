@@ -97,7 +97,7 @@ class BrillouinViewerMicroscope(QWidget):
     cancel_requested = pyqtSignal()
 
     # Flir camera
-    flir_update_exposure_gain_gamma = pyqtSignal(tuple)
+    flir_update_exposure_gain_gamma = pyqtSignal(float, float, float)
     flir_update_config = pyqtSignal(object)
 
 

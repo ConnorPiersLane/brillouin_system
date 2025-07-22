@@ -1,5 +1,7 @@
 # import threading
 import time
+from dataclasses import dataclass
+
 import numpy as np
 from pylablib.devices.Andor import AndorSDK2Camera
 
@@ -13,7 +15,9 @@ AmpMode = namedtuple("AmpMode", ["channel", "oamp", "hsspeed", "preamp"])
 
 
 
-
+@dataclass
+class IxonUltraCameraInfo:
+    pass
 
 
 class IxonUltra(BaseCamera):

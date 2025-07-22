@@ -16,6 +16,12 @@ class DummyFLIRCamera:
         self._pixel_format = 'Mono16'
         self._is_software_stream = False
         self._is_single_frame_mode = False
+        self._max_gain = 47.99
+        self._min_gain = 0.0
+        self._max_exposure_time = 29999998.0
+        self._min_exposure_time = 9
+        self._max_gamma = 4.0
+        self._min_gamma = 0.25
 
         print(f"[DummyFLIR] Initialized with ROI: {self._roi}")
 

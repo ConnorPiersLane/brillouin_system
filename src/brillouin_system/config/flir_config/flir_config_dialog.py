@@ -5,19 +5,31 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QIntValidator
 
-from brillouin_system.devices.cameras.flir.flir_dummy import DummyFLIRCamera
-from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
+from brillouin_system.config.flir_config.flir_config import (
+    _min_gain, _max_gain,
+    _min_exposure_time, _max_exposure_time,
+    _min_gamma, _max_gamma,
+    flir_config, save_flir_settings, flir_config_toml_path
+)
 
 
 class FLIRConfigDialog(QDialog):
-    def __init__(self, flir_worker, parent=None):
+    def __init__(self,
+                 flir_update_config,
+                 parent=None):
+        """
+        Args:
+            flir_update_config = pyqtSignal(object)
+        """
         super().__init__(parent)
         self.setWindowTitle("FLIR Camera Settings")
         self.setMinimumSize(360, 320)
 
-        self.flir_worker = flir_worker
-        self.cam = flir_worker.cam
+        self.flir_update_config = flir_update_config
+
         self.inputs = {}
+        self.slider_controls = {}
+        self.current_slider_values = {}
 
         # ---- ROI + Format controls ----
         form_layout = QVBoxLayout()
@@ -26,7 +38,7 @@ class FLIRConfigDialog(QDialog):
         self.inputs["width"] = QLineEdit()
         self.inputs["height"] = QLineEdit()
         self.inputs["pixel_format"] = QComboBox()
-        self.inputs["pixel_format"].addItems(self.cam.get_available_pixel_formats())
+        self.inputs["pixel_format"].addItems(["Mono8", "Mono16", "RGB8"])  # Example formats
 
         for key in ["offset_x", "offset_y", "width", "height"]:
             self.inputs[key].setValidator(QIntValidator(0, 9999))
@@ -38,12 +50,10 @@ class FLIRConfigDialog(QDialog):
             form_layout.addLayout(row)
 
         # ---- Slider Controls ----
-        self.slider_controls = {}
         self.slider_layout = QVBoxLayout()
-        self.add_camera_slider("Exposure Time (µs)", "exposure_time", *map(int, self.cam.min_max_exposure_time()), int(self.cam.get_exposure_time()))
-        self.add_camera_slider("Gain", "gain", *map(int, self.cam.min_max_gain()), int(self.cam.get_gain()))
-        gmin, gmax = self.cam.min_max_gamma()
-        self.add_camera_slider("Gamma", "gamma", int(gmin * 100), int(gmax * 100), int((self.cam.get_gamma() or 1.0) * 100), scale=100)
+        self.add_camera_slider("Exposure Time (µs)", "exposure_time", int(_min_exposure_time), int(_max_exposure_time), 20000)
+        self.add_camera_slider("Gain", "gain", int(_min_gain), int(_max_gain), 0)
+        self.add_camera_slider("Gamma", "gamma", int(_min_gamma * 100), int(_max_gamma * 100), 100, scale=100)
 
         # ---- Buttons ----
         button_row = QHBoxLayout()
@@ -100,14 +110,15 @@ class FLIRConfigDialog(QDialog):
         self.slider_layout.addLayout(layout)
         self.slider_controls[key] = slider
 
+        # Store initial value
+        self.current_slider_values[key] = initial / scale if key == "gamma" else initial
+
     def on_slider_changed(self, key, label_text, val, label, scale):
         real_val = val / scale
         label.setText(f"{label_text}: {real_val:.2f}")
-        kwargs = {key: real_val if key == "gamma" else val}
-        self.flir_worker.update_exposure_gain_gamma(**kwargs)
+        self.current_slider_values[key] = real_val if key == "gamma" else val
 
     def load_values(self):
-        from brillouin_system.config.flir_config.flir_config import flir_config
         cfg = flir_config.get()
         self.inputs["offset_x"].setText(str(cfg.offset_x))
         self.inputs["offset_y"].setText(str(cfg.offset_y))
@@ -124,11 +135,23 @@ class FLIRConfigDialog(QDialog):
             width = int(self.inputs["width"].text())
             height = int(self.inputs["height"].text())
             pixel_format = self.inputs["pixel_format"].currentText()
+            gain = self.slider_controls["gain"].value()
+            exposure = self.slider_controls["exposure_time"].value()
+            gamma = self.slider_controls["gamma"].value() / 100  # scale down
 
+            # Update config
+            flir_config.update(
+                offset_x=offset_x,
+                offset_y=offset_y,
+                width=width,
+                height=height,
+                pixel_format=pixel_format,
+                gain=gain,
+                exposure=exposure,
+                gamma=gamma,
+            )
 
-
-            self.flir_worker.set_roi_native(offset_x, offset_y, width, height)
-            self.flir_worker.set_pixel_format(pixel_format)
+            self.flir_update_config.emit(flir_config.get())
             print("[FLIR Config] Settings applied.")
 
         except Exception as e:
@@ -136,7 +159,6 @@ class FLIRConfigDialog(QDialog):
 
     def save_config(self):
         try:
-            from brillouin_system.config.flir_config.flir_config import flir_config, save_flir_settings, flir_config_toml_path
             gain = self.slider_controls["gain"].value()
             exposure = self.slider_controls["exposure_time"].value()
             gamma = self.slider_controls["gamma"].value() / 100  # scale down
@@ -158,10 +180,24 @@ class FLIRConfigDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save: {e}")
 
+
 if __name__ == "__main__":
     import sys
     from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtCore import pyqtSignal, QObject
+
+    class DummySignals(QObject):
+        flir_update_config = pyqtSignal(object)
 
     app = QApplication(sys.argv)
-    dialog = FLIRConfigDialog(flir_worker=FlirWorker(DummyFLIRCamera()))
+    signals = DummySignals()
+
+    # Connect test signals to print
+    signals.flir_update_config.connect(
+        lambda cfg: print(f"[Signal] Config updated: {cfg}")
+    )
+
+    dialog = FLIRConfigDialog(
+        flir_update_config=signals.flir_update_config
+    )
     dialog.exec_()

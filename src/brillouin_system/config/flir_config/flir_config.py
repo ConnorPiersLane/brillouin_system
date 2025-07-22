@@ -15,6 +15,14 @@ class FLIRConfig:
     exposure: int
     gamma: float
 
+# Camera Values for the:
+# Blackfly S BFS-U3-70S7M
+_max_gain = 47.99
+_min_gain = 0.0
+_max_exposure_time = 29999998.0
+_min_exposure_time = 9
+_max_gamma = 4.0
+_min_gamma = 0.25
 
 # Path to config file
 flir_config_toml_path = Path(__file__).parent.resolve() / "flir_config.toml"
