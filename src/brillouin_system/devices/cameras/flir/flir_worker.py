@@ -208,22 +208,3 @@ class FlirWorker(QObject):
         #
         self.pause_end()
 
-
-    def min_max_exposure_time(self):
-        # self.pause_start()
-        min, max = self.cam.min_max_exposure_time()
-        # self.pause_end()
-        return min, max
-
-    def min_max_gain(self):
-        # self.pause_start()
-        min, max = self.cam.min_max_gain()
-        # self.pause_end()
-        return min, max
-
-
-    def min_max_gamma(self):
-        # self.pause_start()
-        min, max = self.cam.min_max_gamma()
-        # self.pause_end()
-        return min, max

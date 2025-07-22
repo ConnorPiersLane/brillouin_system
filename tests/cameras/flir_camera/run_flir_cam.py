@@ -30,10 +30,11 @@ def test_all():
         print("Exposure range (µs):", cam.min_max_exposure_time())
 
         print("\n=== Gamma Range ===")
-        try:
-            print("Gamma range:", cam.min_max_gamma())
-        except Exception as e:
-            print("Gamma range not available:", e)
+        cam.set_pixel_format('Mono16')
+        print("Gamma range:", cam.min_max_gamma())
+        cam.set_pixel_format('Mono8')
+        print("Gamma range:", cam.min_max_gamma())
+
 
         print("\n=== ROI Native ===")
         sensor_w, sensor_h = cam.get_sensor_size()

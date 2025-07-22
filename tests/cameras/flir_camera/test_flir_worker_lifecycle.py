@@ -21,9 +21,9 @@ def test_flir_worker_lifecycle():
     # 1. Start streaming
     print("\n[TEST] Starting stream...")
     worker.start_stream(dummy_frame_handler)
-    print(worker.min_max_exposure_time())
-    print(worker.min_max_gain())
-    print(worker.min_max_gamma())
+    print(worker.cam.min_max_exposure_time())
+    print(worker.cam.min_max_gain())
+    print(worker.cam.min_max_gamma())
     worker.update_exposure_gain_gamma(gamma=1)
     time.sleep(3)
 
