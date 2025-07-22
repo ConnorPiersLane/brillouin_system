@@ -46,7 +46,7 @@ def test_flir_worker_lifecycle():
 
     # 4. Go back to streaming
     print("\n[TEST] Restarting stream...")
-    worker.start_stream(dummy_frame_handler, fps=5)
+    worker.start_stream(dummy_frame_handler)
     time.sleep(2)
 
     # 5. Final shutdown
