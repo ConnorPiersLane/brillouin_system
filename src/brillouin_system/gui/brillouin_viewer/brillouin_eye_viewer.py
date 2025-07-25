@@ -363,7 +363,7 @@ class BrillouinViewer(QWidget):
 
         # Populate axis selector from controller
         try:
-            available_axes = self.brillouin_signaller.manager.zaber.get_available_axes()  # ['x', 'y']
+            available_axes = self.brillouin_signaller.backend.zaber.get_available_axes()  # ['x', 'y']
             for axis in available_axes:
                 self.zaber_axis_selector.addItem(axis.upper(), axis)  # Display 'X', 'Y'; store 'x', 'y'
         except Exception as e:

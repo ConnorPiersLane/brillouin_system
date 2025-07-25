@@ -3,8 +3,8 @@ from enum import Enum
 import time
 import numpy as np
 
-# from brillouin_system.devices.cameras.flir.flir_cam import FLIRCamera
-from brillouin_system.devices.cameras.flir.flir_dummy import DummyFLIRCamera
+from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
+from brillouin_system.devices.cameras.flir.flir_base import BaseFLIRCamera
 
 
 class FlirState(Enum):
@@ -23,7 +23,7 @@ class FlirWorker(QObject):
 
     def __init__(self, flir_camera, fps=10):
         super().__init__()
-        self.cam: DummyFLIRCamera = flir_camera
+        self.cam: BaseFLIRCamera = flir_camera
         self._state = FlirState.IDLE
         self._previous_state = FlirState.IDLE
         self._thread = QThread()
@@ -49,7 +49,8 @@ class FlirWorker(QObject):
 
         self._frame_handler = frame_handler
         self._state = FlirState.STREAMING
-        self._thread.start()
+        if not self._thread.isRunning():
+            self._thread.start()
 
     def stop_stream(self):
         """Stop streaming and wait for thread to finish."""
@@ -208,3 +209,31 @@ class FlirWorker(QObject):
         #
         self.pause_end()
 
+    def update_settings(self, flir_config: FLIRConfig):
+        """
+        Apply FLIRConfig settings to the camera hardware.
+
+        Args:
+            flir_config (FLIRConfig): Configuration settings to apply.
+        """
+        try:
+            self.pause_start()
+            self.cam.set_roi_native(
+                offset_x=flir_config.offset_x,
+                offset_y=flir_config.offset_y,
+                width=flir_config.width,
+                height=flir_config.height
+            )
+            self.cam.set_exposure_time(flir_config.exposure)
+            self.cam.set_gain(flir_config.gain)
+            self.cam.set_gamma(flir_config.gamma)
+            self.cam.set_pixel_format(flir_config.pixel_format)
+
+            print("[FLIRCamera] Settings successfully updated.")
+
+        except Exception as e:
+            print(f"[FLIRCamera] Failed to apply FLIRConfig: {e}")
+            raise
+
+        finally:
+            self.pause_end()

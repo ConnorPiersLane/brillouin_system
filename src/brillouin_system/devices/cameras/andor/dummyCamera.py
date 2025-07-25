@@ -2,7 +2,7 @@ import time
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from brillouin_system.config.andor_frame.andor_config import AndorConfig
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from .baseCamera import BaseCamera
 
 class DummyCamera(BaseCamera):

@@ -4,13 +4,17 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.config.andor_frame.andor_config import andor_frame_config
-from brillouin_system.config.config import CalibrationConfig, calibration_config
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config import andor_frame_config, AndorConfig
+from brillouin_system.config.config import CalibrationConfig
+from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig, flir_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
+from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_linear import ZaberLinearDummy
+from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig, led_config
+from brillouin_system.devices.zaber_microscope.zaber_microscope import ZaberMicroscope, DummyZaberMicroscope
 from brillouin_system.fitting.compute_sample_freqs import compute_freq_shift
 from brillouin_system.fitting.fitting_manager import get_empty_fitting, fit_reference_spectrum, fit_sample_spectrum
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
@@ -39,21 +43,37 @@ class BrillouinBackend:
     @staticmethod
     def log_message(msg: str):
         """Optional helper to log messages — or use the signaller’s emit if needed."""
-        print(f"[BrillouinManager] {msg}")
+        print(f"[BrillouinBackend] {msg}")
 
     def __init__(self,
                  camera: BaseCamera | DummyCamera,
                  shutter_manager: ShutterManager | ShutterManagerDummy,
                  microwave: Microwave | MicrowaveDummy,
                  zaber: ZaberLinearController | ZaberLinearDummy,
+                 zaber_microscope: None | ZaberMicroscope | DummyZaberMicroscope= None,
+                 flir_cam_worker: None | FlirWorker = None,
                  is_sample_illumination_continuous: bool = False,
                  ):
         # Devices
         self.andor_camera: BaseCamera | DummyCamera = camera
+        self.andor_camera.set_from_config_file(andor_frame_config.get())
+
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
+
         self.microwave: Microwave | MicrowaveDummy = microwave
+
         self.microwave.set_power(power_dbm=-20)
+
         self.zaber = zaber
+
+        self.zaber_microscope = zaber_microscope
+        if self.zaber_microscope is not None:
+            self.zaber_microscope.set_led_illumination(led_config=led_config.get())
+
+
+        self.flir_cam_worker = flir_cam_worker
+        if self.flir_cam_worker is not None:
+            self.flir_cam_worker.update_settings(flir_config=flir_config.get())
 
         # State
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
@@ -76,6 +96,7 @@ class BrillouinBackend:
         # Init state modes
         self.reference_state_mode: StateMode = self.init_state_mode(is_reference_mode=True)
         self.sample_state_mode: StateMode = self.init_state_mode(is_reference_mode=False)
+
 
     def init_shutters(self):
         if self.is_reference_mode:
@@ -117,12 +138,12 @@ class BrillouinBackend:
     def change_illumination_mode_to_continuous(self):
         self.is_sample_illumination_continuous = True
         self.shutter_manager.sample.open()
-        print("[BrillouinManager] Switched to continuous illumination mode.")
+        print("[BrillouinBackend] Switched to continuous illumination mode.")
 
     def change_illumination_mode_to_pulsed(self):
         self.is_sample_illumination_continuous = False
         self.shutter_manager.sample.close()
-        print("[BrillouinManager] Switched to pulsed illumination mode.")
+        print("[BrillouinBackend] Switched to pulsed illumination mode.")
 
     def change_state_modes(self, state_mode: StateMode):
         self.is_reference_mode = state_mode.is_reference_mode
@@ -148,7 +169,7 @@ class BrillouinBackend:
 
         self.shutter_manager.change_to_reference()
         self.change_state_modes(state_mode=self.reference_state_mode)
-        print("[BrillouinManager] Switched to reference mode.")
+        print("[BrillouinBackend] Switched to reference mode.")
 
 
     def change_to_sample_mode(self):
@@ -156,7 +177,7 @@ class BrillouinBackend:
         self.reference_state_mode = self.get_current_state_mode()
         self.shutter_manager.change_to_objective()
         self.change_state_modes(state_mode=self.sample_state_mode)
-        print("[BrillouinManager] Switched to sample mode.")
+        print("[BrillouinBackend] Switched to sample mode.")
 
 
 
@@ -167,7 +188,7 @@ class BrillouinBackend:
             self.do_background_subtraction = True
         else:
             self.do_background_subtraction = False
-            print("[BrillouinManager] No Background Image available")
+            print("[BrillouinBackend] No Background Image available")
 
     def stop_background_subtraction(self):
         self.do_background_subtraction = False
@@ -203,14 +224,14 @@ class BrillouinBackend:
         andor_config = andor_frame_config.get()
 
         n_bg_images = andor_config.n_bg_images
-        print(f"[BrillouinManager] Taking {n_bg_images} Background Images...")
+        print(f"[BrillouinBackend] Taking {n_bg_images} Background Images...")
         n_images = self.take_n_images(n_bg_images)
 
         if isinstance(self.andor_camera, DummyCamera):
             n_images = n_images * 0.8
 
 
-        print("[BrillouinManager] ...Background Images acquired.")
+        print("[BrillouinBackend] ...Background Images acquired.")
 
 
         if self.is_sample_illumination_continuous:
@@ -228,7 +249,7 @@ class BrillouinBackend:
             return None
 
         n_dark_images = andor_config.n_dark_images
-        print(f"[BrillouinManager] Starting dark image acquisition, images to capture: {n_dark_images}")
+        print(f"[BrillouinBackend] Starting dark image acquisition, images to capture: {n_dark_images}")
 
         self.andor_camera.close_shutter()
         time.sleep(0.1)
@@ -241,7 +262,7 @@ class BrillouinBackend:
         self.andor_camera.open_shutter()
         time.sleep(0.05)
 
-        print(f"[BrillouinManager] {n_dark_images} dark images acquired with: {self.get_andor_camera_settings()}")
+        print(f"[BrillouinBackend] {n_dark_images} dark images acquired with: {self.get_andor_camera_settings()}")
 
         return generate_image_statistics_dataclass(n_images)
 
@@ -252,6 +273,14 @@ class BrillouinBackend:
             return False
         else:
             return True
+
+
+    # ---------------- Zaber Microscope  ----------------
+    def update_microscope_led_settings(self, led_config: LEDConfig):
+        if self.zaber_microscope is None:
+            print(f"[Brillouin Backend] No Flir camera defined. Nothing to update")
+        else:
+            self.zaber_microscope.set_led_illumination(led_config)
 
     # ---------------- Get Frames  ----------------
     def _get_camera_snap(self) -> np.ndarray:
@@ -295,7 +324,7 @@ class BrillouinBackend:
             else:
                 return fit_sample_spectrum(sline=sline, calibration_calculator=self.calibration_calculator)
         except Exception as e:
-            print(f"[BrillouinManager] Fitting error: {e}")
+            print(f"[BrillouinBackend] Fitting error: {e}")
             return get_empty_fitting(sline)
 
     def update_calibration_calculator(self):
@@ -480,8 +509,8 @@ class BrillouinBackend:
             self.sample_state_mode.camera_settings = self.get_andor_camera_settings()
 
 
-    def reload_andor_config(self):
-        self.andor_camera.set_from_config_file(andor_frame_config.get())
+    def update_andor_config_settings(self, andor_config: AndorConfig):
+        self.andor_camera.set_from_config_file(andor_config)
 
 
     def get_andor_camera_settings(self) -> AndorCameraSettings:
@@ -492,3 +521,56 @@ class BrillouinBackend:
                                    binning=self.andor_camera.get_binning(),
                                    preamp_gain=self.andor_camera.get_preamp_gain(),
                                    preamp_mode=f"{self.andor_camera.get_amp_mode()}")
+
+    def update_flir_settings(self, flir_config: FLIRConfig):
+        if self.flir_cam_worker is None:
+            print(f"[BrillouinBackend] No Flir camera defined. Nothing to update")
+        else:
+            self.flir_cam_worker.update_settings(flir_config)
+
+
+
+    def close(self):
+        """Cleanly shut down all backend-controlled devices."""
+        self.log_message("Shutting down BrillouinBackend devices...")
+
+        try:
+            self.shutter_manager.close_all()
+            self.log_message("Shutters closed.")
+        except Exception as e:
+            self.log_message(f"Error closing shutter manager: {e}")
+
+        try:
+            self.andor_camera.close()
+            self.log_message("Andor camera closed.")
+        except Exception as e:
+            self.log_message(f"Error closing Andor camera: {e}")
+
+        try:
+            self.microwave.shutdown()
+            self.log_message("Microwave shut down.")
+        except Exception as e:
+            self.log_message(f"Error shutting down microwave: {e}")
+
+        try:
+            self.zaber.close()
+            self.log_message("Zaber controller closed.")
+        except Exception as e:
+            self.log_message(f"Error closing Zaber controller: {e}")
+
+        try:
+            if self.zaber_microscope:
+                self.zaber_microscope.close()
+                self.log_message("Zaber microscope closed.")
+        except Exception as e:
+            self.log_message(f"Error closing Zaber microscope: {e}")
+
+        try:
+            if self.flir_cam_worker:
+                self.flir_cam_worker.shutdown()
+                self.log_message("FLIR camera closed.")
+        except Exception as e:
+            self.log_message(f"Error closing FLIR camera: {e}")
+
+        self.log_message("BrillouinBackend shutdown complete.")
+

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from pylablib.devices.Andor import AndorSDK2Camera
 
-from brillouin_system.config.andor_frame.andor_config import AndorConfig
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from .baseCamera import BaseCamera
 
 from collections import namedtuple

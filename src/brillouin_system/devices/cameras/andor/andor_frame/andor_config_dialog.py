@@ -1,22 +1,25 @@
-from PyQt5.QtCore import pyqtSignal, QObject
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QMessageBox, QApplication
 )
 from PyQt5.QtGui import QIntValidator
-from brillouin_system.config.andor_frame.andor_config import (
-    andor_frame_config, save_andor_frame_settings, AndorConfig
+
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config import (
+    andor_frame_config, save_andor_frame_settings, andor_config_toml_path
 )
-from brillouin_system.config.andor_frame.andor_config import andor_config_toml_path
 
 
 class AndorConfigDialog(QDialog):
-    config_updated = pyqtSignal(object)  # Emits AndorConfig (as object)
-
-    def __init__(self, parent=None):
+    def __init__(self, andor_update_config, parent=None):
+        """
+        Args:
+            andor_update_config: Callable that accepts the updated config dataclass
+        """
         super().__init__(parent)
         self.setWindowTitle("Andor Camera Settings")
         self.setMinimumSize(300, 300)
+
+        self.andor_update_config = andor_update_config
 
         self.inputs = {
             "advanced_gain_option": QCheckBox("Use Advanced Gain"),
@@ -46,17 +49,26 @@ class AndorConfigDialog(QDialog):
                 row.addWidget(widget)
                 layout.addLayout(row)
 
-        # Save button
+        # ---- Buttons ----
+        btn_layout = QHBoxLayout()
+
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self.apply_settings)
+
         save_btn = QPushButton("Save")
         save_btn.clicked.connect(self.save_config)
-        layout.addWidget(save_btn)
 
-        # Save & emit button
-        emit_btn = QPushButton("Save & Emit")
-        emit_btn.clicked.connect(self.save_and_emit)
-        layout.addWidget(emit_btn)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close_dialog)
 
+        btn_layout.addStretch()
+        btn_layout.addWidget(apply_btn)
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(close_btn)
+
+        layout.addLayout(btn_layout)
         self.setLayout(layout)
+
         self.load_values()
 
     def load_values(self):
@@ -99,33 +111,32 @@ class AndorConfigDialog(QDialog):
             verbose=self.inputs["verbose"].isChecked(),
         )
 
+    def apply_settings(self):
+        try:
+            self._update_config_from_inputs()
+            self.andor_update_config(andor_frame_config.get())
+            print("[Andor Config] Settings applied.")
+        except Exception as e:
+            QMessageBox.critical(self, "Apply Error", f"Failed to apply settings:\n{e}")
+
     def save_config(self):
         try:
             self._update_config_from_inputs()
             save_andor_frame_settings(andor_config_toml_path, andor_frame_config)
-            print("Settings saved successfully.")
+            print("[Andor Config] Settings saved.")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+            QMessageBox.critical(self, "Save Error", f"Failed to save settings:\n{e}")
 
-    def save_and_emit(self):
-        try:
-            self._update_config_from_inputs()
-            save_andor_frame_settings(andor_config_toml_path, andor_frame_config)
-            cfg_copy = andor_frame_config.get()
-            self.config_updated.emit(cfg_copy)
-            print("Settings saved and emitted.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save/emit: {e}")
+    def close_dialog(self):
+        self.close()
 
 
-# Optional test stub
 if __name__ == "__main__":
     import sys
 
-    def on_config_received(config):
-        print("[Signal] Config received:\n", config)
+    def andor_update_config(cfg):
+        print("[Function Call] Config updated:\n", cfg)
 
     app = QApplication(sys.argv)
-    dlg = AndorConfigDialog()
-    dlg.config_updated.connect(on_config_received)
+    dlg = AndorConfigDialog(andor_update_config=andor_update_config)
     dlg.exec_()

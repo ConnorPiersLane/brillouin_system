@@ -1,9 +1,0 @@
-[flir]
-offset_x = 0
-offset_y = 0
-width = 1024
-height = 768
-pixel_format = "Mono16"
-gain = 47
-exposure = 12844041
-gamma = 1.29

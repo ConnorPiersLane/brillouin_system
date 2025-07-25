@@ -1,0 +1,9 @@
+[flir]
+offset_x = 0
+offset_y = 0
+width = 1024
+height = 768
+pixel_format = "Mono8"
+gain = 12
+exposure = 14495417
+gamma = 1.92

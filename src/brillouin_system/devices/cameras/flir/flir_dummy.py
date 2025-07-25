@@ -1,8 +1,11 @@
 import numpy as np
-import cv2
+
+from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
+from brillouin_system.devices.cameras.flir.flir_base import BaseFLIRCamera
+from brillouin_system.devices.cameras.flir.flir_dataclass import FlirCameraInfo
 
 
-class DummyFLIRCamera:
+class DummyFLIRCamera(BaseFLIRCamera):
     def __init__(self, index=0, width=2000, height=2000):
         """
         A dummy FLIR camera for development without hardware.
@@ -40,6 +43,17 @@ class DummyFLIRCamera:
         }
         print(f"[DummyFLIR] get_camera_info() -> {info}")
         return info
+
+    def get_camera_info_dataclass(self) -> FlirCameraInfo:
+        return FlirCameraInfo(
+            model="DummyFLIR",
+            serial="00000000",
+            sensor_size=self.get_sensor_size(),
+            roi=self.get_roi_native(),
+            gain=self.get_gain(),
+            exposure=self.get_exposure_time(),
+            pixel_format=self.get_pixel_format()
+        )
 
     def set_resolution(self, width, height):
         self._roi = (0, 0, min(width, self._max_width), min(height, self._max_height))
@@ -141,6 +155,8 @@ class DummyFLIRCamera:
         formats = ['Mono8', 'Mono16', 'Mono10Packed', 'Mono12Packed', 'Mono10p', 'Mono12p']
         print(f"[DummyFLIR] get_available_pixel_formats() -> {formats}")
         return formats
+
+
 
     def __del__(self):
         print("[DummyFLIR] __del__ called")

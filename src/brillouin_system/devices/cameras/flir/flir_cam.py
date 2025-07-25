@@ -1,23 +1,11 @@
-from dataclasses import dataclass
-
 import PySpin
 import cv2
 
+from brillouin_system.devices.cameras.flir.flir_base import BaseFLIRCamera
+from brillouin_system.devices.cameras.flir.flir_dataclass import FlirCameraInfo
 
 
-@dataclass
-class FlirCameraInfo:
-    model: str
-    serial: str
-    sensor_size: tuple[int, int]
-    roi: tuple[int, int, int, int]
-    gain: float
-    exposure: float
-    pixel_format: str
-
-
-
-class FLIRCamera:
+class FLIRCamera(BaseFLIRCamera):
     def __init__(self, index=0, width=2000, height=2000):
         '''
 
@@ -365,6 +353,8 @@ class FLIRCamera:
                 available_formats.append(symbolic)
 
         return available_formats
+
+
 
 
 if __name__ == "__main__":

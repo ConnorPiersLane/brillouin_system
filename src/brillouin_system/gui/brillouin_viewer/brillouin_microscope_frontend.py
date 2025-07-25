@@ -14,12 +14,17 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 from pyqt_switch import PyQtSwitch
 
-from brillouin_system.config.andor_frame.andor_config_dialog import AndorConfigDialog
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.config.calibration.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.config.config import calibration_config
 from brillouin_system.config.peak_fitting.find_peaks_config_gui import FindPeaksConfigDialog
+from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.cameras.flir.flir_dummy import DummyFLIRCamera
 from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
+from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
+from brillouin_system.devices.zaber_microscope.led_config.led_config_dialog import LEDConfigDialog
+from brillouin_system.devices.zaber_microscope.zaber_microscope import DummyZaberMicroscope
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -35,11 +40,16 @@ from brillouin_system.my_dataclasses.fitted_results import DisplayResults
 from brillouin_system.devices.zaber_linear import ZaberLinearDummy
 from brillouin_system.my_dataclasses.measurements import MeasurementSeries
 
+# SubGuis
+from brillouin_system.devices.cameras.flir.flir_config.flir_config_dialog import FLIRConfigDialog
+
 
 ###
 # Add other guis
-from brillouin_system.config.config_dialog import ConfigDialog
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
+
+
+
 
 ## Testing
 brillouin_backend = BrillouinBackend(
@@ -47,6 +57,8 @@ brillouin_backend = BrillouinBackend(
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
     zaber=ZaberLinearDummy(),
+    zaber_microscope=DummyZaberMicroscope(),
+    flir_cam_worker=FlirWorker(flir_camera=DummyFLIRCamera()),
     is_sample_illumination_continuous=True
 )
 
@@ -76,7 +88,7 @@ class BrillouinViewerMicroscope(QWidget):
     # Signals Outgoing
     gui_ready = pyqtSignal()
     apply_camera_settings_requested = pyqtSignal(dict)
-    reload_andor_config_requested = pyqtSignal()
+    update_andor_config_requested = pyqtSignal(object)
     toggle_camera_shutter_requested = pyqtSignal()
     emit_camera_settings_requested = pyqtSignal()
     start_live_requested = pyqtSignal()
@@ -95,10 +107,13 @@ class BrillouinViewerMicroscope(QWidget):
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
     cancel_requested = pyqtSignal()
+    close_all_shutters_requested = pyqtSignal()
 
     # Flir camera
-    flir_update_exposure_gain_gamma = pyqtSignal(float, float, float)
-    flir_update_config = pyqtSignal(object)
+    request_flir_update_settings = pyqtSignal(object)
+
+    # Microscope
+    request_led_update_settings = pyqtSignal(object)
 
 
     def __init__(self):
@@ -114,7 +129,7 @@ class BrillouinViewerMicroscope(QWidget):
 
         # Sending signals
         self.apply_camera_settings_requested.connect(self.brillouin_signaller.apply_camera_settings)
-        self.reload_andor_config_requested.connect(self.brillouin_signaller.reload_andor_config)
+        self.update_andor_config_requested.connect(self.brillouin_signaller.update_andor_config_settings)
         self.emit_camera_settings_requested.connect(self.brillouin_signaller.emit_camera_settings)
         self.toggle_camera_shutter_requested.connect(self.brillouin_signaller.toggle_camera_shutter)
         self.start_live_requested.connect(self.brillouin_signaller.start_live_view)
@@ -133,6 +148,13 @@ class BrillouinViewerMicroscope(QWidget):
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
         self.cancel_requested.connect(self.brillouin_signaller.cancel_operations)
+        self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
+
+        # Flir camera settings
+        self.request_flir_update_settings.connect(self.brillouin_signaller.flir_update_settings)
+
+        # Microscope
+        self.request_led_update_settings.connect(self.brillouin_signaller.update_microscope_leds)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -148,6 +170,9 @@ class BrillouinViewerMicroscope(QWidget):
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
         self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
+
+
+
 
         # Connect signals BEFORE starting the thread
         self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
@@ -167,6 +192,7 @@ class BrillouinViewerMicroscope(QWidget):
 
         # ---------------- LEFT COLUMN: Settings ----------------
         left_column_layout = QVBoxLayout()
+        left_column_layout.addWidget(self.create_control_group())
         left_column_layout.addWidget(self.create_andor_camera_group())
         left_column_layout.addWidget(self.create_fitting_group())
         left_column_layout.addWidget(self.create_reference_group())
@@ -188,11 +214,19 @@ class BrillouinViewerMicroscope(QWidget):
         self.canvas = FigureCanvas(self.fig)
         plot_row_layout.addWidget(self.create_andor_display_group())
 
-        self.main_display = QLabel("Display area")
-        self.main_display.setFixedSize(int(640 * 0.9), int(480 * 0.9))
-        self.main_display.setStyleSheet("background-color: black; color: white;")
-        self.main_display.setAlignment(Qt.AlignCenter)
-        plot_row_layout.addWidget(self.main_display)
+        # --- FLIR Camera Display ---
+        self.flir_group = QGroupBox("Flir Camera")
+        self.flir_layout = QVBoxLayout()
+
+        self.flir_image_label = QLabel("No FLIR image")
+        self.flir_image_label.setFixedSize(320, 240)
+        self.flir_image_label.setAlignment(Qt.AlignCenter)
+        self.flir_image_label.setStyleSheet("background-color: black; color: white;")
+
+        self.flir_layout.addWidget(self.flir_image_label)
+        self.flir_group.setLayout(self.flir_layout)
+
+        plot_row_layout.addWidget(self.flir_group)
 
         right_layout.addLayout(plot_row_layout)
         outer_layout.addLayout(right_layout, 1)
@@ -206,7 +240,21 @@ class BrillouinViewerMicroscope(QWidget):
 
 
     # ---------------- UI Sections ---------------- #
+    def create_control_group(self):
+        group = QGroupBox("Control")
+        layout = QHBoxLayout()
 
+        stop_btn = QPushButton("STOP")
+        stop_btn.clicked.connect(self.on_stop_clicked)
+
+        restart_btn = QPushButton("Restart")
+        restart_btn.clicked.connect(self.on_restart_clicked)
+
+        layout.addWidget(stop_btn)
+        layout.addWidget(restart_btn)
+        group.setLayout(layout)
+
+        return group
 
     def create_andor_camera_group(self):
         self.exposure_input = QLineEdit()
@@ -215,11 +263,8 @@ class BrillouinViewerMicroscope(QWidget):
         self.gain_input = QLineEdit()
         self.gain_input.setValidator(QIntValidator(0, 1000))
 
-        self.config_camera_btn = QPushButton("Config")
+        self.config_camera_btn = QPushButton("Settings")
         self.config_camera_btn.clicked.connect(self.on_andor_configs_clicked)
-
-        self.load_config_camera_btn = QPushButton("Load Config")
-        self.load_config_camera_btn.clicked.connect(self.on_andor_load_config_clicked)
 
         self.toggle_camera_shutter_btn = QPushButton("Close")
         self.toggle_camera_shutter_btn.clicked.connect(self.toggle_camera_shutter_requested.emit)
@@ -230,7 +275,6 @@ class BrillouinViewerMicroscope(QWidget):
         # Horizontal layout for the buttons
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.config_camera_btn)
-        btn_row.addWidget(self.load_config_camera_btn)
         btn_row.addWidget(self.toggle_camera_shutter_btn)
         btn_row.addWidget(self.apply_camera_btn)
 
@@ -422,166 +466,30 @@ class BrillouinViewerMicroscope(QWidget):
         return group
 
     def create_flir_camera_group(self):
-        group = QGroupBox("FLIR Camera Controls")
+        group = QGroupBox("FLIR Camera")
         layout = QVBoxLayout()
         group.setLayout(layout)
 
-        self._flir_controls = {}
-        scale_style = "font-size: 75%;"
-
-        cam = self.flir_worker.cam
-
-        # Get real limits
-        try:
-            exp_min, exp_max = map(int, cam.min_max_exposure_time())
-            gain_min, gain_max = map(int, cam.min_max_gain())
-            gamma_min, gamma_max = cam.min_max_gamma()
-            gamma_min = int(gamma_min * 100)
-            gamma_max = int(gamma_max * 100)
-        except Exception as e:
-            print(f"[FLIR GUI] Failed to read limits from camera: {e}")
-            exp_min, exp_max = 100, 100000
-            gain_min, gain_max = 0, 24
-            gamma_min, gamma_max = 100, 400
-
-        slider_specs = [
-            ("Exposure Time (µs)", exp_min, exp_max, int(cam.get_exposure_time())),
-            ("Gain", int(gain_min), int(gain_max), int(cam.get_gain())),
-            ("Gamma", gamma_min, gamma_max, int((cam.get_gamma() or 100) * 100)),
-        ]
-
-        def make_slider_callback(name, label):
-            def callback(val):
-                display_val = val / 100 if name == "Gamma" else val
-                label.setText(f"{name}: {display_val:.2f}")
-                kwargs = {"gain": None, "exposure_time": None, "gamma": None}
-                key = name.lower()
-                if "exposure" in key:
-                    kwargs["exposure_time"] = val
-                elif "gain" in key:
-                    kwargs["gain"] = val
-                elif "gamma" in key:
-                    kwargs["gamma"] = val / 100
-                self.flir_worker.update_exposure_gain_gamma(**kwargs)
-
-            return callback
-
-        for name, min_val, max_val, default in slider_specs:
-            row = QVBoxLayout()
-            label = QLabel(f"{name}: {default / 100 if name == 'Gamma' else default}")
-            label.setStyleSheet(scale_style)
-
-            slider = QSlider(Qt.Horizontal)
-            slider.setMinimum(min_val)
-            slider.setMaximum(max_val)
-            slider.setValue(default)
-            slider.setTickInterval(max((max_val - min_val) // 10, 1))
-            slider.setTickPosition(QSlider.TicksBelow)
-            slider.setFixedHeight(15)
-            slider.valueChanged.connect(make_slider_callback(name, label))
-
-            limits = QHBoxLayout()
-            min_lbl = QLabel(str(min_val / 100 if name == 'Gamma' else min_val))
-            max_lbl = QLabel(str(max_val / 100 if name == 'Gamma' else max_val))
-            min_lbl.setStyleSheet("font-size: 70%;")
-            max_lbl.setStyleSheet("font-size: 70%;")
-
-            limits.addWidget(min_lbl)
-            limits.addStretch()
-            limits.addWidget(max_lbl)
-
-            row.addWidget(label)
-            row.addLayout(limits)
-            row.addWidget(slider)
-            layout.addLayout(row)
-
-            key = name.lower().replace(" ", "_")
-            self._flir_controls[key] = {"label": label, "slider": slider}
-
-        # Config buttons
-        button_row = QHBoxLayout()
-        self.flir_config_btn = QPushButton("Config")
-        self.flir_config_btn.setStyleSheet("font-size: 75%; padding: 2px;")
-        self.flir_config_btn.clicked.connect(self.on_flir_config_clicked)
-
-        self.flir_load_config_btn = QPushButton("Load Config")
-        self.flir_load_config_btn.setStyleSheet("font-size: 75%; padding: 2px;")
-        self.flir_load_config_btn.clicked.connect(self.on_flir_load_config_clicked)
-
-        button_row.addWidget(self.flir_config_btn)
-        button_row.addWidget(self.flir_load_config_btn)
-        layout.addLayout(button_row)
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self.on_flir_config_clicked)
+        layout.addWidget(settings_btn)
 
         return group
 
-    def update_flir_slider_limits(self):
-        cam = self.flir_worker.cam
-        try:
-            exp_min, exp_max = map(int, cam.min_max_exposure_time())
-            gain_min, gain_max = map(int, cam.min_max_gain())
-            gamma_min, gamma_max = cam.min_max_gamma()
-            gamma_min = int(gamma_min * 100)
-            gamma_max = int(gamma_max * 100)
-
-            self._flir_controls["exposure_time_(µs)"]["slider"].setMinimum(exp_min)
-            self._flir_controls["exposure_time_(µs)"]["slider"].setMaximum(exp_max)
-
-            self._flir_controls["gain"]["slider"].setMinimum(int(gain_min))
-            self._flir_controls["gain"]["slider"].setMaximum(int(gain_max))
-
-            self._flir_controls["gamma"]["slider"].setMinimum(gamma_min)
-            self._flir_controls["gamma"]["slider"].setMaximum(gamma_max)
-        except Exception as e:
-            print(f"[FLIR GUI] Failed to update slider limits: {e}")
 
     # LED------------------------------------
     def create_leds_group(self):
-
         group = QGroupBox("LEDs")
         layout = QVBoxLayout()
 
-        self._led_controls = {}
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self.on_led_settings_clicked)
 
-        led_names = [
-            'white_below',
-            'blue_385_below',
-            'red_625_below',
-            'white_top'
-        ]
-
-        for name in led_names:
-            row = QHBoxLayout()
-
-            label = QLabel(name.replace('_', ' ').title())
-            label.setFixedWidth(120)
-
-            # Switch
-            switch = PyQtSwitch()
-            switch.checked = False
-            switch.toggled.connect(lambda checked, n=name: print(f"[LED] {n} turned {'ON' if checked else 'OFF'}"))
-
-            # Slider
-            slider = QSlider(Qt.Horizontal)
-            slider.setMinimum(0)
-            slider.setMaximum(100)
-            slider.setValue(100)
-            slider.setTickInterval(10)
-            slider.setTickPosition(QSlider.TicksBelow)
-            slider.valueChanged.connect(lambda value, n=name: print(f"[LED] {n} intensity set to {value}%"))
-
-            row.addWidget(label)
-            row.addWidget(switch)
-            row.addWidget(slider)
-            layout.addLayout(row)
-
-            self._led_controls[name] = {'switch': switch, 'slider': slider}
-
+        layout.addWidget(settings_btn)
         group.setLayout(layout)
         return group
 
     # Frames
-
-
     def create_andor_display_group(self):
         group = QGroupBox("Andor Frame and Fitting")
 
@@ -594,6 +502,9 @@ class BrillouinViewerMicroscope(QWidget):
 
 
     # ---------------- Signal Handles ---------------- #
+    def update_flir_camera_settings(self, flir_config: FLIRConfig):
+        self.request_flir_update_settings.emit(flir_config)
+
     def update_bg_subtraction(self, enabled: bool):
         if enabled:
             self.bg_label_on.setText("● With BG Subtraction")
@@ -637,13 +548,10 @@ class BrillouinViewerMicroscope(QWidget):
         self.cancel_requested.emit()
 
     def on_flir_config_clicked(self):
-        from brillouin_system.config.flir_config.flir_config_dialog import FLIRConfigDialog
-        dialog = FLIRConfigDialog(self)
+        dialog = FLIRConfigDialog(flir_update_config=self.update_flir_camera_settings, parent=self)
         dialog.exec_()
 
-    def on_flir_load_config_clicked(self):
-        print("[Brillouin Viewer] Load FLIR Config clicked.")
-        # TODO: Implement actual load logic
+
 
     # ---------------- Toggle ---------------- #
     def toggle_background_subtraction(self):
@@ -653,13 +561,11 @@ class BrillouinViewerMicroscope(QWidget):
         self.toggle_illumination_requested.emit()
 
     def on_andor_configs_clicked(self):
-        dialog = AndorConfigDialog(self)
-        if dialog.exec_():
-            settings = dialog.get_settings()
-            print("[Brillouin Viewer] Received Configs:", settings)
+        dialog = AndorConfigDialog(andor_update_config=self.update_andor_config_settings, parent=self)
+        dialog.exec_()
 
-    def on_andor_load_config_clicked(self):
-        self.reload_andor_config_requested.emit()
+    def update_andor_config_settings(self, andor_config: AndorConfig):
+        self.update_andor_config_requested.emit(andor_config)
 
     def on_reference_configs_clicked(self):
         dialog = CalibrationConfigDialog(self)
@@ -670,6 +576,16 @@ class BrillouinViewerMicroscope(QWidget):
         dialog.exec_()
 
     # ---------------- GUI Update Loop ---------------- #
+    def on_stop_clicked(self):
+        print("[Brillouin Viewer] STOP clicked.")
+        self.close_all_shutters_requested.emit()
+        self.stop_live_requested.emit()
+
+    def on_restart_clicked(self):
+        print("[Brillouin Viewer] Restart clicked.")
+        self.stop_live_requested.emit()
+        QApplication.processEvents()
+        self.start_live_requested.emit()
 
     def update_background_ui(self):
         self.brillouin_signaller.emit_do_background_subtraction()
@@ -733,8 +649,10 @@ class BrillouinViewerMicroscope(QWidget):
 
     # ---------------- Handlers ---------------- #
 
+
+
     def update_camera_shutter_button(self, is_open: bool):
-        text = "Close" if is_open else "Open"
+        text = "Close Shutter" if is_open else "Open Shutter"
         self.toggle_camera_shutter_btn.setText(text)
 
     def populate_camera_ui(self, settings: dict):
@@ -781,6 +699,18 @@ class BrillouinViewerMicroscope(QWidget):
         self.ref_freq_input.setText(f"{freq:.3f}")
 
     # -------------- Functions --------------
+
+
+    # -------------- Zaber Microscope -------
+    def on_led_settings_clicked(self):
+        dialog = LEDConfigDialog(update_led_config=self.update_led_settings, parent=self)
+        dialog.exec_()
+
+    def update_led_settings(self, led_config: LEDConfig):
+        self.request_led_update_settings.emit(led_config)
+
+
+
 
     def update_main_display(self, pixmap: QPixmap):
         self.allied_camera_display.setPixmap(pixmap)

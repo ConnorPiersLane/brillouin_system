@@ -7,6 +7,9 @@ import time
 from PyQt5.QtWidgets import QApplication
 
 from brillouin_system.config.config import calibration_config
+from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
+from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
+from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
@@ -48,7 +51,7 @@ class BrillouinSignaller(QObject):
 
     def __init__(self, manager: BrillouinBackend):
         super().__init__()
-        self.manager = manager
+        self.backend = manager
         self._running = False
         self._thread_active = False
         self._gui_ready = True
@@ -62,16 +65,16 @@ class BrillouinSignaller(QObject):
 
     @contextmanager
     def force_reference_mode(self):
-        was_sample_mode = not self.manager.is_reference_mode
+        was_sample_mode = not self.backend.is_reference_mode
         if was_sample_mode:
-            self.manager.change_to_reference_mode()
+            self.backend.change_to_reference_mode()
             self.reference_mode_state.emit(True)
             time.sleep(0.2)
         try:
             yield
         finally:
             if was_sample_mode:
-                self.manager.change_to_sample_mode()
+                self.backend.change_to_sample_mode()
                 self.reference_mode_state.emit(False)
 
     @pyqtSlot()
@@ -87,80 +90,81 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def emit_do_background_subtraction(self):
-        self.background_subtraction_state.emit(self.manager.do_background_subtraction)
+        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
 
     @pyqtSlot()
     def emit_is_background_available(self):
-        self.background_available_state.emit(self.manager.is_background_image_available())
+        self.background_available_state.emit(self.backend.is_background_image_available())
 
     @pyqtSlot()
     def emit_is_illumination_continuous(self):
-        self.illumination_mode_state.emit(self.manager.is_sample_illumination_continuous)
+        self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
+
 
     # Toggle
     @pyqtSlot()
     def toggle_background_subtraction(self):
-        if self.manager.do_background_subtraction:
-            self.manager.stop_background_subtraction()
+        if self.backend.do_background_subtraction:
+            self.backend.stop_background_subtraction()
             self.log_message.emit("Background subtraction disabled")
-        elif self.manager.is_background_image_available():
-            self.manager.start_background_subtraction()
+        elif self.backend.is_background_image_available():
+            self.backend.start_background_subtraction()
             self.log_message.emit("Background subtraction enabled")
         else:
             self.log_message.emit("Cannot enable background subtraction: no background image available")
             return
 
         # Emit updated state to viewer
-        self.background_subtraction_state.emit(self.manager.do_background_subtraction)
-        self.background_available_state.emit(self.manager.is_background_image_available())
+        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
+        self.background_available_state.emit(self.backend.is_background_image_available())
 
 
     @pyqtSlot()
     def emit_background_data(self):
         data = BackgroundImage(
-            dark_image=self.manager.dark_image,
-            bg_image=self.manager.bg_image,
+            dark_image=self.backend.dark_image,
+            bg_image=self.backend.bg_image,
         )
         self.background_data_ready.emit(data)
 
     @pyqtSlot()
     def toggle_do_live_fitting(self):
-        self.manager.do_live_fitting = not self.manager.do_live_fitting
-        self.log_message.emit(f"Do Live Fitting toggled to: {self.manager.do_live_fitting}")
-        self.do_live_fitting_state.emit(self.manager.do_live_fitting)
+        self.backend.do_live_fitting = not self.backend.do_live_fitting
+        self.log_message.emit(f"Do Live Fitting toggled to: {self.backend.do_live_fitting}")
+        self.do_live_fitting_state.emit(self.backend.do_live_fitting)
 
     @pyqtSlot()
     def emit_do_live_fitting_state(self):
-        self.do_live_fitting_state.emit(self.manager.do_live_fitting)
+        self.do_live_fitting_state.emit(self.backend.do_live_fitting)
 
     @pyqtSlot()
     def toggle_illumination_mode(self):
-        if self.manager.is_sample_illumination_continuous:
-            self.manager.change_illumination_mode_to_pulsed()
+        if self.backend.is_sample_illumination_continuous:
+            self.backend.change_illumination_mode_to_pulsed()
             self.stop_live_view()
             self.log_message.emit("Switched to pulsed illumination")
         else:
-            self.manager.change_illumination_mode_to_continuous()
+            self.backend.change_illumination_mode_to_continuous()
             self.start_live_view()
             self.log_message.emit("Switched to continuous illumination")
 
-        self.illumination_mode_state.emit(self.manager.is_sample_illumination_continuous)
+        self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
 
     @pyqtSlot()
     def toggle_reference_mode(self):
-        if self.manager.is_reference_mode:
-            self.manager.change_to_sample_mode()
+        if self.backend.is_reference_mode:
+            self.backend.change_to_sample_mode()
         else:
-            self.manager.change_to_reference_mode()
+            self.backend.change_to_reference_mode()
         self.emit_camera_settings()
-        self.reference_mode_state.emit(self.manager.is_reference_mode)
+        self.reference_mode_state.emit(self.backend.is_reference_mode)
         # Emit updated state to viewer
-        self.background_subtraction_state.emit(self.manager.do_background_subtraction)
-        self.background_available_state.emit(self.manager.is_background_image_available())
+        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
+        self.background_available_state.emit(self.backend.is_background_image_available())
 
     @pyqtSlot()
     def emit_camera_settings(self):
-        cam = self.manager.andor_camera
+        cam = self.backend.andor_camera
         settings = {
             "exposure": round(cam.get_exposure_time(),ndigits=4),
             "gain": cam.get_emccd_gain(),
@@ -170,7 +174,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot(dict)
     def apply_camera_settings(self, settings: dict):
         try:
-            self.manager.set_camera_settings(
+            self.backend.set_camera_settings(
                 exposure_time=settings["exposure"],
                 emccd_gain=settings["gain"],
             )
@@ -179,22 +183,22 @@ class BrillouinSignaller(QObject):
             self.log_message.emit(f"Failed to apply camera settings: {e}")
 
         # Remove Background if sample mode
-        if not self.manager.is_reference_mode:
+        if not self.backend.is_reference_mode:
             # Reset background
-            self.manager.stop_background_subtraction()
-            self.manager.bg_image = None
+            self.backend.stop_background_subtraction()
+            self.backend.bg_image = None
             self.background_subtraction_state.emit(False)
             self.background_available_state.emit(False)
 
 
-    @pyqtSlot()
-    def reload_andor_config(self):
-        self.manager.reload_andor_config()
+    @pyqtSlot(object)
+    def update_andor_config_settings(self, andor_config: AndorConfig):
+        self.backend.update_andor_config_settings(andor_config)
 
     @pyqtSlot()
     def toggle_camera_shutter(self):
         try:
-            cam = self.manager.andor_camera
+            cam = self.backend.andor_camera
 
             if self._camera_shutter_open:
                 cam.close_shutter()
@@ -213,7 +217,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot(str)
     def query_zaber_position(self, axis: str):
         try:
-            pos = self.manager.zaber.get_position(axis)
+            pos = self.backend.zaber.get_position(axis)
             self.zaber_position_updated.emit(pos)
         except Exception as e:
             self.log_message.emit(f"Failed to get Zaber position for axis '{axis}': {e}")
@@ -221,8 +225,8 @@ class BrillouinSignaller(QObject):
     @pyqtSlot(str, float)
     def move_zaber_relative(self, which_axis: str, step: float):
         try:
-            self.manager.zaber.move_rel(which_axis, step)
-            pos = self.manager.zaber.get_position(which_axis)
+            self.backend.zaber.move_rel(which_axis, step)
+            pos = self.backend.zaber.get_position(which_axis)
             self.log_message.emit(f"Zaber {which_axis}-Axis moved by {step} µm to {pos:.2f} µm")
             self.zaber_position_updated.emit(pos)
         except Exception as e:
@@ -231,8 +235,8 @@ class BrillouinSignaller(QObject):
     @pyqtSlot(float)
     def set_microwave_frequency(self, freq: float):
         try:
-            self.manager.microwave.set_frequency(freq)
-            freq_real = self.manager.microwave.get_frequency()
+            self.backend.microwave.set_frequency(freq)
+            freq_real = self.backend.microwave.get_frequency()
             self.log_message.emit(f"Microwave frequency set to {freq_real:.3f} GHz")
             self.microwave_frequency_updated.emit(freq)
         except Exception as e:
@@ -242,7 +246,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def emit_microwave_frequency(self):
         try:
-            freq = self.manager.microwave.get_frequency()
+            freq = self.backend.microwave.get_frequency()
             self.microwave_frequency_updated.emit(freq)
         except Exception as e:
             self.log_message.emit(f"Failed to read microwave frequency: {e}")
@@ -254,8 +258,8 @@ class BrillouinSignaller(QObject):
         self._running = False
 
         try:
-            self.manager.take_bg_and_darknoise_images()
-            self.background_available_state.emit(self.manager.is_background_image_available())
+            self.backend.take_bg_and_darknoise_images()
+            self.background_available_state.emit(self.backend.is_background_image_available())
             self.log_message.emit("Background image acquired.")
         except Exception as e:
             self.log_message.emit(f"Failed to acquire background image: {e}")
@@ -272,16 +276,16 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def snap_and_fit(self):
         try:
-            frame = self.manager.get_andor_frame()
-            fitting: FittedSpectrum = self.manager.get_fitted_spectrum(frame)
-            display = self.manager.get_display_results(frame, fitting)
+            frame = self.backend.get_andor_frame()
+            fitting: FittedSpectrum = self.backend.get_fitted_spectrum(frame)
+            display = self.backend.get_display_results(frame, fitting)
             self.frame_and_fit_ready.emit(display)
         except Exception as e:
             self.log_message.emit(f"Error snapping frame: {e}")
 
     @pyqtSlot()
     def start_live_view(self):
-        if not self.manager.is_sample_illumination_continuous:
+        if not self.backend.is_sample_illumination_continuous:
             self.log_message.emit("Live view not started: illumination mode is pulsed.")
             return
 
@@ -317,8 +321,8 @@ class BrillouinSignaller(QObject):
         self.frame_and_fit_ready.emit(display_results)
 
     def _fitting_and_update_gui(self, frame: np.ndarray):
-        fitting = self.manager.get_fitted_spectrum(frame)
-        display_results = self.manager.get_display_results(frame, fitting)
+        fitting = self.backend.get_fitted_spectrum(frame)
+        display_results = self.backend.get_display_results(frame, fitting)
         self._update_gui(display_results)
 
     @pyqtSlot()
@@ -332,8 +336,8 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def get_calibration_results(self):
-        self.manager.update_calibration_calculator() # this recalculates the calibration
-        self.calibration_result_ready.emit((self.manager.calibration_data, self.manager.calibration_calculator))
+        self.backend.update_calibration_calculator() # this recalculates the calibration
+        self.calibration_result_ready.emit((self.backend.calibration_data, self.backend.calibration_calculator))
 
     def emit_display_result(self, display: DisplayResults):
         self.frame_and_fit_ready.emit(display)
@@ -344,7 +348,7 @@ class BrillouinSignaller(QObject):
 
         try:
             with self.force_reference_mode():
-                success = self.manager.perform_calibration(config, call_update_gui=self.emit_display_result)
+                success = self.backend.perform_calibration(config, call_update_gui=self.emit_display_result)
 
             if success:
                 self.calibration_finished.emit()
@@ -366,7 +370,7 @@ class BrillouinSignaller(QObject):
 
             # Extract axis and movement parameters
             which_axis = measurement_settings.move_axes
-            start = self.manager.zaber.get_position(which_axis)
+            start = self.backend.zaber.get_position(which_axis)
             step = measurement_settings.move_x_rel_um
             n = measurement_settings.n_measurements
             fixed_positions = {}
@@ -393,7 +397,7 @@ class BrillouinSignaller(QObject):
                         f"Zaber (x,y,z) = ({zaber_pos.x:.2f},{zaber_pos.y:.2f},{zaber_pos.z:.2f}) µm"
                     )
                     # Take single measurement
-                    mp = self.manager.take_one_measurement(zaber_position=zaber_pos)
+                    mp = self.backend.take_one_measurement(zaber_position=zaber_pos)
                     self._fitting_and_update_gui(frame=mp.frame)
                     measurements.append(mp)
 
@@ -402,8 +406,8 @@ class BrillouinSignaller(QObject):
 
             series = MeasurementSeries(
                 measurements=measurements,
-                state_mode=self.manager.get_current_state_mode(),
-                calibration_data=self.manager.calibration_data,
+                state_mode=self.backend.get_current_state_mode(),
+                calibration_data=self.backend.calibration_data,
                 settings=measurement_settings,
             )
 
@@ -417,12 +421,19 @@ class BrillouinSignaller(QObject):
 
 
     # Flir Camera
+    @pyqtSlot(object)
+    def flir_update_settings(self, flir_config: FLIRConfig):
+        self.backend.update_flir_settings(flir_config)
+
+
+    # Zaber Microscope
+    @pyqtSlot(object)
+    def update_microscope_leds(self, led_config: LEDConfig):
+        self.backend.update_microscope_led_settings(led_config)
+
     @pyqtSlot()
-    def update_flir_exposure_gain_gamma(self, exposure_time, gain, gamma):
-        pass
-
-
-
+    def close_all_shutters(self):
+        self.backend.shutter_manager.close_all()
 
     @pyqtSlot()
     def close(self):
@@ -433,33 +444,10 @@ class BrillouinSignaller(QObject):
             if self._thread_active:
                 QTimer.singleShot(100, _wait_for_thread_and_shutdown)
             else:
-                _shutdown_devices()
-
-        def _shutdown_devices():
-            try:
-                self.manager.andor_camera.close()
-                print("Camera closed.")
-            except Exception as e:
-                print(f"Error closing camera: {e}")
-
-            try:
-                self.manager.shutter_manager.close_all()
-                print("Shutter manager closed.")
-            except Exception as e:
-                print(f"Error closing shutter manager: {e}")
-
-            try:
-                self.manager.microwave.shutdown()
-                print("Microwave closed.")
-            except Exception as e:
-                print(f"Error closing microwave: {e}")
-
-            try:
-                self.manager.zaber.close()
-                print("Zaber closed.")
-            except Exception as e:
-                print(f"Error closing zaber: {e}")
-
-            print("BrillouinWorker shutdown complete.")
+                try:
+                    self.backend.close()
+                except Exception as e:
+                    print(f"Error during backend shutdown: {e}")
 
         _wait_for_thread_and_shutdown()
+

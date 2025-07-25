@@ -1,8 +1,12 @@
+from dataclasses import dataclass
+
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection, Axis
 from zaber_motion.microscopy import Illuminator, FilterChanger, IlluminatorChannel
 
+from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
+
 
 
 class ZaberMicroscope:
@@ -147,6 +151,33 @@ Chroma ZT775sp-2p-UF3
         """Return list of available axes as string labels: ['x', 'y']"""
         return [label for label, axis in self._axis_map.items() if axis is not None]
 
+    def set_led_illumination(self, led_config: LEDConfig):
+        self.led_white_below.set_intensity(led_config.intensity_led_white_below / 100.0)
+        self.led_blue_385_below.set_intensity(led_config.intensity_led_blue_385_below / 100.0)
+        self.led_red_625_below.set_intensity(led_config.intensity_led_red_625_below / 100.0)
+        self.led_white_top.set_intensity(led_config.intensity_led_white_top / 100.0)
+
+        if led_config.is_led_white_below:
+            self.led_white_below.on()
+        else:
+            self.led_white_below.off()
+
+        if led_config.is_led_blue_385_below:
+            self.led_blue_385_below.on()
+        else:
+            self.led_blue_385_below.off()
+
+        if led_config.is_led_red_625_below:
+            self.led_red_625_below.on()
+        else:
+            self.led_red_625_below.off()
+
+        if led_config.is_led_white_top:
+            self.led_white_top.on()
+        else:
+            self.led_white_top.off()
+
+
     def close(self):
         self._connection.close()
 
@@ -159,8 +190,6 @@ Chroma ZT775sp-2p-UF3
         self.led_white_top.off()
         self._connection.close()
         print("[Microscope] Shutdown complete.")
-
-from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
 
 
 class DummyZaberMicroscope:
@@ -214,6 +243,20 @@ class DummyZaberMicroscope:
     def get_available_axes(self) -> list[str]:
         print("[Dummy] Reporting available axes: ['x', 'y', 'z']")
         return ['x', 'y', 'z']
+
+    def set_led_illumination(self, led_config: LEDConfig):
+        def handle_led(label, is_on, intensity_percent):
+            intensity = intensity_percent / 100.0
+            self._led_states[label] = is_on
+            if is_on:
+                print(f"[Dummy] LED '{label}' ON — Intensity: {intensity:.2f}")
+            else:
+                print(f"[Dummy] LED '{label}' OFF")
+
+        handle_led("white_below", led_config.is_led_white_below, led_config.intensity_led_white_below)
+        handle_led("blue_385_below", led_config.is_led_blue_385_below, led_config.intensity_led_blue_385_below)
+        handle_led("red_625_below", led_config.is_led_red_625_below, led_config.intensity_led_red_625_below)
+        handle_led("white_top", led_config.is_led_white_top, led_config.intensity_led_white_top)
 
     def close(self):
         print("[Dummy] Closing dummy connection")

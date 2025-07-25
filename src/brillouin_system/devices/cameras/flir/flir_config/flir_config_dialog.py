@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QIntValidator
 
-from brillouin_system.config.flir_config.flir_config import (
+from brillouin_system.devices.cameras.flir.flir_config.flir_config import (
     _min_gain, _max_gain,
     _min_exposure_time, _max_exposure_time,
     _min_gamma, _max_gamma,
@@ -38,7 +38,7 @@ class FLIRConfigDialog(QDialog):
         self.inputs["width"] = QLineEdit()
         self.inputs["height"] = QLineEdit()
         self.inputs["pixel_format"] = QComboBox()
-        self.inputs["pixel_format"].addItems(["Mono8", "Mono16", "RGB8"])  # Example formats
+        self.inputs["pixel_format"].addItems(['Mono8', 'Mono16', 'Mono10Packed', 'Mono12Packed', 'Mono10p', 'Mono12p'])
 
         for key in ["offset_x", "offset_y", "width", "height"]:
             self.inputs[key].setValidator(QIntValidator(0, 9999))
@@ -51,9 +51,12 @@ class FLIRConfigDialog(QDialog):
 
         # ---- Slider Controls ----
         self.slider_layout = QVBoxLayout()
-        self.add_camera_slider("Exposure Time (µs)", "exposure_time", int(_min_exposure_time), int(_max_exposure_time), 20000)
-        self.add_camera_slider("Gain", "gain", int(_min_gain), int(_max_gain), 0)
-        self.add_camera_slider("Gamma", "gamma", int(_min_gamma * 100), int(_max_gamma * 100), 100, scale=100)
+        cfg = flir_config.get_raw()
+        self.add_camera_slider("Exposure Time (µs)", "exposure_time", int(_min_exposure_time), int(_max_exposure_time),
+                               int(cfg.exposure))
+        self.add_camera_slider("Gain", "gain", int(_min_gain), int(_max_gain), int(cfg.gain))
+        self.add_camera_slider("Gamma", "gamma", int(_min_gamma * 100), int(_max_gamma * 100), int(cfg.gamma * 100),
+                               scale=100)
 
         # ---- Buttons ----
         button_row = QHBoxLayout()
@@ -151,7 +154,7 @@ class FLIRConfigDialog(QDialog):
                 gamma=gamma,
             )
 
-            self.flir_update_config.emit(flir_config.get())
+            self.flir_update_config(flir_config.get())
             print("[FLIR Config] Settings applied.")
 
         except Exception as e:
@@ -184,20 +187,14 @@ class FLIRConfigDialog(QDialog):
 if __name__ == "__main__":
     import sys
     from PyQt5.QtWidgets import QApplication
-    from PyQt5.QtCore import pyqtSignal, QObject
 
-    class DummySignals(QObject):
-        flir_update_config = pyqtSignal(object)
+    def flir_update_config(cfg):
+        print(f"[Function Call] Config updated: {cfg}")
 
     app = QApplication(sys.argv)
-    signals = DummySignals()
-
-    # Connect test signals to print
-    signals.flir_update_config.connect(
-        lambda cfg: print(f"[Signal] Config updated: {cfg}")
-    )
 
     dialog = FLIRConfigDialog(
-        flir_update_config=signals.flir_update_config
+        flir_update_config=flir_update_config
     )
     dialog.exec_()
+
