@@ -3,6 +3,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
+from .andor_dataclasses import AndorExposure, AndorCameraInfo
 from .baseCamera import BaseCamera
 
 class DummyCamera(BaseCamera):
@@ -21,6 +22,26 @@ class DummyCamera(BaseCamera):
 
         if self.verbose:
             print("[DummyCamera] initialized")
+
+    def get_camera_info(self):
+        model = "Simulated - DummyCamera"
+        return {
+            "model": model,
+            "serial": "DUMMY001",
+            "roi": self.get_roi(),
+            "binning": self.get_binning(),
+            "gain": self.get_emccd_gain(),
+            "exposure": self.get_exposure_time(),
+            "amp_mode": self.get_amp_mode(),
+            "preamp_gain": self.get_preamp_gain(),
+            "temperature": "off",
+            "flip_image_horizontally": self.get_flip_image_horizontally(),
+            "advanced_gain_option": False,
+            "vss_speed": self.get_vss_index()
+        }
+
+    def get_camera_info_dataclass(self) -> AndorCameraInfo:
+        return AndorCameraInfo(**self.get_camera_info())
 
     def get_name(self) -> str:
         return "DummyCamera"
@@ -160,3 +181,13 @@ class DummyCamera(BaseCamera):
 
         if self.verbose:
             print("[IxonUltra] Configuration applied.")
+
+    def get_exposure_dataclass(self) -> AndorExposure:
+        return AndorExposure(
+            exposure_time_s=self.get_exposure_time(),
+            emccd_gain=self.get_emccd_gain()
+        )
+
+    def set_from_exposure_dataclass(self, andor_exposure: AndorExposure) -> None:
+        self.set_exposure_time(andor_exposure.exposure_time_s)
+        self.set_emccd_gain(andor_exposure.emccd_gain)

@@ -2,7 +2,18 @@
 from abc import ABC, abstractmethod
 import numpy as np
 
+from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure, AndorCameraInfo
+
+
 class BaseCamera(ABC):
+
+    @abstractmethod
+    def get_camera_info(self) -> dict:
+        pass
+
+    @abstractmethod
+    def get_camera_info_dataclass(self) -> AndorCameraInfo:
+        pass
 
     @abstractmethod
     def get_name(self) -> str:
@@ -107,4 +118,12 @@ class BaseCamera(ABC):
 
     @abstractmethod
     def set_from_config_file(self, config) -> None:
+        pass
+
+    @abstractmethod
+    def get_exposure_dataclass(self) -> AndorExposure:
+        pass
+
+    @abstractmethod
+    def set_from_exposure_dataclass(self, andor_exposure: AndorExposure) -> None:
         pass

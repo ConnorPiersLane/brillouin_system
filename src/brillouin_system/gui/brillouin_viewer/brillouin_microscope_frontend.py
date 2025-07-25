@@ -26,7 +26,7 @@ from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDC
 from brillouin_system.devices.zaber_microscope.led_config.led_config_dialog import LEDConfigDialog
 from brillouin_system.devices.zaber_microscope.zaber_microscope import DummyZaberMicroscope
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
-from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
+from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller, SystemState
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
@@ -170,9 +170,7 @@ class BrillouinViewerMicroscope(QWidget):
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
         self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
-
-
-
+        self.brillouin_signaller.b2f_system_state_changed.connect(self.update_system_state_label)
 
         # Connect signals BEFORE starting the thread
         self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
@@ -247,11 +245,19 @@ class BrillouinViewerMicroscope(QWidget):
         stop_btn = QPushButton("STOP")
         stop_btn.clicked.connect(self.on_stop_clicked)
 
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.on_cancel_event_clicked)
+
         restart_btn = QPushButton("Restart")
         restart_btn.clicked.connect(self.on_restart_clicked)
 
+        self.state_label = QLabel("● IDLE")
+        self.state_label.setStyleSheet("color: gray; font-weight: bold")
+
         layout.addWidget(stop_btn)
+        layout.addWidget(cancel_btn)
         layout.addWidget(restart_btn)
+        layout.addWidget(self.state_label)
         group.setLayout(layout)
 
         return group
@@ -502,6 +508,17 @@ class BrillouinViewerMicroscope(QWidget):
 
 
     # ---------------- Signal Handles ---------------- #
+    def update_system_state_label(self, state: SystemState):
+        if state == SystemState.IDLE:
+            self.state_label.setText("● IDLE")
+            self.state_label.setStyleSheet("color: gray; font-weight: bold")
+        elif state == SystemState.BUSY:
+            self.state_label.setText("● BUSY")
+            self.state_label.setStyleSheet("color: orange; font-weight: bold")
+        elif state == SystemState.FREERUNNING:
+            self.state_label.setText("● LIVE")
+            self.state_label.setStyleSheet("color: green; font-weight: bold")
+
     def update_flir_camera_settings(self, flir_config: FLIRConfig):
         self.request_flir_update_settings.emit(flir_config)
 
@@ -543,9 +560,6 @@ class BrillouinViewerMicroscope(QWidget):
             self.illum_label_pulse.setStyleSheet("color: green; font-weight: bold")
             self.snap_once_btn.setEnabled(True)
 
-    def on_cancel_event_clicked(self):
-        print("[BrillouinViewer] Cancel button clicked.")
-        self.cancel_requested.emit()
 
     def on_flir_config_clicked(self):
         dialog = FLIRConfigDialog(flir_update_config=self.update_flir_camera_settings, parent=self)
@@ -580,6 +594,10 @@ class BrillouinViewerMicroscope(QWidget):
         print("[Brillouin Viewer] STOP clicked.")
         self.close_all_shutters_requested.emit()
         self.stop_live_requested.emit()
+
+    def on_cancel_event_clicked(self):
+        print("[BrillouinViewer] Cancel button clicked.")
+        self.cancel_requested.emit()
 
     def on_restart_clicked(self):
         print("[Brillouin Viewer] Restart clicked.")

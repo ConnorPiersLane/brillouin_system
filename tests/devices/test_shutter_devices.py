@@ -8,9 +8,9 @@ from brillouinDAQ.devices.shutter_device import (
 def test_individual_shutter_real():
     print("Testing individual real shutter initialization...")
     s = Shutter(384)
-    s.set_state(True)
+    s.send_system_state_to_frontend(True)
     assert s.get_state() is True, "Failed to open shutter"
-    s.set_state(False)
+    s.send_system_state_to_frontend(False)
     assert s.get_state() is False, "Failed to close shutter"
     s.shutdown()
 

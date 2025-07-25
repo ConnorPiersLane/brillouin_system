@@ -2,8 +2,6 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-import threading
-from copy import deepcopy
 
 from brillouin_system.config.config import ThreadSafeConfig
 

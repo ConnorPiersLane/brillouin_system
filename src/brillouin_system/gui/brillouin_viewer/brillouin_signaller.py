@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from enum import Enum
 
 import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
@@ -10,12 +11,14 @@ from brillouin_system.config.config import calibration_config
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
-from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
+from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend, SystemState
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSettings, MeasurementSeries
 from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
+
+
 
 
 class BrillouinSignaller(QObject):
@@ -46,7 +49,8 @@ class BrillouinSignaller(QObject):
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
 
-    # Flir Camera Signals, from Backend to Frontend
+    # Signals to Frontend
+    b2f_system_state_changed = pyqtSignal(SystemState)
 
 
     def __init__(self, manager: BrillouinBackend):
@@ -58,24 +62,22 @@ class BrillouinSignaller(QObject):
         self._camera_shutter_open = True
         self._is_cancel_operations = False
 
+        self.backend.init_b2f_signals(send_state_signal=self.send_system_state_to_frontend)
+        self.backend.init_f2b_signals(cancel_callback=self.is_cancel_requested)
+
 
 
     # ------- State control -------
     # SLOTS
+    # in BrillouinSignaller
+    #  cancel callback to pass down to the backend
+    def is_cancel_requested(self) -> bool:
+        return self._is_cancel_operations
 
-    @contextmanager
-    def force_reference_mode(self):
-        was_sample_mode = not self.backend.is_reference_mode
-        if was_sample_mode:
-            self.backend.change_to_reference_mode()
-            self.reference_mode_state.emit(True)
-            time.sleep(0.2)
-        try:
-            yield
-        finally:
-            if was_sample_mode:
-                self.backend.change_to_sample_mode()
-                self.reference_mode_state.emit(False)
+
+    def send_system_state_to_frontend(self, new_state: SystemState):
+        self.b2f_system_state_changed.emit(new_state)
+
 
     @pyqtSlot()
     def on_gui_ready(self):
@@ -344,19 +346,13 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def run_calibration(self):
-        config = calibration_config.get()
-
-        try:
-            with self.force_reference_mode():
-                success = self.backend.perform_calibration(config, call_update_gui=self.emit_display_result)
-
-            if success:
-                self.calibration_finished.emit()
-            else:
-                self.log_message.emit("[Calibration] Calibration failed.")
-
-        except Exception as e:
-            self.log_message.emit(f"[Calibration] Exception: {e}")
+        self.backend.perform_calibration(
+            call_update_gui=self.emit_display_result,
+            cancel_callback=self.is_cancel_requested,
+            send_state_signal=self.send_system_state_to_frontend,
+            emit_calibration_finished=self.calibration_finished.emit,
+            log=self.log_message.emit,
+        )
 
     @pyqtSlot(object)
     def take_measurements(self, measurement_settings: MeasurementSettings):

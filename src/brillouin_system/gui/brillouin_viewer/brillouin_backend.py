@@ -1,11 +1,14 @@
 import threading
 import time
+from contextlib import contextmanager
+from enum import Enum
 from typing import Callable
 
 import numpy as np
 
+from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import andor_frame_config, AndorConfig
-from brillouin_system.config.config import CalibrationConfig
+from brillouin_system.config.config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig, flir_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -25,7 +28,7 @@ from brillouin_system.my_dataclasses.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, get_calibration_calculator_from_data
 from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
 from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries, MeasurementSettings
-from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
+
 from brillouin_system.devices.zaber_linear import ZaberLinearController
 
 
@@ -36,6 +39,11 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
     img = np.clip(img, 0, np.percentile(img, 99))  # contrast stretch
     img = 255 * (img / img.max()) if img.max() > 0 else img
     return img.astype(np.uint8)
+
+class SystemState(Enum):
+    IDLE = 0
+    FREERUNNING = 1
+    BUSY = 2
 
 
 class BrillouinBackend:
@@ -54,6 +62,10 @@ class BrillouinBackend:
                  flir_cam_worker: None | FlirWorker = None,
                  is_sample_illumination_continuous: bool = False,
                  ):
+
+        # System state
+        self.system_state: SystemState = SystemState.IDLE
+
         # Devices
         self.andor_camera: BaseCamera | DummyCamera = camera
         self.andor_camera.set_from_config_file(andor_frame_config.get())
@@ -98,6 +110,10 @@ class BrillouinBackend:
         self.sample_state_mode: StateMode = self.init_state_mode(is_reference_mode=False)
 
 
+        # Init Signals (they are send down from the signaller)
+        self.b2f_send_state_signal = None
+        self.f2b_cancel_callback = None
+
     def init_shutters(self):
         if self.is_reference_mode:
             self.shutter_manager.change_to_reference()
@@ -130,8 +146,17 @@ class BrillouinBackend:
             is_do_bg_subtraction_active=False,
             bg_image=None,
             dark_image=None,
-            camera_settings=self.get_andor_camera_settings()
+            andor_exposure_settings=self.andor_camera.get_exposure_dataclass()
         )
+
+
+    def init_b2f_signals(self,
+                                      send_state_signal: Callable[[SystemState], None],
+                                      ):
+        self.b2f_send_state_signal = send_state_signal
+
+    def init_f2b_signals(self, cancel_callback: Callable[[], bool]):
+        self.f2b_cancel_callback = cancel_callback
 
     # ---------------- Change Modes ----------------
 
@@ -150,8 +175,8 @@ class BrillouinBackend:
         self.do_background_subtraction = state_mode.is_do_bg_subtraction_active
         self.bg_image = state_mode.bg_image
         self.set_camera_settings(
-            exposure_time=state_mode.camera_settings.exposure_time_s,
-            emccd_gain=state_mode.camera_settings.emccd_gain,
+            exposure_time=state_mode.andor_exposure_settings.exposure_time_s,
+            emccd_gain=state_mode.andor_exposure_settings.emccd_gain,
         )
 
     def get_current_state_mode(self) -> StateMode:
@@ -160,7 +185,7 @@ class BrillouinBackend:
             is_do_bg_subtraction_active=self.do_background_subtraction,
             bg_image=self.bg_image,
             dark_image=self.dark_image,
-            camera_settings=self.get_andor_camera_settings()
+            andor_exposure_settings=self.andor_camera.get_exposure_dataclass()
         )
 
     def change_to_reference_mode(self):
@@ -249,7 +274,12 @@ class BrillouinBackend:
             return None
 
         n_dark_images = andor_config.n_dark_images
-        print(f"[BrillouinBackend] Starting dark image acquisition, images to capture: {n_dark_images}")
+
+        # Info:
+        settings = self.andor_camera.get_exposure_dataclass()
+        print(
+            f"[BrillouinBackend] Acquired {n_dark_images} dark images | Exposure: "
+            f"{settings.exposure_time_s:.3f}s | EM Gain: {settings.emccd_gain}")
 
         self.andor_camera.close_shutter()
         time.sleep(0.1)
@@ -262,7 +292,7 @@ class BrillouinBackend:
         self.andor_camera.open_shutter()
         time.sleep(0.05)
 
-        print(f"[BrillouinBackend] {n_dark_images} dark images acquired with: {self.get_andor_camera_settings()}")
+        print(f"[BrillouinBackend] {n_dark_images} dark images acquired with: {self.andor_camera.get_exposure_dataclass()}")
 
         return generate_image_statistics_dataclass(n_images)
 
@@ -332,45 +362,6 @@ class BrillouinBackend:
             self.calibration_calculator = None
         else:
             self.calibration_calculator: CalibrationCalculator = get_calibration_calculator_from_data(self.calibration_data)
-
-
-
-    def perform_calibration(self, config: CalibrationConfig, call_update_gui: Callable[[DisplayResults], None]) -> bool:
-        """
-        Perform a calibration measurement series and store the results.
-
-        Args:
-            config: CalibrationConfig with frequencies and number of points
-            call_update_gui: Callback to update GUI after each measurement
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            measured_freqs = []
-            for freq in config.calibration_freqs:
-                self.microwave.set_frequency(freq)
-                freq_points = []
-                for _ in range(config.n_per_freq):
-                    frame = self.get_andor_frame()
-                    fs = self.get_fitted_spectrum(frame)
-                    calibration_point = CalibrationMeasurementPoint(
-                        frame=frame,
-                        microwave_freq=self.microwave.get_frequency(),  # measured freq from device
-                        fitting_results=fs,
-                    )
-                    call_update_gui(self.get_display_results(frame, fs))
-                    freq_points.append(calibration_point)
-                measured_freqs.append(MeasurementsPerFreq(set_freq_ghz=freq,
-                                                          state_mode=self.get_current_state_mode(),
-                                                          cali_meas_points=freq_points))
-
-            self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
-            self.update_calibration_calculator()
-            return True
-        except Exception as e:
-            print(f"[Manager] Calibration failed: {e}")
-            return False
 
 
     def take_one_measurement(self, zaber_position) -> MeasurementPoint:
@@ -500,27 +491,20 @@ class BrillouinBackend:
                             emccd_gain: int,
                             ):
 
-        self.andor_camera.set_exposure_time(exposure_time)
-        self.andor_camera.set_emccd_gain(emccd_gain)
+        andor_exposure = AndorExposure(exposure_time_s=exposure_time, emccd_gain=emccd_gain)
+
+        self.andor_camera.set_from_exposure_dataclass(andor_exposure)
 
         if self.is_reference_mode:
-            self.reference_state_mode.camera_settings = self.get_andor_camera_settings()
+            self.reference_state_mode.andor_exposure_settings = andor_exposure
         else:
-            self.sample_state_mode.camera_settings = self.get_andor_camera_settings()
+            self.sample_state_mode.andor_exposure_settings = andor_exposure
 
 
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.andor_camera.set_from_config_file(andor_config)
 
 
-    def get_andor_camera_settings(self) -> AndorCameraSettings:
-        return AndorCameraSettings(name=self.andor_camera.get_name(),
-                                   exposure_time_s=self.andor_camera.get_exposure_time(),
-                                   emccd_gain=self.andor_camera.get_emccd_gain(),
-                                   roi=self.andor_camera.get_roi(),
-                                   binning=self.andor_camera.get_binning(),
-                                   preamp_gain=self.andor_camera.get_preamp_gain(),
-                                   preamp_mode=f"{self.andor_camera.get_amp_mode()}")
 
     def update_flir_settings(self, flir_config: FLIRConfig):
         if self.flir_cam_worker is None:
@@ -528,6 +512,80 @@ class BrillouinBackend:
         else:
             self.flir_cam_worker.update_settings(flir_config)
 
+    @contextmanager
+    def force_reference_mode(self):
+        was_sample_mode = not self.is_reference_mode
+        if was_sample_mode:
+            self.change_to_reference_mode()
+        try:
+            yield
+        finally:
+            if was_sample_mode:
+                self.change_to_sample_mode()
+
+
+
+
+
+    def perform_calibration(
+            self,
+            call_update_gui: Callable[[DisplayResults], None],
+            cancel_callback: Callable[[], bool],
+            send_state_signal: Callable[[SystemState], None],
+            emit_calibration_finished: Callable[[], None],
+            log: Callable[[str], None],
+    ) -> None:
+
+        self.system_state = SystemState.BUSY
+
+        config: CalibrationConfig = calibration_config.get()
+
+        send_state_signal(SystemState.BUSY)
+        log("[Calibration] Starting calibration.")
+
+        try:
+            with self.force_reference_mode():
+                measured_freqs = []
+
+                for freq in config.calibration_freqs:
+                    if cancel_callback():
+                        log("[Calibration] Cancelled by user.")
+                        return
+
+                    self.microwave.set_frequency(freq)
+                    freq_points = []
+
+                    for _ in range(config.n_per_freq):
+                        if cancel_callback():
+                            log("[Calibration] Cancelled by user.")
+                            return
+
+                        frame = self.get_andor_frame()
+                        fs = self.get_fitted_spectrum(frame)
+
+                        cali_point = CalibrationMeasurementPoint(
+                            frame=frame,
+                            microwave_freq=self.microwave.get_frequency(),
+                            fitting_results=fs,
+                        )
+                        freq_points.append(cali_point)
+                        call_update_gui(self.get_display_results(frame, fs))
+
+                    measured_freqs.append(MeasurementsPerFreq(
+                        set_freq_ghz=freq,
+                        state_mode=self.get_current_state_mode(),
+                        cali_meas_points=freq_points
+                    ))
+
+                self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
+                self.update_calibration_calculator()
+                emit_calibration_finished()
+                log("[Calibration] Completed successfully.")
+
+        except Exception as e:
+            log(f"[Calibration] Exception: {e}")
+        finally:
+            send_state_signal(SystemState.IDLE)
 
 
     def close(self):

@@ -65,7 +65,7 @@ class AnalyzerManager:
     def displayed_series_info(self, series: MeasurementSeries, file_name: str = "Unknown") -> str:
         name = series.settings.name if series.settings else "Unnamed"
         power = series.settings.power_mW if series.settings else "?"
-        expo = series.state_mode.camera_settings.exposure_time_s if series.state_mode and series.state_mode.camera_settings else "?"
+        expo = series.state_mode.andor_exposure_settings.exposure_time_s if series.state_mode and series.state_mode.andor_exposure_settings else "?"
         n = series.settings.n_measurements if series.settings and hasattr(series.settings, "n_measurements") else "?"
         return f"File: {file_name} - Name: {name} - Expo: {round(expo, ndigits=3)}[s] - Power: {power}[mW] - N: {n}"
 
@@ -143,7 +143,7 @@ class AnalyzerManager:
                 fs = get_empty_fitting(sline)
 
             af = fitting_to_analyzer_result(frame=frame, fitting=fs, calibration_calculator=calibration_calculator,
-                                            camera_settings=measurement.state_mode.camera_settings)
+                                            camera_settings=measurement.state_mode.andor_exposure_settings)
             analyzed_frames.append(af)
         return analyzed_frames
 

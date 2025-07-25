@@ -26,7 +26,7 @@ with open(target_file, "rb") as f:
     series_list = pickle.load(f)
 
 for series in series_list:
-    t_exp = series.measurements[0].camera_settings.exposure_time_s
+    t_exp = series.measurements[0].andor_exposure_settings.exposure_time_s
     if abs(t_exp - target_exposure) > 1e-3:
         continue
     else:

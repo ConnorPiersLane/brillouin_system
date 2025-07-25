@@ -60,7 +60,7 @@ def extract_snr_and_energy(series_path: str, reference: str):
         snr = np.mean(freqs) / np.std(freqs)
 
         # Exposure time and energy
-        t_exp = series.measurements[0].camera_settings.exposure_time_s
+        t_exp = series.measurements[0].andor_exposure_settings.exposure_time_s
         energy_mJ = (power_mW * 1e-3) * t_exp * 1e3  # Convert to mJ
 
         all_energies.append(energy_mJ)
@@ -131,7 +131,7 @@ for label, path in series_paths.items():
 
         freqs = get_freq(np.array(px_values))
         std = np.std(freqs)
-        t_exp = series.measurements[0].camera_settings.exposure_time_s
+        t_exp = series.measurements[0].andor_exposure_settings.exposure_time_s
         energy_mJ = (power_mW * 1e-3) * t_exp * 1e3
 
         energies.append(energy_mJ)
@@ -161,7 +161,7 @@ with open(target_file, "rb") as f:
     series_list = pickle.load(f)
 
 for series in series_list:
-    t_exp = series.measurements[0].camera_settings.exposure_time_s
+    t_exp = series.measurements[0].andor_exposure_settings.exposure_time_s
     if abs(t_exp - target_exposure) > 1e-3:
         continue
 
@@ -206,7 +206,7 @@ with open(target_file, "rb") as f:
 
 # Find the series with the correct exposure time
 target_series = next(
-    (s for s in series_list if abs(s.measurements[0].camera_settings.exposure_time_s - target_exposure) < 1e-3),
+    (s for s in series_list if abs(s.measurements[0].andor_exposure_settings.exposure_time_s - target_exposure) < 1e-3),
     None
 )
 
