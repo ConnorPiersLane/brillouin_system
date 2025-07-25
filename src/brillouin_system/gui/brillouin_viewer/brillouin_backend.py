@@ -158,6 +158,11 @@ class BrillouinBackend:
     def init_f2b_signals(self, cancel_callback: Callable[[], bool]):
         self.f2b_cancel_callback = cancel_callback
 
+    def set_state(self, state: SystemState):
+        self.system_state = state
+        if self.b2f_send_state_signal is not None:
+            self.b2f_send_state_signal(state)
+
     # ---------------- Change Modes ----------------
 
     def change_illumination_mode_to_continuous(self):
