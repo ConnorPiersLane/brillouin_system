@@ -133,7 +133,11 @@ class DummyFLIRCamera(BaseFLIRCamera):
         width, height = self.get_resolution()
         dtype = np.uint16 if self._pixel_format == 'Mono16' else np.uint8
         print(f"[DummyFLIR] Acquiring image ({width}x{height}, {dtype})")
-        return np.zeros((height, width), dtype=dtype)
+
+        # Generate random image with pixel values between 0 and 255
+        image = np.random.randint(0, 256, size=(height, width), dtype=dtype)
+
+        return image
 
     def start_software_stream(self):
         self._is_software_stream = True

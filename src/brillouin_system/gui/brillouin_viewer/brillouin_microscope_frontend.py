@@ -3,16 +3,15 @@ import sys
 import pickle
 import numpy as np
 
-from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
+from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap, QImage
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
-    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QSlider
+    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
-from pyqt_switch import PyQtSwitch
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
@@ -53,6 +52,7 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 
 ## Testing
 brillouin_backend = BrillouinBackend(
+    system_type='microscope',
         camera=DummyCamera(),
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
@@ -106,7 +106,6 @@ class BrillouinViewerMicroscope(QWidget):
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
-    cancel_requested = pyqtSignal()
     close_all_shutters_requested = pyqtSignal()
 
     # Flir camera
@@ -147,7 +146,6 @@ class BrillouinViewerMicroscope(QWidget):
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
-        self.cancel_requested.connect(self.brillouin_signaller.cancel_operations)
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
 
         # Flir camera settings
@@ -170,7 +168,8 @@ class BrillouinViewerMicroscope(QWidget):
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
         self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
-        self.brillouin_signaller.b2f_system_state_changed.connect(self.update_system_state_label)
+        self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
+        self.brillouin_signaller.flir_frame_ready.connect(self.display_flir_frame)
 
         # Connect signals BEFORE starting the thread
         self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
@@ -592,12 +591,14 @@ class BrillouinViewerMicroscope(QWidget):
     # ---------------- GUI Update Loop ---------------- #
     def on_stop_clicked(self):
         print("[Brillouin Viewer] STOP clicked.")
+        self.brillouin_signaller.cancel_operations()
         self.close_all_shutters_requested.emit()
         self.stop_live_requested.emit()
 
     def on_cancel_event_clicked(self):
         print("[BrillouinViewer] Cancel button clicked.")
-        self.cancel_requested.emit()
+        # self.cancel_requested.emit()
+        self.brillouin_signaller.cancel_operations()
 
     def on_restart_clicked(self):
         print("[Brillouin Viewer] Restart clicked.")
@@ -664,6 +665,34 @@ class BrillouinViewerMicroscope(QWidget):
     def on_zaber_axis_changed(self, index: int):
         axis = self.zaber_axis_selector.itemData(index)
         self.request_zaber_position.emit(axis)
+
+    @pyqtSlot(np.ndarray)
+    def display_flir_frame(self, frame: np.ndarray):
+        if frame is None:
+            print("Frame is None")
+            return
+
+        frame = np.ascontiguousarray(frame)
+        h, w = frame.shape
+        bytes_per_line = w
+
+        q_img = QImage(frame.tobytes(), w, h, bytes_per_line, QImage.Format_Grayscale8)
+
+        if q_img.isNull():
+            print("QImage is null")
+            return
+
+        pixmap = QPixmap.fromImage(q_img)
+
+        if pixmap.isNull():
+            print("QPixmap is null")
+            return
+
+        self.flir_image_label.setPixmap(pixmap.scaled(
+            self.flir_image_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        ))
 
     # ---------------- Handlers ---------------- #
 

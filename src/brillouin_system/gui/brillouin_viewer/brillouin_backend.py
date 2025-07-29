@@ -8,7 +8,7 @@ import numpy as np
 
 from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import andor_frame_config, AndorConfig
-from brillouin_system.config.config import CalibrationConfig, calibration_config
+from brillouin_system.config.calibration.calibration_config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig, flir_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -31,7 +31,9 @@ from brillouin_system.my_dataclasses.measurements import MeasurementPoint, Measu
 
 from brillouin_system.devices.zaber_linear import ZaberLinearController
 
-
+class SystemType(Enum):
+    HUMAN_INTERFACE = 0
+    MICROSCOPE = 1
 
 def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
     """Normalize image to uint8 using contrast stretching."""
@@ -40,10 +42,6 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
     img = 255 * (img / img.max()) if img.max() > 0 else img
     return img.astype(np.uint8)
 
-class SystemState(Enum):
-    IDLE = 0
-    FREERUNNING = 1
-    BUSY = 2
 
 
 class BrillouinBackend:
@@ -54,6 +52,7 @@ class BrillouinBackend:
         print(f"[BrillouinBackend] {msg}")
 
     def __init__(self,
+                 system_type: str,
                  camera: BaseCamera | DummyCamera,
                  shutter_manager: ShutterManager | ShutterManagerDummy,
                  microwave: Microwave | MicrowaveDummy,
@@ -63,8 +62,13 @@ class BrillouinBackend:
                  is_sample_illumination_continuous: bool = False,
                  ):
 
-        # System state
-        self.system_state: SystemState = SystemState.IDLE
+        if system_type == 'microscope':
+            self.system_type = SystemType.MICROSCOPE
+        elif system_type == 'human_interface':
+            self.system_type = SystemType.HUMAN_INTERFACE
+        else:
+            raise ValueError(f"Incorrect parameter input sample={system_type}, "
+                             f"either 'microscope' or 'human_interface'")
 
         # Devices
         self.andor_camera: BaseCamera | DummyCamera = camera
@@ -110,8 +114,11 @@ class BrillouinBackend:
         self.sample_state_mode: StateMode = self.init_state_mode(is_reference_mode=False)
 
 
-        # Init Signals (they are send down from the signaller)
-        self.b2f_send_state_signal = None
+        # Init Signals (they are sent down from the signaller)
+        # b2f = backend to frontend
+        # f2b = frontend to backend
+        self.b2f_send_system_state_signal = None
+        self.b2f_emit_display_result = None
         self.f2b_cancel_callback = None
 
     def init_shutters(self):
@@ -150,18 +157,14 @@ class BrillouinBackend:
         )
 
 
-    def init_b2f_signals(self,
-                                      send_state_signal: Callable[[SystemState], None],
-                                      ):
-        self.b2f_send_state_signal = send_state_signal
 
     def init_f2b_signals(self, cancel_callback: Callable[[], bool]):
         self.f2b_cancel_callback = cancel_callback
 
-    def set_state(self, state: SystemState):
-        self.system_state = state
-        if self.b2f_send_state_signal is not None:
-            self.b2f_send_state_signal(state)
+    def init_b2f_emit_display_result(self, emit_display_result: Callable[[DisplayResults], None]):
+        self.b2f_emit_display_result = emit_display_result
+
+
 
     # ---------------- Change Modes ----------------
 
@@ -472,6 +475,8 @@ class BrillouinBackend:
                 sline=fitting.sline,
             )
 
+
+
     def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> np.ndarray:
         """Acquire a frame with temporary shutter open for pulsed mode."""
         frame = None
@@ -529,41 +534,28 @@ class BrillouinBackend:
                 self.change_to_sample_mode()
 
 
-
-
-
-    def perform_calibration(
-            self,
-            call_update_gui: Callable[[DisplayResults], None],
-            cancel_callback: Callable[[], bool],
-            send_state_signal: Callable[[SystemState], None],
-            emit_calibration_finished: Callable[[], None],
-            log: Callable[[str], None],
-    ) -> None:
-
-        self.system_state = SystemState.BUSY
+    def perform_calibration(self) -> bool:
 
         config: CalibrationConfig = calibration_config.get()
 
-        send_state_signal(SystemState.BUSY)
-        log("[Calibration] Starting calibration.")
+        print("[Calibration] Starting calibration.")
 
         try:
             with self.force_reference_mode():
                 measured_freqs = []
 
                 for freq in config.calibration_freqs:
-                    if cancel_callback():
-                        log("[Calibration] Cancelled by user.")
-                        return
+                    if self.f2b_cancel_callback():
+                        print("[Calibration] Cancelled by user.")
+                        return False
 
                     self.microwave.set_frequency(freq)
                     freq_points = []
 
                     for _ in range(config.n_per_freq):
-                        if cancel_callback():
-                            log("[Calibration] Cancelled by user.")
-                            return
+                        if self.f2b_cancel_callback():
+                            print("[Calibration] Cancelled by user.")
+                            return False
 
                         frame = self.get_andor_frame()
                         fs = self.get_fitted_spectrum(frame)
@@ -574,7 +566,7 @@ class BrillouinBackend:
                             fitting_results=fs,
                         )
                         freq_points.append(cali_point)
-                        call_update_gui(self.get_display_results(frame, fs))
+                        self.b2f_emit_display_result(self.get_display_results(frame, fs))
 
                     measured_freqs.append(MeasurementsPerFreq(
                         set_freq_ghz=freq,
@@ -584,13 +576,13 @@ class BrillouinBackend:
 
                 self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
                 self.update_calibration_calculator()
-                emit_calibration_finished()
-                log("[Calibration] Completed successfully.")
+                print("[Calibration] Completed successfully.")
+                return True
 
         except Exception as e:
-            log(f"[Calibration] Exception: {e}")
-        finally:
-            send_state_signal(SystemState.IDLE)
+            print(f"[Calibration] Exception: {e}")
+            return False
+
 
 
     def close(self):

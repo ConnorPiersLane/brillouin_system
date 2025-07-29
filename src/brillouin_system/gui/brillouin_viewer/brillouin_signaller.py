@@ -11,13 +11,18 @@ from brillouin_system.config.config import calibration_config
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
-from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend, SystemState
+from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend, SystemType
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 
 from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
 from brillouin_system.my_dataclasses.measurements import MeasurementSettings, MeasurementSeries
 from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
 
+
+class SystemState(Enum):
+    IDLE = 0
+    FREERUNNING = 1
+    BUSY = 2
 
 
 
@@ -48,9 +53,10 @@ class BrillouinSignaller(QObject):
     camera_shutter_state_changed = pyqtSignal(bool)
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
+    flir_frame_ready = pyqtSignal(np.ndarray)
 
     # Signals to Frontend
-    b2f_system_state_changed = pyqtSignal(SystemState)
+    update_system_state_in_frontend = pyqtSignal(SystemState)
 
 
     def __init__(self, manager: BrillouinBackend):
@@ -62,21 +68,21 @@ class BrillouinSignaller(QObject):
         self._camera_shutter_open = True
         self._is_cancel_operations = False
 
-        self.backend.init_b2f_signals(send_state_signal=self.send_system_state_to_frontend)
+        self.system_state = SystemState.IDLE
+
         self.backend.init_f2b_signals(cancel_callback=self.is_cancel_requested)
+        self.backend.init_b2f_emit_display_result(emit_display_result=self.emit_display_result)
 
 
 
-    # ------- State control -------
-    # SLOTS
-    # in BrillouinSignaller
-    #  cancel callback to pass down to the backend
-    def is_cancel_requested(self) -> bool:
-        return self._is_cancel_operations
 
 
-    def send_system_state_to_frontend(self, new_state: SystemState):
-        self.b2f_system_state_changed.emit(new_state)
+
+    def update_system_state(self, new_state: SystemState):
+        self.system_state = new_state
+        self.update_system_state_in_frontend.emit(new_state)
+        if new_state in (SystemState.BUSY, SystemState.FREERUNNING):
+            self.reset_cancel()
 
 
     @pyqtSlot()
@@ -292,12 +298,16 @@ class BrillouinSignaller(QObject):
             return
 
         if not self._thread_active:
+
             self._running = True
             QTimer.singleShot(0, self.run)
 
     @pyqtSlot()
     def stop_live_view(self):
         self._running = False
+        if self.backend.system_type == SystemType.MICROSCOPE:
+            self.backend.flir_cam_worker.stop_stream()
+        self.update_system_state(new_state=SystemState.IDLE)
 
     @pyqtSlot()
     def run(self):
@@ -305,7 +315,13 @@ class BrillouinSignaller(QObject):
             return
         self._thread_active = True
         self._running = True
+        self.update_system_state(new_state=SystemState.FREERUNNING)
         self.log_message.emit("Worker started live acquisition loop.")
+
+        # Start the cameras
+        if self.backend.system_type == SystemType.MICROSCOPE:
+            self.backend.flir_cam_worker.start_stream(frame_handler=self._handle_flir_frame)
+
 
         while self._running:
             if self._gui_ready:
@@ -327,14 +343,24 @@ class BrillouinSignaller(QObject):
         display_results = self.backend.get_display_results(frame, fitting)
         self._update_gui(display_results)
 
-    @pyqtSlot()
     def cancel_operations(self):
         self._is_cancel_operations = True
+
+    # ------- State control -------
+    # SLOTS
+    # in BrillouinSignaller
+    #  cancel callback to pass down to the backend
+    def is_cancel_requested(self) -> bool:
+        return self._is_cancel_operations
+
 
     @pyqtSlot()
     def reset_cancel(self):
         self._is_cancel_operations = False
-        self.update_gui()
+
+    @pyqtSlot(np.ndarray)
+    def _handle_flir_frame(self, frame):
+        self.flir_frame_ready.emit(frame)
 
     @pyqtSlot()
     def get_calibration_results(self):
@@ -346,13 +372,14 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def run_calibration(self):
-        self.backend.perform_calibration(
-            call_update_gui=self.emit_display_result,
-            cancel_callback=self.is_cancel_requested,
-            send_state_signal=self.send_system_state_to_frontend,
-            emit_calibration_finished=self.calibration_finished.emit,
-            log=self.log_message.emit,
-        )
+        old_state = self.system_state
+        self.update_system_state(new_state=SystemState.BUSY)
+        try:
+            is_sucess = self.backend.perform_calibration()
+            if is_sucess:
+                self.calibration_finished.emit()
+        finally:
+            self.update_system_state(new_state=old_state)
 
     @pyqtSlot(object)
     def take_measurements(self, measurement_settings: MeasurementSettings):

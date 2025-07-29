@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.shutter_device import (
+from brillouin_system.devices.shutter_device import (
     Shutter,
     ShutterDummy,
     ShutterManager,
@@ -8,9 +8,9 @@ from brillouinDAQ.devices.shutter_device import (
 def test_individual_shutter_real():
     print("Testing individual real shutter initialization...")
     s = Shutter(384)
-    s.send_system_state_to_frontend(True)
+    s.set_state(True)
     assert s.get_state() is True, "Failed to open shutter"
-    s.send_system_state_to_frontend(False)
+    s.set_state(False)
     assert s.get_state() is False, "Failed to close shutter"
     s.shutdown()
 

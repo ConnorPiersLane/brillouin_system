@@ -5,7 +5,7 @@ import tomli
 import tomli_w
 from brillouin_system.config.thread_safe_config import ThreadSafeConfig
 
-FITTING_MODELS_SAMPLE = ["lorentzian", "gaussian", "voigt"]
+FITTING_MODELS_SAMPLE = ["lorentzian", "gaussian", "voigt", 'lorentzian_quad_bg', 'lorentzian_log_quad_bg']
 FITTING_MODELS_REFERENCE = ["lorentzian", "gaussian"]
 
 @dataclass
