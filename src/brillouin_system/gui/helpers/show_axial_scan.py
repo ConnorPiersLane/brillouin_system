@@ -28,8 +28,12 @@ class AxialScanViewer(QWidget):
         self.init_ui()
         self.update_display()
 
-        # ToDo
-        # analyzed_axial_scan = analyze_axial_scan(scan=axial_scan, calibration_calculator=calibration_calculator)
+        if calibration_calculator is None:
+            print('No Calibration available, cannot calculate Frequency shifts')
+            self.analyzed_axial_scan = None
+        else:
+            self.analyzed_axial_scan = analyze_axial_scan(scan=axial_scan,
+                                                     calibration_calculator=calibration_calculator)
 
     def init_ui(self):
         outer_layout = QVBoxLayout()

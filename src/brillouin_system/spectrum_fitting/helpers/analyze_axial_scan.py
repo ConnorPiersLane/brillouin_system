@@ -10,13 +10,13 @@ from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import ca
 
 
 def analyze_axial_scan(scan: AxialScan,
-                       calibration_calculator: CalibrationCalculator,
-                       do_bg_subtraction) -> AnalyzedAxialScan:
+                       calibration_calculator: CalibrationCalculator
+                       ) -> AnalyzedAxialScan:
     spectrum_fitter = SpectrumFitter()
     spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
     is_reference_mode = scan.system_state.is_reference_mode
-    do_bg_subtraction = do_bg_subtraction
+    do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
 
 
     analyzed_measurements = []

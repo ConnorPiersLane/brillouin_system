@@ -29,6 +29,7 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 
 from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -100,7 +101,6 @@ class BrillouinBackend:
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
         self.is_reference_mode: bool = False
         self.do_background_subtraction: bool = False
-        self._is_do_bg_subtraction_selected_for_sample = False
         self.do_live_fitting = False
 
         # Calibration
@@ -256,9 +256,7 @@ class BrillouinBackend:
         if not self.is_background_image_available():
             print("[AcquisitionManager] No background image available")
             return frame
-        result = frame - self.bg_image.mean_image
-        result = np.clip(result, 0, None)  # enforce non-negativity
-        return result
+        return subtract_background(frame=frame, bg_frame=self.bg_image.mean_image)
 
 
     def take_n_images(self, n_images) -> np.ndarray:
