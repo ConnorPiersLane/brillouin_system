@@ -9,7 +9,6 @@ from brillouin_system.calibration.calibration import CalibrationData, Calibratio
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
 
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
-from brillouin_system.spectrum_fitting.helpers.analyze_axial_scan import analyze_axial_scan
 
 
 class AnalyzerManager:

@@ -14,7 +14,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan
-from brillouin_system.spectrum_fitting.helpers.analyze_axial_scan import analyze_axial_scan
+
 
 
 class AxialScanViewer(QWidget):
@@ -32,8 +32,8 @@ class AxialScanViewer(QWidget):
             print('No Calibration available, cannot calculate Frequency shifts')
             self.analyzed_axial_scan = None
         else:
-            self.analyzed_axial_scan = analyze_axial_scan(scan=axial_scan,
-                                                     calibration_calculator=calibration_calculator)
+            # self.analyzed_axial_scan = analyze_axial_scan(scan=axial_scan,
+            #                                          calibration_calculator=calibration_calculator)
 
     def init_ui(self):
         outer_layout = QVBoxLayout()
