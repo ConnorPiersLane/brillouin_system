@@ -15,9 +15,9 @@ import matplotlib.pyplot as plt
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
-from brillouin_system.config.calibration.calibration_config_gui import CalibrationConfigDialog
+from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.config.config import calibration_config
-from brillouin_system.config.peak_fitting.find_peaks_config_gui import FindPeaksConfigDialog
+from brillouin_system.spectrum_fitting.peak_fitting import FindPeaksConfigDialog
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.cameras.flir.flir_dummy import DummyFLIRCamera
 from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
@@ -32,12 +32,9 @@ from brillouin_system.devices.microwave_device import MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManagerDummy
 
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.measurements import MeasurementSettings
-from brillouin_system.my_dataclasses.calibration import render_calibration_to_pixmap, \
+from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
-from brillouin_system.my_dataclasses.fitted_results import DisplayResults
-from brillouin_system.devices.zaber_linear import ZaberLinearDummy
-from brillouin_system.my_dataclasses.measurements import MeasurementSeries
+from brillouin_system.my_dataclasses.fitted_spectrum import DisplayResults
 
 # SubGuis
 from brillouin_system.devices.cameras.flir.flir_config.flir_config_dialog import FLIRConfigDialog
@@ -56,7 +53,6 @@ brillouin_backend = BrillouinBackend(
         camera=DummyCamera(),
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
-    zaber=ZaberLinearDummy(),
     zaber_microscope=DummyZaberMicroscope(),
     flir_cam_worker=FlirWorker(flir_camera=DummyFLIRCamera()),
     is_sample_illumination_continuous=True
@@ -99,8 +95,6 @@ class BrillouinViewerMicroscope(QWidget):
     snap_requested = pyqtSignal()
     toggle_reference_mode_requested = pyqtSignal()
     acquire_background_requested = pyqtSignal()
-    move_zaber_requested = pyqtSignal(str, float)
-    request_zaber_position = pyqtSignal(str)
     run_calibration_requested = pyqtSignal()
     take_measurement_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
@@ -118,7 +112,6 @@ class BrillouinViewerMicroscope(QWidget):
     def __init__(self):
         super().__init__()
 
-        self._stored_measurements: list[MeasurementSeries] = []  # list of measurement series
 
         self.setWindowTitle("Brillouin Viewer (Live)")
 
@@ -138,10 +131,8 @@ class BrillouinViewerMicroscope(QWidget):
         self.snap_requested.connect(self.brillouin_signaller.snap_and_fit)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
         self.acquire_background_requested.connect(self.brillouin_signaller.acquire_background_image)
-        self.move_zaber_requested.connect(self.brillouin_signaller.move_zaber_relative)
-        self.request_zaber_position.connect(self.brillouin_signaller.query_zaber_position)
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
-        self.take_measurement_requested.connect(self.brillouin_signaller.take_measurements)
+        self.take_measurement_requested.connect(self.brillouin_signaller.take_axial_scan)
         self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
@@ -163,7 +154,7 @@ class BrillouinViewerMicroscope(QWidget):
         self.brillouin_signaller.camera_shutter_state_changed.connect(self.update_camera_shutter_button)
         self.brillouin_signaller.frame_and_fit_ready.connect(self.display_result, Qt.QueuedConnection)
         self.brillouin_signaller.measurement_result_ready.connect(self.handle_measurement_results)
-        self.brillouin_signaller.zaber_position_updated.connect(self.update_zaber_position)
+        self.brillouin_signaller.zaber_lens_position_updated.connect(self.update_zaber_position)
         self.brillouin_signaller.microwave_frequency_updated.connect(self.update_ref_freq_input)
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
@@ -410,30 +401,25 @@ class BrillouinViewerMicroscope(QWidget):
         self.bg_label_on.setStyleSheet("color: gray")
 
         self.btn_take_bg = QPushButton("Take BG")
-        self.btn_take_bg.setFixedWidth(70)
         self.btn_take_bg.clicked.connect(self.take_background_image)
 
         self.toggle_bg_btn = QPushButton("Switch")
-        self.toggle_bg_btn.setFixedWidth(60)
         self.toggle_bg_btn.clicked.connect(self.toggle_background_subtraction)
 
         self.btn_save_bg = QPushButton("Save BG")
-        self.btn_save_bg.setFixedWidth(70)
         self.btn_save_bg.clicked.connect(self.save_background_image)
 
-        # Row layout for the buttons
+        # Create horizontal layout for the three buttons
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.btn_take_bg)
         btn_row.addWidget(self.toggle_bg_btn)
         btn_row.addWidget(self.btn_save_bg)
-        btn_row.addStretch()
 
-        # Main layout
         layout = QVBoxLayout()
         layout.addWidget(self.bg_label_off)
         layout.addWidget(self.bg_label_on)
         layout.addSpacing(5)
-        layout.addLayout(btn_row)
+        layout.addLayout(btn_row)  # Add button row as one horizontal layout
 
         group = QGroupBox("Background")
         group.setLayout(layout)
@@ -480,6 +466,7 @@ class BrillouinViewerMicroscope(QWidget):
         layout.addWidget(settings_btn)
 
         return group
+
 
 
     # LED------------------------------------
@@ -878,81 +865,7 @@ class BrillouinViewerMicroscope(QWidget):
         self._show_cali = False
         self._save_cali = True
 
-    def take_measurements(self):
-        try:
-            n = int(self.num_images_input.text())
-            axis = self.zaber_axis_selector.currentData()
 
-            if self.move_stage_checkbox.isChecked():
-                step_size = float(self.zaber_step_input.text())
-            else:
-                step_size = 0.0
-
-
-            name = self.series_name_input.text().strip()
-            power = float(self.power_input.text())
-
-            print(f"[Brillouin Viewer] Preparing to take {n} measurements along {axis}-axis "
-                  f"with step {step_size} µm. Name: '{name}', Power: {power:.2f} mW")
-
-            self.stop_live_requested.emit()
-            QApplication.processEvents()
-
-            measurement_settings = MeasurementSettings(
-                name = name,
-                n_measurements=n,
-                power_mW=power,
-                move_axes = 'x',
-                move_x_rel_um = step_size,
-                move_y_rel_um = 0.0,
-                move_z_rel_um = 0.0,
-            )
-
-
-            # If needed, you can pass name and power through a signal or store them for later use.
-            self.take_measurement_requested.emit(measurement_settings)
-
-        except Exception as e:
-            print(f"[Brillouin Viewer] Measurement setup failed: {e}")
-
-    def handle_measurement_results(self, measurement_result: MeasurementSeries):
-        self._stored_measurements.append(measurement_result)
-        self.measurement_series_label.setText(f"Stored Series: {len(self._stored_measurements)}")
-        self.start_live_requested.emit()
-
-    def save_measurements_to_file(self):
-        if not self._stored_measurements:
-            print("[Brillouin Viewer] No measurements to save.")
-            return
-
-        # Ask user for base file path
-        base_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Measurements (base name, without extension)",
-            filter="All Files (*)"
-        )
-        if not base_path:
-            return
-
-        try:
-            # Save as Pickle
-            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-            with open(pkl_path, "wb") as f:
-                pickle.dump(self._stored_measurements, f)
-            print(f"[✓] Pickle saved to: {pkl_path}")
-
-            # Save as HDF5
-            h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
-            native_dict = dataclass_to_hdf5_native_dict(self._stored_measurements)
-            save_dict_to_hdf5(h5_path, native_dict)
-            print(f"[✓] HDF5 saved to: {h5_path}")
-
-        except Exception as e:
-            print(f"[Brillouin Viewer] [Error] Failed to save: {e}")
-
-    def clear_measurements(self):
-        self._stored_measurements.clear()
-        self.measurement_series_label.setText("Stored Series: 0")
-        print("[Brillouin Viewer] Cleared all stored measurement series.")
 
     def closeEvent(self, event):
         print("[Brillouin Viewer] Shutdown initiated...")

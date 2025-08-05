@@ -1,7 +1,7 @@
 import numpy as np
 
-from brillouin_system.my_dataclasses.calibration import CalibrationData, CalibrationResults, calibrate
-from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
+from brillouin_system.calibration.calibration import CalibrationData, CalibrationResults, calibrate
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 
 def test_calibration_fit():

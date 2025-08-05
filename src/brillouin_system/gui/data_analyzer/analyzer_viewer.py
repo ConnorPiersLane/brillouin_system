@@ -9,14 +9,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from brillouin_system.gui.data_analyzer.analyzer_manager import AnalyzerManager
-from brillouin_system.config.config_dialog import ConfigDialog
-from brillouin_system.gui.data_analyzer.analyzer_utils import numpy_array_to_pixmap
-from brillouin_system.my_dataclasses.analyzer_results import AnalyzedFrame, print_analyzed_frame_summary
-from brillouin_system.my_dataclasses.calibration import (
+
+from brillouin_system.gui.helpers.gui_utils import numpy_array_to_pixmap
+
+from brillouin_system.calibration.calibration import (
     CalibrationCalculator, render_calibration_to_pixmap,
     CalibrationImageDialog, calibrate,
 )
-from brillouin_system.config.config import calibration_config
+from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.my_dataclasses.human_interface_measurements import AnalyzedAxialScan, AnalyzedMeasurementPoint, \
+    MeasurementPoint
+from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
+
 
 class PlotWindow(QDialog):
     def __init__(self, parent=None):
@@ -65,8 +69,8 @@ class AnalyzerViewer(QWidget):
         self.setMinimumSize(1200, 720)
         self.analyze_manager = AnalyzerManager()
 
-        self.current_measurement_index = 0
-        self.current_fitted_results: list[AnalyzedFrame] = []
+        self.current_point_index = 0
+        self.selected_analyzed_scan: AnalyzedAxialScan | None = None
         self.current_series = None
         self.analyzed_series_lookup = {}
 
@@ -116,7 +120,7 @@ class AnalyzerViewer(QWidget):
         self.mako_label = QLabel("Display area")
         self.mako_label.setAlignment(Qt.AlignCenter)
         self.mako_label.setStyleSheet("background-color: black; color: white;")
-        self.mako_label.setFixedSize(576, 432)
+
 
         self.display_row.addLayout(left_display_col)
         self.display_row.addWidget(self.mako_label)
@@ -256,7 +260,7 @@ class AnalyzerViewer(QWidget):
         self.plot_histogram_btn.clicked.connect(self.plot_histogram)
 
     def open_config_dialog(self):
-        dialog = ConfigDialog(self)
+        dialog = FindPeaksConfigDialog(self)
         dialog.exec_()
 
     def load_calibration_file(self):
@@ -276,7 +280,7 @@ class AnalyzerViewer(QWidget):
                 return
 
             index = self.series_list_widget.row(selected_items[0])
-            series = self.analyze_manager.stored_measurement_series[index]
+            series = self.analyze_manager.stored_axial_scans[index]
             calibration_data = series.calibration_data
         else:
             calibration_data = self.analyze_manager.calibration_data_from_file
@@ -324,14 +328,12 @@ class AnalyzerViewer(QWidget):
         self.refresh_analyzed_dropdown()
 
     def refresh_analyzed_dropdown(self):
-        existing_indices = {
-            self.analyzed_series_dropdown.itemData(i)
-            for i in range(self.analyzed_series_dropdown.count())
-        }
+        self.analyzed_series_dropdown.clear()
 
         for index in sorted(self.analyze_manager.analyzed_series_lookup):
-            if index not in existing_indices:
-                series = self.analyze_manager.stored_measurement_series[index]
+            # Make sure the index still exists in stored_axial_scans
+            if 0 <= index < len(self.analyze_manager.stored_axial_scans):
+                series = self.analyze_manager.stored_axial_scans[index]
                 filename = self.analyze_manager.series_filenames.get(index, "Unknown")
                 label = self.analyze_manager.displayed_series_info(series, file_name=filename)
 
@@ -339,7 +341,7 @@ class AnalyzerViewer(QWidget):
                 self.analyzed_series_dropdown.setItemData(
                     self.analyzed_series_dropdown.count() - 1,
                     label,
-                    Qt.ToolTipRole  # 👈 Tooltip on hover
+                    Qt.ToolTipRole  # Tooltip on hover
                 )
 
     def clear_analyzed_series(self):
@@ -353,22 +355,22 @@ class AnalyzerViewer(QWidget):
             QMessageBox.warning(self, "Selection Error", "No analyzed series selected.")
             return
 
-        self.current_series = self.analyze_manager.stored_measurement_series[index]
-        self.current_fitted_results = self.analyze_manager.analyzed_series_lookup[index]
-        self.current_measurement_index = 0
+        self.current_series = self.analyze_manager.stored_axial_scans[index]
+        self.selected_analyzed_scan = self.analyze_manager.analyzed_series_lookup[index]
+        self.current_point_index = 0
         self.series_status_label.setText("Show Series: OK.")
         self.update_series_display()
 
-    def display_result(self, analyzed_frame: AnalyzedFrame):
-        frame = analyzed_frame.frame
+    def display_result(self, measurement_point: MeasurementPoint, analyzed_measurement_point: AnalyzedMeasurementPoint):
+        frame = measurement_point.frame_andor
 
         pixmap = numpy_array_to_pixmap(frame)
         self.frame_label.setPixmap(pixmap.scaled(
             self.frame_label.width(), self.frame_label.height(), Qt.KeepAspectRatio
         ))
 
-        x_px = analyzed_frame.fitted_spectrum.x_pixels
-        spectrum = analyzed_frame.fitted_spectrum.sline
+        x_px = analyzed_measurement_point.fitted_spectrum.x_pixels
+        spectrum = analyzed_measurement_point.fitted_spectrum.sline
 
         self.ax.clear()
         self.ax.plot(x_px, spectrum, 'k.', label="Spectrum")
@@ -376,11 +378,11 @@ class AnalyzerViewer(QWidget):
         interpeak = None
         freq_shift_ghz = None
 
-        if analyzed_frame.fitted_spectrum.is_success:
-            x_fit_refined = analyzed_frame.fitted_spectrum.x_fit_refined
-            y_fit_refined = analyzed_frame.fitted_spectrum.y_fit_refined
-            interpeak = analyzed_frame.fitted_spectrum.inter_peak_distance
-            freq_shift_ghz = analyzed_frame.freq_shift_peak_distance_ghz
+        if analyzed_measurement_point.fitted_spectrum.is_success:
+            x_fit_refined = analyzed_measurement_point.fitted_spectrum.x_fit_refined
+            y_fit_refined = analyzed_measurement_point.fitted_spectrum.y_fit_refined
+            interpeak = analyzed_measurement_point.fitted_spectrum.inter_peak_distance
+            freq_shift_ghz = analyzed_measurement_point.freq_shifts.freq_shift_peak_distance_ghz
             self.ax.plot(x_fit_refined, y_fit_refined, 'r--', label="Fit")
             self.ax.legend()
 
@@ -400,24 +402,26 @@ class AnalyzerViewer(QWidget):
 
 
     def go_left(self):
-        if self.current_measurement_index > 0:
-            self.current_measurement_index -= 1
+        if self.current_point_index > 0:
+            self.current_point_index -= 1
             self.update_series_display()
 
     def go_right(self):
-        if self.current_series and self.current_measurement_index < len(self.current_series.measurements) - 1:
-            self.current_measurement_index += 1
+        if self.current_series and self.current_point_index < len(self.current_series.measurements) - 1:
+            self.current_point_index += 1
             self.update_series_display()
 
     def update_series_display(self):
-        if not self.current_fitted_results:
+        if not self.selected_analyzed_scan:
             self.index_label.setText("0 of 0")
             return
-        self.index_label.setText(f"{self.current_measurement_index + 1} of {len(self.current_fitted_results)}")
-        analyzed_frame_to_be_displayed = self.current_fitted_results[self.current_measurement_index]
-        self.display_result(analyzed_frame_to_be_displayed)
-        print(f"Index: {self.current_measurement_index}")
-        print_analyzed_frame_summary(analyzed_frame_to_be_displayed)
+        self.index_label.setText(f"{self.current_point_index + 1} of {len(self.selected_analyzed_scan.analyzed_measurements)}")
+        point_to_be_displayed = self.selected_analyzed_scan.axial_scan.measurements[self.current_point_index]
+        result_to_be_displayed = self.selected_analyzed_scan.analyzed_measurements[self.current_point_index]
+        self.display_result(measurement_point=point_to_be_displayed,
+                            analyzed_measurement_point=result_to_be_displayed)
+        print(f"Index: {self.current_point_index}")
+
 
     def plot_selected_series(self):
         index = self.analyzed_series_dropdown.currentData()
@@ -425,7 +429,7 @@ class AnalyzerViewer(QWidget):
             QMessageBox.warning(self, "Selection Error", "No analyzed series selected.")
             return
 
-        self.current_fitted_results = self.analyze_manager.analyzed_series_lookup[index]
+        self.selected_analyzed_scan = self.analyze_manager.analyzed_series_lookup[index]
 
         x_axis = self.x_axis_dropdown.currentText()
         y_axis = self.y_axis_dropdown.currentText()
@@ -437,7 +441,7 @@ class AnalyzerViewer(QWidget):
         # Extract Y values
         y_values = [
             getattr(af, y_axis)
-            for af in self.current_fitted_results
+            for af in self.selected_analyzed_scan
             if getattr(af, y_axis) is not None
         ]
 
@@ -478,7 +482,7 @@ class AnalyzerViewer(QWidget):
         # Show stats overlay if checkbox is checked
         if self.show_stats_checkbox.isChecked():
             from brillouin_system.my_dataclasses.analyzer_results import analyze_frame_statistics
-            stats = analyze_frame_statistics(self.current_fitted_results)
+            stats = analyze_frame_statistics(self.selected_analyzed_scan)
 
             # Get corresponding mean and std field dynamically
             mean_attr = f"mean_{y_axis}"
@@ -504,12 +508,12 @@ class AnalyzerViewer(QWidget):
             QMessageBox.warning(self, "Selection Error", "No analyzed series selected.")
             return
 
-        self.current_fitted_results = self.analyze_manager.analyzed_series_lookup[index]
+        self.selected_analyzed_scan = self.analyze_manager.analyzed_series_lookup[index]
         y_axis = self.y_axis_dropdown.currentText()
 
         y_values = [
             getattr(af, y_axis)
-            for af in self.current_fitted_results
+            for af in self.selected_analyzed_scan
             if getattr(af, y_axis) is not None
         ]
 
@@ -538,7 +542,7 @@ class AnalyzerViewer(QWidget):
         # Plot Gaussian overlay if enabled
         if self.show_stats_checkbox.isChecked():
             from brillouin_system.my_dataclasses.analyzer_results import analyze_frame_statistics
-            stats = analyze_frame_statistics(self.current_fitted_results)
+            stats = analyze_frame_statistics(self.selected_analyzed_scan)
 
             mean_attr = f"mean_{y_axis}"
             std_attr = f"std_{y_axis}"

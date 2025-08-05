@@ -1,9 +1,9 @@
 from contextlib import ExitStack
 
 from vimba import Vimba, VimbaFeatureError, VimbaCameraError
-from brillouin_system.devices.cameras.allied.base_mako import BaseMakoCamera
+from brillouin_system.devices.cameras.allied.base_mako import BaseAlliedVisionCamera
 
-class AlliedVisionCamera(BaseMakoCamera):
+class AlliedVisionCamera(BaseAlliedVisionCamera):
     def __init__(self, id="DEV_000F315BC084"):
         print("[AVCamera] Connecting to Allied Vision Camera...")
         self.stack = ExitStack()

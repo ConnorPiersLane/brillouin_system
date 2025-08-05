@@ -124,6 +124,3 @@ class BaseCamera(ABC):
     def get_exposure_dataclass(self) -> AndorExposure:
         pass
 
-    @abstractmethod
-    def set_from_exposure_dataclass(self, andor_exposure: AndorExposure) -> None:
-        pass

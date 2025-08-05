@@ -161,9 +161,6 @@ class IxonUltra(BaseCamera):
             emccd_gain=self.get_emccd_gain()
         )
 
-    def set_from_exposure_dataclass(self, andor_exposure: AndorExposure) -> None:
-        self.set_exposure_time(seconds=andor_exposure.exposure_time_s)
-        self.set_emccd_gain(gain=andor_exposure.emccd_gain)
 
     def get_name(self) -> str:
         return "IxonUltra"

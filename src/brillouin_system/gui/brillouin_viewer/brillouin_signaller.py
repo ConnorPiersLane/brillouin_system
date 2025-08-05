@@ -1,3 +1,4 @@
+import pickle
 from contextlib import contextmanager
 from enum import Enum
 
@@ -5,18 +6,19 @@ import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 import time
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QFileDialog
 
-from brillouin_system.config.config import calibration_config
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend, SystemType
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
+from brillouin_system.my_dataclasses.display_results import DisplayResults
 
-from brillouin_system.my_dataclasses.fitted_results import DisplayResults, FittedSpectrum
-from brillouin_system.my_dataclasses.measurements import MeasurementSettings, MeasurementSeries
-from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan
+from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig, SlineFromFrameConfig, \
+    FittingConfigs
 
 
 class SystemState(Enum):
@@ -45,7 +47,7 @@ class BrillouinSignaller(QObject):
 
     # Signals outwards
     camera_settings_ready = pyqtSignal(dict)
-    zaber_position_updated = pyqtSignal(float)
+    zaber_lens_position_updated = pyqtSignal(float)
     microwave_frequency_updated = pyqtSignal(float)
     background_data_ready = pyqtSignal(object)  # emits a BackgroundData instance
     frame_and_fit_ready = pyqtSignal(object)
@@ -54,6 +56,9 @@ class BrillouinSignaller(QObject):
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
     flir_frame_ready = pyqtSignal(np.ndarray)
+    send_update_stored_axial_scans = pyqtSignal(list)
+
+
 
     # Signals to Frontend
     update_system_state_in_frontend = pyqtSignal(SystemState)
@@ -74,7 +79,10 @@ class BrillouinSignaller(QObject):
         self.backend.init_b2f_emit_display_result(emit_display_result=self.emit_display_result)
 
 
-
+        # Init Zaber position updates
+        self.backend.init_b2f_zaber_position_updates_human_interface(
+            emit_update_zaber_lens_position=self.update_zaber_lens_position
+        )
 
 
 
@@ -95,6 +103,9 @@ class BrillouinSignaller(QObject):
         self.emit_camera_settings()
         self.emit_do_background_subtraction()
         self.emit_do_live_fitting_state()
+        # ToDo: emit zaber positions
+        if self.backend.system_type == SystemType.HUMAN_INTERFACE:
+            self.update_zaber_lens_position(pos=self.backend.zaber_eye_lens.get_position())
 
     @pyqtSlot()
     def emit_do_background_subtraction(self):
@@ -182,7 +193,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot(dict)
     def apply_camera_settings(self, settings: dict):
         try:
-            self.backend.set_camera_settings(
+            self.backend.set_andor_exposure(
                 exposure_time=settings["exposure"],
                 emccd_gain=settings["gain"],
             )
@@ -203,6 +214,10 @@ class BrillouinSignaller(QObject):
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.backend.update_andor_config_settings(andor_config)
 
+    @pyqtSlot(FittingConfigs)
+    def update_fitting_configs(self, fitting_configs: FittingConfigs):
+        self.backend.spectrum_fitter.update_configs(fitting_configs)
+
     @pyqtSlot()
     def toggle_camera_shutter(self):
         try:
@@ -222,21 +237,18 @@ class BrillouinSignaller(QObject):
         except Exception as e:
             self.log_message.emit(f"Failed to toggle camera shutter: {e}")
 
-    @pyqtSlot(str)
-    def query_zaber_position(self, axis: str):
-        try:
-            pos = self.backend.zaber.get_position(axis)
-            self.zaber_position_updated.emit(pos)
-        except Exception as e:
-            self.log_message.emit(f"Failed to get Zaber position for axis '{axis}': {e}")
+    def update_zaber_lens_position(self, pos: float):
+        self.zaber_lens_position_updated.emit(pos)
 
-    @pyqtSlot(str, float)
-    def move_zaber_relative(self, which_axis: str, step: float):
+
+    @pyqtSlot(float)
+    def move_zaber_eye_lens_relative(self, step: float):
+        #TODO: update this
         try:
-            self.backend.zaber.move_rel(which_axis, step)
-            pos = self.backend.zaber.get_position(which_axis)
-            self.log_message.emit(f"Zaber {which_axis}-Axis moved by {step} µm to {pos:.2f} µm")
-            self.zaber_position_updated.emit(pos)
+            self.backend.zaber_eye_lens.move_rel(step)
+            pos = self.backend.zaber_eye_lens.get_position()
+            self.log_message.emit(f"Zaber Lens moved by {step} µm to {pos:.2f} µm")
+            self.zaber_lens_position_updated.emit(pos)
         except Exception as e:
             self.log_message.emit(f"Zaber movement failed: {e}")
 
@@ -272,13 +284,8 @@ class BrillouinSignaller(QObject):
         except Exception as e:
             self.log_message.emit(f"Failed to acquire background image: {e}")
 
-        # Start live view again
-        def restart_live_view_when_ready():
-            if not self._thread_active:
-                self.start_live_view()
-            else:
-                QTimer.singleShot(100, restart_live_view_when_ready)
-        restart_live_view_when_ready()
+
+        self.restart_live_view_when_ready()
 
 
     @pyqtSlot()
@@ -296,11 +303,19 @@ class BrillouinSignaller(QObject):
         if not self.backend.is_sample_illumination_continuous:
             self.log_message.emit("Live view not started: illumination mode is pulsed.")
             return
+        self.backend.init_shutters()
 
         if not self._thread_active:
 
             self._running = True
             QTimer.singleShot(0, self.run)
+
+    # Start live view again
+    def restart_live_view_when_ready(self):
+        if not self._thread_active:
+            self.start_live_view()
+        else:
+            QTimer.singleShot(100, self.restart_live_view_when_ready)
 
     @pyqtSlot()
     def stop_live_view(self):
@@ -346,6 +361,10 @@ class BrillouinSignaller(QObject):
     def cancel_operations(self):
         self._is_cancel_operations = True
 
+    def update_stored_axial_scans(self):
+        lines = self.backend.get_list_of_axial_scans()
+        self.send_update_stored_axial_scans.emit(lines)
+
     # ------- State control -------
     # SLOTS
     # in BrillouinSignaller
@@ -382,66 +401,22 @@ class BrillouinSignaller(QObject):
             self.update_system_state(new_state=old_state)
 
     @pyqtSlot(object)
-    def take_measurements(self, measurement_settings: MeasurementSettings):
+    def take_axial_scan(self, request_axial_scan: RequestAxialScan):
         """
         Generates a series of ZaberPositions using the given axis, n, and step,
         then takes measurements and updates the GUI accordingly.
         """
+        old_state = self.system_state
+        self.stop_live_view()
+        self.update_system_state(new_state=SystemState.BUSY)
+        QCoreApplication.processEvents()
+
         try:
-            self._gui_ready = True
-            measurements = []
-
-            # Extract axis and movement parameters
-            which_axis = measurement_settings.move_axes
-            start = self.backend.zaber.get_position(which_axis)
-            step = measurement_settings.move_x_rel_um
-            n = measurement_settings.n_measurements
-            fixed_positions = {}
-
-            # Generate the list of positions to move to
-            zaber_positions = generate_zaber_positions(
-                axis=which_axis,
-                start=start,
-                step=step,
-                n=n,
-                fixed_positions=fixed_positions
-            )
-
-            for i, zaber_pos in enumerate(zaber_positions):
-                QApplication.processEvents()
-                # Check if user requested cancelation
-                if self._is_cancel_operations:
-                    self.reset_cancel()
-                    raise InterruptedError(f"Cancelled at measurement {i}")
-
-                try:
-                    self.log_message.emit(
-                        f"Measurement {i + 1}: "
-                        f"Zaber (x,y,z) = ({zaber_pos.x:.2f},{zaber_pos.y:.2f},{zaber_pos.z:.2f}) µm"
-                    )
-                    # Take single measurement
-                    mp = self.backend.take_one_measurement(zaber_position=zaber_pos)
-                    self._fitting_and_update_gui(frame=mp.frame)
-                    measurements.append(mp)
-
-                except Exception as e:
-                    self.log_message.emit(f"[Measurement] Error at index {i}: {e}")
-
-            series = MeasurementSeries(
-                measurements=measurements,
-                state_mode=self.backend.get_current_state_mode(),
-                calibration_data=self.backend.calibration_data,
-                settings=measurement_settings,
-            )
-
-            # Emit full result list if all measurements completed
-            self.measurement_result_ready.emit(series)
-
-        except InterruptedError as e:
-            self.log_message.emit(f"[Measurement] Cancelled by user: {e}")
-        except Exception as e:
-            self.log_message.emit(f"[Measurement] Exception: {e}")
-
+            self.backend.take_axial_scan(request_axial_scan)
+            self.update_stored_axial_scans()
+        finally:
+            self.update_system_state(new_state=old_state)
+            self.restart_live_view_when_ready()
 
     # Flir Camera
     @pyqtSlot(object)
@@ -457,6 +432,70 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def close_all_shutters(self):
         self.backend.shutter_manager.close_all()
+
+
+
+    # ----------------- Saving -----------------------
+    @pyqtSlot()
+    def save_all_axial_scans(self):
+        scans = list(self.backend.axial_scan_dict.values())
+        self._save_axial_scan_list_to_file(scans)
+
+    @pyqtSlot(list)
+    def save_multiple_axial_scans(self, indices: list[int]):
+        scans = [
+            scan for i, scan in self.backend.axial_scan_dict.items()
+            if i in indices
+        ]
+        self._save_axial_scan_list_to_file(scans)
+
+    def _save_axial_scan_list_to_file(self, scans: list):
+        from PyQt5.QtWidgets import QFileDialog
+        from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+            dataclass_to_hdf5_native_dict, save_dict_to_hdf5
+        )
+
+        if not scans:
+            self.log_message.emit("[Save] No axial scans to save.")
+            return
+
+        base_path, _ = QFileDialog.getSaveFileName(
+            None,
+            "Save Axial Scans (base name)",
+            filter="All Files (*)"
+        )
+        if not base_path:
+            return
+
+        try:
+            # Save as Pickle
+            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
+            with open(pkl_path, "wb") as f:
+                pickle.dump(scans, f)
+            self.log_message.emit(f"[✓] Pickle saved to: {pkl_path}")
+
+            # Save as HDF5
+            h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
+            native_dict = dataclass_to_hdf5_native_dict(scans)
+            save_dict_to_hdf5(h5_path, native_dict)
+            self.log_message.emit(f"[✓] HDF5 saved to: {h5_path}")
+
+        except Exception as e:
+            self.log_message.emit(f"[Error] Failed to save axial scans: {e}")
+
+    @pyqtSlot(list)
+    def remove_selected_axial_scans(self, indices: list[int]):
+        removed = 0
+        for index in indices:
+            if index in self.backend.axial_scan_dict:
+                del self.backend.axial_scan_dict[index]
+                removed += 1
+                self.log_message.emit(f"Removed axial scan {index}")
+            else:
+                self.log_message.emit(f"Scan {index} not found for removal")
+
+        if removed > 0:
+            self.update_stored_axial_scans()
 
     @pyqtSlot()
     def close(self):

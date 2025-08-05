@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-from brillouin_system.config.config import ThreadSafeConfig
+from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
 @dataclass
 class FLIRConfig:

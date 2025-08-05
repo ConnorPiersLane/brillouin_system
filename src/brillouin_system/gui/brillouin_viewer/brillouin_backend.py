@@ -6,30 +6,31 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure
+
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import andor_frame_config, AndorConfig
-from brillouin_system.config.calibration.calibration_config import CalibrationConfig, calibration_config
+from brillouin_system.calibration.config.calibration_config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig, flir_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
-from brillouin_system.devices.zaber_linear import ZaberLinearDummy
+from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig, led_config
 from brillouin_system.devices.zaber_microscope.zaber_microscope import ZaberMicroscope, DummyZaberMicroscope
-from brillouin_system.fitting.compute_sample_freqs import compute_freq_shift
-from brillouin_system.fitting.fitting_manager import get_empty_fitting, fit_reference_spectrum, fit_sample_spectrum
+from brillouin_system.spectrum_fitting.helpers.compute_sample_freqs import compute_freq_shift
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
-from brillouin_system.my_dataclasses.state_mode import StateMode
-from brillouin_system.my_dataclasses.zaber_position import generate_zaber_positions
-from brillouin_system.fitting.fit_util import get_sline_from_image
-from brillouin_system.my_dataclasses.calibration import CalibrationData, \
+from brillouin_system.my_dataclasses.display_results import DisplayResults
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, MeasurementPoint, AxialScan
+from brillouin_system.my_dataclasses.system_state import SystemState
+from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, get_calibration_calculator_from_data
-from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
-from brillouin_system.my_dataclasses.measurements import MeasurementPoint, MeasurementSeries, MeasurementSettings
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
-from brillouin_system.devices.zaber_linear import ZaberLinearController
+
+from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+
 
 class SystemType(Enum):
     HUMAN_INTERFACE = 0
@@ -56,7 +57,7 @@ class BrillouinBackend:
                  camera: BaseCamera | DummyCamera,
                  shutter_manager: ShutterManager | ShutterManagerDummy,
                  microwave: Microwave | MicrowaveDummy,
-                 zaber: ZaberLinearController | ZaberLinearDummy,
+                 zaber_eye_lens: None | ZaberEyeLens | ZaberEyeLensDummy = None,
                  zaber_microscope: None | ZaberMicroscope | DummyZaberMicroscope= None,
                  flir_cam_worker: None | FlirWorker = None,
                  is_sample_illumination_continuous: bool = False,
@@ -70,6 +71,10 @@ class BrillouinBackend:
             raise ValueError(f"Incorrect parameter input sample={system_type}, "
                              f"either 'microscope' or 'human_interface'")
 
+        # init Spectrum Fitter:
+        self.spectrum_fitter = SpectrumFitter()
+
+
         # Devices
         self.andor_camera: BaseCamera | DummyCamera = camera
         self.andor_camera.set_from_config_file(andor_frame_config.get())
@@ -80,7 +85,7 @@ class BrillouinBackend:
 
         self.microwave.set_power(power_dbm=-20)
 
-        self.zaber = zaber
+        self.zaber_eye_lens = zaber_eye_lens
 
         self.zaber_microscope = zaber_microscope
         if self.zaber_microscope is not None:
@@ -110,8 +115,8 @@ class BrillouinBackend:
         self.init_camera_settings()
 
         # Init state modes
-        self.reference_state_mode: StateMode = self.init_state_mode(is_reference_mode=True)
-        self.sample_state_mode: StateMode = self.init_state_mode(is_reference_mode=False)
+        self.reference_state_mode: SystemState = self.init_state_mode(is_reference_mode=True)
+        self.sample_state_mode: SystemState = self.init_state_mode(is_reference_mode=False)
 
 
         # Init Signals (they are sent down from the signaller)
@@ -120,6 +125,22 @@ class BrillouinBackend:
         self.b2f_send_system_state_signal = None
         self.b2f_emit_display_result = None
         self.f2b_cancel_callback = None
+
+        # Init Zaber position Signals
+        # Human Interface
+        self.b2f_emit_update_zaber_lens_position = None
+
+
+
+        # Store measurements for Human Interface
+        self._i_axial_scans: int = 0
+        self.axial_scan_dict: dict[int, AxialScan] = {}
+
+    def get_list_of_axial_scans(self) -> list[str]:
+        if not self.axial_scan_dict:
+            return [""]
+        lines = [f"{scan.i} - ID: {scan.id}" for scan in sorted(self.axial_scan_dict.values(), key=lambda s: s.i)]
+        return lines
 
     def init_shutters(self):
         if self.is_reference_mode:
@@ -147,13 +168,13 @@ class BrillouinBackend:
         self.andor_camera.set_flip_image_horizontally(flip=andor_config.flip_image_horizontally)
 
 
-    def init_state_mode(self, is_reference_mode: bool) -> StateMode:
-        return StateMode(
+    def init_state_mode(self, is_reference_mode: bool) -> SystemState:
+        return SystemState(
             is_reference_mode=is_reference_mode,
             is_do_bg_subtraction_active=False,
             bg_image=None,
             dark_image=None,
-            andor_exposure_settings=self.andor_camera.get_exposure_dataclass()
+            andor_camera_info=self.andor_camera.get_camera_info_dataclass()
         )
 
 
@@ -163,6 +184,11 @@ class BrillouinBackend:
 
     def init_b2f_emit_display_result(self, emit_display_result: Callable[[DisplayResults], None]):
         self.b2f_emit_display_result = emit_display_result
+
+    def init_b2f_zaber_position_updates_human_interface(self,
+                                                        emit_update_zaber_lens_position:
+                                                        Callable[[float], None]):
+        self.b2f_emit_update_zaber_lens_position = emit_update_zaber_lens_position
 
 
 
@@ -178,38 +204,38 @@ class BrillouinBackend:
         self.shutter_manager.sample.close()
         print("[BrillouinBackend] Switched to pulsed illumination mode.")
 
-    def change_state_modes(self, state_mode: StateMode):
+    def change_system_state(self, state_mode: SystemState):
         self.is_reference_mode = state_mode.is_reference_mode
         self.do_background_subtraction = state_mode.is_do_bg_subtraction_active
         self.bg_image = state_mode.bg_image
-        self.set_camera_settings(
-            exposure_time=state_mode.andor_exposure_settings.exposure_time_s,
-            emccd_gain=state_mode.andor_exposure_settings.emccd_gain,
+        self.set_andor_exposure(
+            exposure_time=state_mode.andor_camera_info.exposure,
+            emccd_gain=state_mode.andor_camera_info.gain,
         )
 
-    def get_current_state_mode(self) -> StateMode:
-        return StateMode(
+    def get_current_system_state(self) -> SystemState:
+        return SystemState(
             is_reference_mode=self.is_reference_mode,
             is_do_bg_subtraction_active=self.do_background_subtraction,
             bg_image=self.bg_image,
             dark_image=self.dark_image,
-            andor_exposure_settings=self.andor_camera.get_exposure_dataclass()
+            andor_camera_info=self.andor_camera.get_camera_info_dataclass()
         )
 
     def change_to_reference_mode(self):
         # Store current state mode of the sample for future:
-        self.sample_state_mode = self.get_current_state_mode()
+        self.sample_state_mode = self.get_current_system_state()
 
         self.shutter_manager.change_to_reference()
-        self.change_state_modes(state_mode=self.reference_state_mode)
+        self.change_system_state(state_mode=self.reference_state_mode)
         print("[BrillouinBackend] Switched to reference mode.")
 
 
     def change_to_sample_mode(self):
         # Store current state mode of the sample for future:
-        self.reference_state_mode = self.get_current_state_mode()
+        self.reference_state_mode = self.get_current_system_state()
         self.shutter_manager.change_to_objective()
-        self.change_state_modes(state_mode=self.sample_state_mode)
+        self.change_system_state(state_mode=self.sample_state_mode)
         print("[BrillouinBackend] Switched to sample mode.")
 
 
@@ -236,7 +262,7 @@ class BrillouinBackend:
 
 
     def take_n_images(self, n_images) -> np.ndarray:
-        return np.stack([self._get_camera_snap() for _ in range(n_images)])
+        return np.stack([self._get_andor_camera_snap() for _ in range(n_images)])
 
 
     def take_bg_and_darknoise_images(self):
@@ -278,10 +304,12 @@ class BrillouinBackend:
     def get_dark_image(self) -> ImageStatistics | None:
         andor_config = andor_frame_config.get()
 
-        if not andor_config.take_dark_image:
-            return None
-
         n_dark_images = andor_config.n_dark_images
+
+        if n_dark_images == 0:
+            print(
+                f"[BrillouinBackend] No Dark Images Requested")
+            return None
 
         # Info:
         settings = self.andor_camera.get_exposure_dataclass()
@@ -321,7 +349,7 @@ class BrillouinBackend:
             self.zaber_microscope.set_led_illumination(led_config)
 
     # ---------------- Get Frames  ----------------
-    def _get_camera_snap(self) -> np.ndarray:
+    def _get_andor_camera_snap(self) -> np.ndarray:
         """Pull a raw frame from the camera."""
         return self.andor_camera.snap().astype(np.float64)
 
@@ -329,7 +357,7 @@ class BrillouinBackend:
     def get_andor_frame(self) -> np.ndarray:
         # Get the frame:
         if self.is_reference_mode or self.is_sample_illumination_continuous:
-            frame = self._get_camera_snap()
+            frame = self._get_andor_camera_snap()
         else:
             frame = self._open_sample_shutter_get_frame_close_shutter(timeout=1)
 
@@ -349,21 +377,18 @@ class BrillouinBackend:
 
         if self.do_background_subtraction:
             frame_with_sub_bg = self.subtract_background(frame)
-            sline = get_sline_from_image(frame_with_sub_bg)
+            sline = self.spectrum_fitter.get_sline_from_image(frame_with_sub_bg)
         else:
-            sline = get_sline_from_image(frame)
+            sline = self.spectrum_fitter.get_sline_from_image(frame)
 
         if not self.do_live_fitting:
-            return get_empty_fitting(sline)
+            return self.spectrum_fitter.get_empty_fitting(sline)
 
         try:
-            if self.is_reference_mode:
-                return fit_reference_spectrum(sline=sline)
-            else:
-                return fit_sample_spectrum(sline=sline, calibration_calculator=self.calibration_calculator)
+            return self.spectrum_fitter.fit(sline, is_reference_mode=self.is_reference_mode)
         except Exception as e:
             print(f"[BrillouinBackend] Fitting error: {e}")
-            return get_empty_fitting(sline)
+            return self.spectrum_fitter.get_empty_fitting(sline)
 
     def update_calibration_calculator(self):
         if self.calibration_data is None:
@@ -372,77 +397,75 @@ class BrillouinBackend:
             self.calibration_calculator: CalibrationCalculator = get_calibration_calculator_from_data(self.calibration_data)
 
 
-    def take_one_measurement(self, zaber_position) -> MeasurementPoint:
-        self.zaber.set_zaber_position_by_class(zaber_position=zaber_position)
+    def take_one_measurement(self) -> MeasurementPoint:
 
-        frame = self.get_andor_frame()
 
         return MeasurementPoint(
-            frame=frame,
-            zaber_position=self.zaber.get_zaber_position_class(),
-            mako_image=None,
+            frame_andor=self.get_andor_frame(),
+            lens_zaber_position=self.zaber_eye_lens.get_position(),
+            frame_left_allied=None,
+            frame_right_allied=None,
         )
 
-    def take_measurement_series(
-            self,
-            measurement_settings: MeasurementSettings,
-            call_update_gui: Callable[[DisplayResults], None]
-    ) -> MeasurementSeries:
-        measurements = []
+    def take_axial_scan(self, request_axial_scan: RequestAxialScan):
+        lens_x0 = self.zaber_eye_lens.get_position()
+        dx = request_axial_scan.step_size_um
 
-        # Generate ZaberPositions
-        # Current position:
-        which_axis = measurement_settings.move_axes  # ToDo: make this versatil for other axex
-        # Todo: save images is not beeing used
+        print(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
+              f"step size: {request_axial_scan.step_size_um} µm, "
+              f"ID: {request_axial_scan.id}, power: {request_axial_scan.power_mW:.2f} mW")
 
-        start = self.zaber.get_position(which_axis)  # or any default you want
-        step = measurement_settings.move_x_rel_um
-        n = measurement_settings.n_measurements
+        all_results = []
 
-        fixed_positions = {}  # optionally set this if you have known values
+        try:
+            if not self.is_sample_illumination_continuous:
+                self.shutter_manager.sample.open()
 
-        zaber_positions = generate_zaber_positions(
-            axis='x',
-            start=start,
-            step=step,
-            n=n,
-            fixed_positions=fixed_positions
-        )
+            for i in range(request_axial_scan.n_measurements):
+                if self.f2b_cancel_callback():
+                    print(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
+                    self.zaber_eye_lens.move_rel(lens_x0)
+                    return False
 
+                self.zaber_eye_lens.move_rel(dx)
+                zaber_pos = self.zaber_eye_lens.get_position()
+                self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
-        for i, zaber_pos in enumerate(zaber_positions):
-            try:
-                self.log_message(
-                    f"Measurement {i + 1}: "
-                    f"Zaber (x,y,z) = ({zaber_pos.x:.2f},{zaber_pos.y:.2f},{zaber_pos.z:.2f}) µm"
+                frame = self._get_andor_camera_snap()
+
+                fs = self.get_fitted_spectrum(frame)
+                self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
+
+                all_results.append(
+                    MeasurementPoint(
+                    frame_andor=frame,
+                    lens_zaber_position=zaber_pos,
+                    frame_left_allied=None,
+                    frame_right_allied=None,)
                 )
-                self.zaber.set_zaber_position_by_class(zaber_position=zaber_pos)
 
-                frame = self.get_andor_frame()
-                fitting = self.get_fitted_spectrum(frame)
+        finally:
+            if not self.is_sample_illumination_continuous:
+                self.shutter_manager.sample.close()
 
-                # Update GUI via provided callback
-                display_results = self.get_display_results(frame, fitting)
-                call_update_gui(display_results)
+        self._i_axial_scans += 1
 
-                measurement_point = MeasurementPoint(
-                    frame=frame,
-                    zaber_position=self.zaber.get_zaber_position_class(),
-                    mako_image=None,
-                )
-                measurements.append(measurement_point)
+        cali_config: CalibrationConfig = calibration_config.get()
+        if cali_config.safe_each_scan:
+            calibration_data = self.calibration_data
+        else:
+            calibration_data = None
 
-            except Exception as e:
-                self.log_message(f"[Measurement] Error at index {i}: {e}")
-
-        return MeasurementSeries(
-            measurements=measurements,
-            state_mode=self.get_current_state_mode(),
-            calibration_data=self.calibration_data,
-            settings = measurement_settings,
+        axial_scan = AxialScan(
+            i=self._i_axial_scans,
+            id=request_axial_scan.id,
+            power_mW=request_axial_scan.power_mW,
+            measurements=all_results,
+            system_state=self.get_current_system_state(),
+            calibration_data=calibration_data,
+            eye_location= None
         )
-
-
+        self.axial_scan_dict[axial_scan.i] = axial_scan
 
     def get_freq_shift(self, fitting: FittedSpectrum) -> float | None:
         return compute_freq_shift(fitting=fitting, calibration_calculator=self.calibration_calculator)
@@ -486,7 +509,7 @@ class BrillouinBackend:
             self.shutter_manager.sample.open()
             timer.start()
             try:
-                frame = self._get_camera_snap()
+                frame = self._get_andor_camera_snap()
             finally:
                 # Always cancel the timer (even if _get_camera_snap() fails)
                 timer.cancel()
@@ -496,19 +519,21 @@ class BrillouinBackend:
 
         return frame
 
-    def set_camera_settings(self,
+    def set_andor_exposure(self,
                             exposure_time: float,
                             emccd_gain: int,
                             ):
 
-        andor_exposure = AndorExposure(exposure_time_s=exposure_time, emccd_gain=emccd_gain)
+        self.andor_camera.set_exposure_time(seconds=exposure_time)
+        self.andor_camera.set_emccd_gain(gain=emccd_gain)
 
-        self.andor_camera.set_from_exposure_dataclass(andor_exposure)
 
         if self.is_reference_mode:
-            self.reference_state_mode.andor_exposure_settings = andor_exposure
+            self.reference_state_mode.andor_camera_info.exposure = exposure_time
+            self.reference_state_mode.andor_camera_info.gain = emccd_gain
         else:
-            self.sample_state_mode.andor_exposure_settings = andor_exposure
+            self.sample_state_mode.andor_camera_info.exposure = exposure_time
+            self.sample_state_mode.andor_camera_info.gain = emccd_gain
 
 
     def update_andor_config_settings(self, andor_config: AndorConfig):
@@ -570,7 +595,7 @@ class BrillouinBackend:
 
                     measured_freqs.append(MeasurementsPerFreq(
                         set_freq_ghz=freq,
-                        state_mode=self.get_current_state_mode(),
+                        state_mode=self.get_current_system_state(),
                         cali_meas_points=freq_points
                     ))
 
@@ -608,7 +633,7 @@ class BrillouinBackend:
             self.log_message(f"Error shutting down microwave: {e}")
 
         try:
-            self.zaber.close()
+            self.zaber_eye_lens.close()
             self.log_message("Zaber controller closed.")
         except Exception as e:
             self.log_message(f"Error closing Zaber controller: {e}")

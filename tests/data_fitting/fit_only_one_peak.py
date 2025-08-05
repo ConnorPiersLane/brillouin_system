@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from brillouin_system.fitting.lorentzian_fitting import get_fitted_spectrum_lorentzian
+from brillouin_system.archiv.fitting import get_fitted_spectrum_lorentzian
 
 
 # <- Import your new fitting function

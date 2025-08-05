@@ -11,13 +11,9 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import (
 
 class AndorConfigDialog(QDialog):
     def __init__(self, andor_update_config, parent=None):
-        """
-        Args:
-            andor_update_config: Callable that accepts the updated config dataclass
-        """
         super().__init__(parent)
         self.setWindowTitle("Andor Camera Settings")
-        self.setMinimumSize(300, 300)
+        self.setMinimumSize(300, 400)
 
         self.andor_update_config = andor_update_config
 
@@ -34,9 +30,12 @@ class AndorConfigDialog(QDialog):
             "temperature": QLineEdit(),
             "flip_image_horizontally": QCheckBox("Flip Image Horizontally"),
             "verbose": QCheckBox("Verbose Output"),
+            "n_dark_images": QLineEdit(),
+            "n_bg_images": QLineEdit(),
         }
 
-        for key in ["x_start", "x_end", "y_start", "y_end", "vbin", "hbin", "pre_amp_mode", "vss_index"]:
+        # Int validators
+        for key in ["x_start", "x_end", "y_start", "y_end", "vbin", "hbin", "pre_amp_mode", "vss_index", "n_dark_images", "n_bg_images"]:
             self.inputs[key].setValidator(QIntValidator(0, 9999))
 
         layout = QVBoxLayout()
@@ -49,15 +48,12 @@ class AndorConfigDialog(QDialog):
                 row.addWidget(widget)
                 layout.addLayout(row)
 
-        # ---- Buttons ----
+        # Buttons
         btn_layout = QHBoxLayout()
-
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self.apply_settings)
-
         save_btn = QPushButton("Save")
         save_btn.clicked.connect(self.save_config)
-
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close_dialog)
 
@@ -85,6 +81,8 @@ class AndorConfigDialog(QDialog):
         self.inputs["temperature"].setText(str(cfg.temperature))
         self.inputs["flip_image_horizontally"].setChecked(cfg.flip_image_horizontally)
         self.inputs["verbose"].setChecked(cfg.verbose)
+        self.inputs["n_dark_images"].setText(str(cfg.n_dark_images))
+        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images))
 
     def _parse_temperature(self, value: str) -> float | str:
         value = value.strip().lower()
@@ -109,6 +107,8 @@ class AndorConfigDialog(QDialog):
             temperature=self._parse_temperature(self.inputs["temperature"].text()),
             flip_image_horizontally=self.inputs["flip_image_horizontally"].isChecked(),
             verbose=self.inputs["verbose"].isChecked(),
+            n_dark_images=int(self.inputs["n_dark_images"].text()),
+            n_bg_images=int(self.inputs["n_bg_images"].text()),
         )
 
     def apply_settings(self):
@@ -133,7 +133,6 @@ class AndorConfigDialog(QDialog):
 
 if __name__ == "__main__":
     import sys
-
     def andor_update_config(cfg):
         print("[Function Call] Config updated:\n", cfg)
 

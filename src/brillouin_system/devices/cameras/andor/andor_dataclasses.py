@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 
 
 @dataclass
@@ -21,3 +22,4 @@ class AndorCameraInfo:
     flip_image_horizontally: bool
     advanced_gain_option: bool
     vss_speed: float | int
+

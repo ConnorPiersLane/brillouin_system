@@ -1,11 +1,4 @@
-from dataclasses import dataclass, field
-
-import numpy as np
-
-
-from brillouin_system.my_dataclasses.state_mode import StateMode
-from brillouin_system.my_dataclasses.calibration import CalibrationData
-from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
+from dataclasses import dataclass
 
 
 @dataclass
@@ -18,15 +11,5 @@ class MeasurementSettings:
     move_y_rel_um: float = 0.0
     move_z_rel_um: float = 0.0
 
-@dataclass
-class MeasurementPoint:
-    frame: np.ndarray  # Original frame, not subtracted
-    zaber_position: ZaberPosition # tuple[float, float, float]
-    mako_image: np.ndarray | None = field(default=None)
 
-@dataclass
-class MeasurementSeries:
-    measurements: list[MeasurementPoint]
-    state_mode: StateMode
-    settings: MeasurementSettings
-    calibration_data: CalibrationData | None
+

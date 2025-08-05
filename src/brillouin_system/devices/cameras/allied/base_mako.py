@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-class BaseMakoCamera(ABC):
+class BaseAlliedVisionCamera(ABC):
     @abstractmethod
     def set_exposure(self, exposure_us: float):
         """Set the camera exposure time in microseconds."""

@@ -2,40 +2,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from brillouin_system.my_dataclasses.calibration import CalibrationCalculator
-from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings, is_conventional_camera_mode
-from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
+from brillouin_system.calibration.calibration import CalibrationCalculator
+from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
-@dataclass
-class PhotonsCounts:
-    left_peak_photons: float | None
-    right_peak_photons: float | None
-    total_photons: float | None
 
-@dataclass
-class AnalyzedFrame:
-    frame: np.ndarray
-    fitted_spectrum: FittedSpectrum
-    freq_shift_left_peak_ghz: float | None
-    freq_shift_right_peak_ghz: float | None
-    freq_shift_peak_distance_ghz: float | None
-    fwhm_left_peak_ghz: float | None
-    fwhm_right_peak_ghz: float | None
-
-    left_peak_photons: float | None
-    right_peak_photons: float | None
-    total_photons: float | None
-
-def print_analyzed_frame_summary(af: AnalyzedFrame):
-    print("AnalyzedFrame Summary:")
-    print(f"  freq_shift_left_peak_ghz      : {af.freq_shift_left_peak_ghz}")
-    print(f"  freq_shift_right_peak_ghz     : {af.freq_shift_right_peak_ghz}")
-    print(f"  freq_shift_peak_distance_ghz  : {af.freq_shift_peak_distance_ghz}")
-    print(f"  fwhm_left_peak_ghz            : {af.fwhm_left_peak_ghz}")
-    print(f"  fwhm_right_peak_ghz           : {af.fwhm_right_peak_ghz}")
-    print(f"  left_peak_photons             : {af.left_peak_photons}")
-    print(f"  right_peak_photons            : {af.right_peak_photons}")
-    print(f"  total_photons                 : {af.total_photons}")
 
 
 @dataclass

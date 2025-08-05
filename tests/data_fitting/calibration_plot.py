@@ -1,12 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from brillouin_system.my_dataclasses.calibration import (
+from brillouin_system.calibration.calibration import (
     CalibrationData,
     CalibrationResults,
     calibrate, get_calibration_fig,
 )
-from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 
 

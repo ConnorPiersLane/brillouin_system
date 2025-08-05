@@ -11,3 +11,5 @@ vss_index = 4
 temperature = -60.0
 flip_image_horizontally = false
 verbose = true
+n_dark_images = 2
+n_bg_images = 10

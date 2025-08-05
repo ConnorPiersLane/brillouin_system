@@ -1,24 +1,27 @@
-from brillouin_system.my_dataclasses.measurements import (
-    MeasurementSeries, MeasurementPoint, MeasurementSettings
+from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorCameraInfo
+from brillouin_system.my_dataclasses.display_results import DisplayResults
+from brillouin_system.my_dataclasses.human_interface_measurements import (
+    AxialScan, MeasurementPoint, EyeLocation
 )
-from brillouin_system.my_dataclasses.calibration import (
+from brillouin_system.calibration.calibration import (
     CalibrationData, MeasurementsPerFreq, CalibrationMeasurementPoint, CalibrationPolyfitParameters
 )
-from brillouin_system.my_dataclasses.state_mode import StateMode
+from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, BackgroundImage
 from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
-from brillouin_system.my_dataclasses.fitted_results import FittedSpectrum, DisplayResults
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 known_classes = {
     cls.__name__: cls
     for cls in [
-        MeasurementSeries, MeasurementPoint, MeasurementSettings,
+        AxialScan, MeasurementPoint, EyeLocation,
         CalibrationData, MeasurementsPerFreq, CalibrationMeasurementPoint,
         CalibrationPolyfitParameters,
-        StateMode, AndorCameraSettings,
+        SystemState, AndorCameraSettings,
         ImageStatistics, BackgroundImage,
         ZaberPosition,
-        FittedSpectrum, DisplayResults
+        FittedSpectrum, DisplayResults,
+        AndorCameraInfo
     ]
 }

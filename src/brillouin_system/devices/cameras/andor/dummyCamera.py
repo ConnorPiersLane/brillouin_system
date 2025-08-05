@@ -187,7 +187,3 @@ class DummyCamera(BaseCamera):
             exposure_time_s=self.get_exposure_time(),
             emccd_gain=self.get_emccd_gain()
         )
-
-    def set_from_exposure_dataclass(self, andor_exposure: AndorExposure) -> None:
-        self.set_exposure_time(andor_exposure.exposure_time_s)
-        self.set_emccd_gain(andor_exposure.emccd_gain)
