@@ -159,3 +159,20 @@ class ShutterManagerDummy:
         self.reference.shutdown()
         self.sample.shutdown()
         print("[ShutterController] All shutters shut down.")
+
+# TODO: Test this
+import time
+def measure(shutter, n=20):
+    latencies = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        shutter.open()
+        while shutter.get_state() is not True:
+            pass
+        t1 = time.perf_counter()
+        shutter.close()
+        while shutter.get_state() is not False:
+            pass
+        t2 = time.perf_counter()
+        latencies.append((t1 - t0, t2 - t1))  # (open_time, close_time)
+    return latencies
