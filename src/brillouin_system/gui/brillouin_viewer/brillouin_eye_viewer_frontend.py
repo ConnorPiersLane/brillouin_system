@@ -19,6 +19,7 @@ from brillouin_system.calibration.config.calibration_config_gui import Calibrati
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -33,9 +34,7 @@ from brillouin_system.my_dataclasses.human_interface_measurements import Request
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
-
-
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy, ZaberEyeLens
 
 ###
 # Add other guis
@@ -50,7 +49,8 @@ brillouin_manager = BrillouinBackend(
         camera=DummyCamera(),
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
-    zaber_eye_lens=ZaberEyeLensDummy(),
+    zaber_eye_lens=ZaberEyeLens(),
+    zaber_hi=ZaberHumanInterface(),
     is_sample_illumination_continuous=True
 )
 
@@ -89,7 +89,13 @@ class BrillouinEyeViewerFrontend(QWidget):
     snap_requested = pyqtSignal()
     toggle_reference_mode_requested = pyqtSignal()
     acquire_background_requested = pyqtSignal()
+
     move_zaber_eye_lens_requested = pyqtSignal(float)
+    move_zaber_stage_x_requested = pyqtSignal(float)
+    move_zaber_stage_y_requested = pyqtSignal(float)
+    move_zaber_stage_z_requested = pyqtSignal(float)
+
+
     run_calibration_requested = pyqtSignal()
     take_axial_scan_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
@@ -132,7 +138,12 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.snap_requested.connect(self.brillouin_signaller.snap_and_fit)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
         self.acquire_background_requested.connect(self.brillouin_signaller.acquire_background_image)
+
         self.move_zaber_eye_lens_requested.connect(self.brillouin_signaller.move_zaber_eye_lens_relative)
+        self.move_zaber_stage_x_requested.connect(self.brillouin_signaller.move_zaber_stage_x_relative)
+        self.move_zaber_stage_y_requested.connect(self.brillouin_signaller.move_zaber_stage_y_relative)
+        self.move_zaber_stage_z_requested.connect(self.brillouin_signaller.move_zaber_stage_z_relative)
+
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
         self.take_axial_scan_requested.connect(self.brillouin_signaller.take_axial_scan)
         self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
@@ -155,8 +166,12 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.brillouin_signaller.camera_shutter_state_changed.connect(self.update_camera_shutter_button)
         self.brillouin_signaller.frame_and_fit_ready.connect(self.display_result, Qt.QueuedConnection)
         self.brillouin_signaller.measurement_result_ready.connect(self.handle_measurement_results)
+
         self.brillouin_signaller.zaber_lens_position_updated.connect(self.update_zaber_lens_position)
+        self.brillouin_signaller.zaber_stage_positions_updated.connect(self.update_stage_positions)
+
         self.brillouin_signaller.microwave_frequency_updated.connect(self.update_ref_freq_input)
+
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
         self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
@@ -642,6 +657,23 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.lens_back_btn.clicked.connect(lambda: self.move_zaber_lens_by(-1))
         self.lens_forward_btn.clicked.connect(lambda: self.move_zaber_lens_by(+1))
 
+        # Stage Z
+        self.z_back_btn.clicked.connect(
+            lambda: self.move_zaber_stage_z_requested.emit(-float(self.z_step_input.text())))
+        self.z_forward_btn.clicked.connect(
+            lambda: self.move_zaber_stage_z_requested.emit(+float(self.z_step_input.text())))
+
+        # Stage X
+        self.x_left_btn.clicked.connect(
+            lambda: self.move_zaber_stage_x_requested.emit(-float(self.x_step_input.text())))
+        self.x_right_btn.clicked.connect(
+            lambda: self.move_zaber_stage_x_requested.emit(+float(self.x_step_input.text())))
+
+        # Stage Y
+        self.y_up_btn.clicked.connect(lambda: self.move_zaber_stage_y_requested.emit(+float(self.y_step_input.text())))
+        self.y_down_btn.clicked.connect(
+            lambda: self.move_zaber_stage_y_requested.emit(-float(self.y_step_input.text())))
+
         group.setLayout(layout)
         return group
 
@@ -685,6 +717,11 @@ class BrillouinEyeViewerFrontend(QWidget):
             self.move_zaber_eye_lens_requested.emit(direction * step)
         except ValueError:
             print("[Error] Invalid lens step size input.")
+
+    def update_stage_positions(self, x: float, y: float, z: float):
+        self.x_pos_display.setText(f"X {x:.2f} µm")
+        self.y_pos_display.setText(f"Y {y:.2f} µm")
+        self.z_pos_display.setText(f"Z {z:.2f} µm")
 
     def remove_selected_axial_scan(self):
         selected_items = self.axial_scans_list.selectedItems()

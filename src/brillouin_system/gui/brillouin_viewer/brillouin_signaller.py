@@ -55,6 +55,11 @@ class BrillouinSignaller(QObject):
     send_update_stored_axial_scans = pyqtSignal(list)
     axial_scan_data_ready = pyqtSignal(object)
 
+    zaber_stage_positions_updated = pyqtSignal(float, float, float)
+    # (x, y, z) positions in µm
+
+
+
 
 
     # Signals to Frontend
@@ -246,6 +251,37 @@ class BrillouinSignaller(QObject):
             self.zaber_lens_position_updated.emit(pos)
         except Exception as e:
             self.log_message.emit(f"Zaber movement failed: {e}")
+
+    @pyqtSlot(float)
+    def move_zaber_stage_x_relative(self, step: float):
+        try:
+            self.backend.zaber_hi.move_rel(dx=step)
+            self.update_stage_positions()
+        except Exception as e:
+            self.log_message.emit(f"Zaber X move failed: {e}")
+
+    @pyqtSlot(float)
+    def move_zaber_stage_y_relative(self, step: float):
+        try:
+            self.backend.zaber_hi.move_rel(dy=step)
+            self.update_stage_positions()
+        except Exception as e:
+            self.log_message.emit(f"Zaber Y move failed: {e}")
+
+    @pyqtSlot(float)
+    def move_zaber_stage_z_relative(self, step: float):
+        try:
+            self.backend.zaber_hi.move_rel(dz=step)
+            self.update_stage_positions()
+        except Exception as e:
+            self.log_message.emit(f"Zaber Z move failed: {e}")
+
+    def update_stage_positions(self):
+        try:
+            x, y, z = self.backend.zaber_hi.get_position()
+            self.zaber_stage_positions_updated.emit(x, y, z)
+        except Exception as e:
+            self.log_message.emit(f"Failed to read stage positions: {e}")
 
     @pyqtSlot(float)
     def set_microwave_frequency(self, freq: float):
