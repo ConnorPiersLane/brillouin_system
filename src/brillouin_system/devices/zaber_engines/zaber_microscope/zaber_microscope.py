@@ -1,11 +1,9 @@
-from dataclasses import dataclass
-
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection, Axis
 from zaber_motion.microscopy import Illuminator, FilterChanger, IlluminatorChannel
 
-from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
-from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
+from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig
+from brillouin_system.devices.zaber_engines.zaber_position import ZaberPosition
 
 
 

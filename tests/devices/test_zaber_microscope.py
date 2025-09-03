@@ -1,5 +1,5 @@
 from time import sleep
-from brillouin_system.devices.zaber_microscope import ZaberMicroscope
+from brillouin_system.devices.zaber_engines.zaber_microscope import ZaberMicroscope
 
 
 def test_microscope():

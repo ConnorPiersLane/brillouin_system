@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from brillouin_system.devices.zaber_microscope.led_config.led_config import (
+from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import (
     led_config, save_led_settings, led_config_toml_path, LEDConfig
 )
 

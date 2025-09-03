@@ -1,24 +1,20 @@
 import pickle
-from contextlib import contextmanager
 from enum import Enum
 
 import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 import time
 
-from PyQt5.QtWidgets import QApplication, QFileDialog
-
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
-from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
+from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend, SystemType
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan
-from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig, SlineFromFrameConfig, \
-    FittingConfigs
+from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
 
 class SystemState(Enum):

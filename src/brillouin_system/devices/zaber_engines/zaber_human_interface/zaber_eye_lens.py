@@ -20,10 +20,14 @@ class ZaberEyeLens:
         self.axis = devices[0].get_axis(axis_index)
 
         self.home()
+        self.move_init()
 
     def home(self):
         self.axis.home()
         self.axis.wait_until_idle()
+
+    def move_init(self):
+        self.move_abs(12e3)
 
     def move_abs(self, position_um: float):
         self.axis.move_absolute(position_um, Units.LENGTH_MICROMETRES)
@@ -82,3 +86,5 @@ class ZaberEyeLensDummy:
     def close(self):
         print(f"[ZaberEyeLensDummy] Shutdown: port {self.port}, axis {self.axis_index}")
 
+if __name__ == "__main__":
+    zaber_hi = ZaberEyeLens()

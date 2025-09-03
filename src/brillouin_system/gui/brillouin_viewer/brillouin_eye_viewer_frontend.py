@@ -28,13 +28,12 @@ from brillouin_system.devices.shutter_device import ShutterManagerDummy
 from brillouin_system.gui.helpers.show_axial_scan import AxialScanViewer
 
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan, fit_axial_scan, \
-    analyze_axial_scan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan
 
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 
 
 

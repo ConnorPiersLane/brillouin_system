@@ -15,11 +15,11 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
-from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
-from brillouin_system.devices.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
-from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig, led_config
-from brillouin_system.devices.zaber_microscope.zaber_microscope import ZaberMicroscope, DummyZaberMicroscope
+from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig, led_config
+from brillouin_system.devices.zaber_engines.zaber_microscope.zaber_microscope import ZaberMicroscope, DummyZaberMicroscope
 from brillouin_system.spectrum_fitting.helpers.compute_sample_freqs import compute_freq_shift
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
@@ -30,7 +30,7 @@ from brillouin_system.calibration.calibration import CalibrationData, \
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 
-from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 

@@ -3,6 +3,13 @@ from dataclasses import dataclass
 
 @dataclass
 class ZaberPosition:
+    """
+    all in [um]
+    HI (looking from patient into lens):
+    x: right (+) - left (-)
+    y: up (+) - down (-)
+    z: into eye (+) - away from eye (-)
+    """
     x: float
     y: float
     z: float

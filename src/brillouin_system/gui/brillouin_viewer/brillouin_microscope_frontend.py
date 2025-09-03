@@ -21,9 +21,9 @@ from brillouin_system.spectrum_fitting.peak_fitting import FindPeaksConfigDialog
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.cameras.flir.flir_dummy import DummyFLIRCamera
 from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
-from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig
-from brillouin_system.devices.zaber_microscope.led_config.led_config_dialog import LEDConfigDialog
-from brillouin_system.devices.zaber_microscope.zaber_microscope import DummyZaberMicroscope
+from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig
+from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config_dialog import LEDConfigDialog
+from brillouin_system.devices.zaber_engines.zaber_microscope.zaber_microscope import DummyZaberMicroscope
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller, SystemState
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera

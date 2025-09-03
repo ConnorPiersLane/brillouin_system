@@ -9,7 +9,7 @@ from brillouin_system.calibration.calibration import (
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, BackgroundImage
-from brillouin_system.my_dataclasses.zaber_position import ZaberPosition
+from brillouin_system.devices.zaber_engines.zaber_position import ZaberPosition
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 known_classes = {
