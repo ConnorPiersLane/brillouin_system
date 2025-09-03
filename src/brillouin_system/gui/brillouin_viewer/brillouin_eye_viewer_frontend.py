@@ -19,7 +19,8 @@ from brillouin_system.calibration.config.calibration_config_gui import Calibrati
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
-from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
+    ZaberHumanInterfaceDummy
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
@@ -49,8 +50,8 @@ brillouin_manager = BrillouinBackend(
         camera=DummyCamera(),
     shutter_manager=ShutterManagerDummy('human_interface'),
     microwave=MicrowaveDummy(),
-    zaber_eye_lens=ZaberEyeLens(),
-    zaber_hi=ZaberHumanInterface(),
+    zaber_eye_lens=ZaberEyeLensDummy(),
+    zaber_hi=ZaberHumanInterfaceDummy(),
     is_sample_illumination_continuous=True
 )
 
