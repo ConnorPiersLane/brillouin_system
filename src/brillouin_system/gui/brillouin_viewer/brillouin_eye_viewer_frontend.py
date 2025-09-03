@@ -25,9 +25,11 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManagerDummy
+from brillouin_system.gui.helpers.show_axial_scan import AxialScanViewer
 
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan, fit_axial_scan, \
+    analyze_axial_scan
 
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
@@ -98,6 +100,7 @@ class BrillouinEyeViewerFrontend(QWidget):
     update_andor_config_requested = pyqtSignal(object)
     close_all_shutters_requested = pyqtSignal()
     update_fitting_configs_requested = pyqtSignal(FittingConfigs)
+    request_axial_scan_data = pyqtSignal(int)
 
     # Saving Signals
     save_all_axial_scans_requested = pyqtSignal()
@@ -141,6 +144,7 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.update_andor_config_requested.connect(self.brillouin_signaller.update_andor_config_settings)
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
         self.update_fitting_configs_requested.connect(self.brillouin_signaller.update_fitting_configs)
+        self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -159,6 +163,7 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
+        self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
 
         # Saving Signals
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
@@ -467,12 +472,10 @@ class BrillouinEyeViewerFrontend(QWidget):
         layout = QFormLayout()
 
         self.axial_id_input = QLineEdit()
-        self.axial_power_input = QLineEdit()
         self.axial_num_input = QLineEdit("5")
         self.axial_step_input = QLineEdit("9")
 
         layout.addRow("ID:", self.axial_id_input)
-        layout.addRow("Power [mW]:", self.axial_power_input)
         layout.addRow("Num Meas:", self.axial_num_input)
         layout.addRow("Step Size (µm):", self.axial_step_input)
 
@@ -494,6 +497,7 @@ class BrillouinEyeViewerFrontend(QWidget):
         # Show button
         self.shift_show_btn = QPushButton("Show")
         self.shift_show_btn.setFixedWidth(60)
+        self.shift_show_btn.clicked.connect(self.on_show_axial_scan_clicked)
 
         # Horizontal layout
         row = QHBoxLayout()
@@ -543,9 +547,36 @@ class BrillouinEyeViewerFrontend(QWidget):
     def create_andor_display_group(self):
         group = QGroupBox("Andor Frame and Fitting")
 
-        self.fig, (self.ax_img, self.ax_fit) = plt.subplots(2, 1, figsize=(8, 6))
+        self.fig, (self.ax_img, self.ax_fit, self.ax_history) = plt.subplots(3, 1, figsize=(8, 8))
         self.fig.subplots_adjust(hspace=0.9)
         self.canvas = FigureCanvas(self.fig)
+
+        import numpy as np
+        dummy_frame = np.zeros((10, 10))
+        self.img_artist = self.ax_img.imshow(
+            dummy_frame,
+            cmap="gray",
+            aspect="equal",
+            interpolation="none",
+            origin="upper"
+        )
+        self._last_img_shape = dummy_frame.shape
+        self.ax_img.set_xlabel("Pixel (X)")
+        self.ax_img.set_ylabel("Pixel (Y)")
+
+        # spectrum lines
+        (self.spectrum_line,) = self.ax_fit.plot([], [], "k.", label="Spectrum")
+        (self.fit_line,) = self.ax_fit.plot([], [], "r--", label="Fit")
+        self.ax_fit.set_xlabel("Pixel (X)")
+        self.ax_fit.set_ylabel("Intensity")
+
+        # history line
+        from collections import deque
+        self.history_data = deque(maxlen=100)
+        (self.history_line,) = self.ax_history.plot([], [], "b-")
+        self.ax_history.set_title("Last 100 Fits (Frequency Shift)")
+        self.ax_history.set_ylabel("GHz")
+        self.ax_history.set_xlabel("Frame Index")
 
         layout = QVBoxLayout()
         layout.addWidget(self.canvas)
@@ -772,30 +803,46 @@ class BrillouinEyeViewerFrontend(QWidget):
         x_px = display_results.x_pixels
         spectrum = display_results.sline
 
-
-        # --- Image Plot ---
-        self.ax_img.clear()
-        self.ax_img.imshow(frame, cmap="gray", aspect='equal', interpolation='none', origin="upper")
-        self.ax_img.set_xticks(np.arange(0, frame.shape[1], 10))
-        self.ax_img.set_yticks(np.arange(0, frame.shape[0], 5))
-        self.ax_img.set_xlabel("Pixel (X)")
-        self.ax_img.set_ylabel("Pixel (Y)")
+        # --- Image Plot (efficient update if size unchanged) ---
+        h, w = frame.shape
+        if (h, w) != self._last_img_shape:
+            self.ax_img.clear()
+            self.img_artist = self.ax_img.imshow(
+                frame,
+                cmap="gray",
+                aspect="equal",
+                interpolation="none",
+                origin="upper"
+            )
+            self.ax_img.set_xticks(np.arange(0, w, 10))
+            self.ax_img.set_yticks(np.arange(0, h, 5))
+            self.ax_img.set_xlabel("Pixel (X)")
+            self.ax_img.set_ylabel("Pixel (Y)")
+            self._last_img_shape = (h, w)
+        else:
+            self.img_artist.set_data(frame)
 
         # --- Spectrum Plot ---
-        self.ax_fit.clear()
-        self.ax_fit.plot(x_px, spectrum, 'k.', label="Spectrum")
-
-        interpeak = None
-        freq_shift_ghz = None
-
+        self.spectrum_line.set_data(x_px, spectrum)
+        interpeak, freq_shift_ghz = None, None
         if display_results.is_fitting_available:
-            x_fit_refined = display_results.x_fit_refined
-            y_fit_refined = display_results.y_fit_refined
+            self.fit_line.set_data(display_results.x_fit_refined, display_results.y_fit_refined)
             interpeak = display_results.inter_peak_distance
             freq_shift_ghz = display_results.freq_shift_ghz
-            self.ax_fit.plot(x_fit_refined, y_fit_refined, 'r--', label="Fit")
             self.ax_fit.legend()
+        else:
+            self.fit_line.set_data([], [])
+        self.ax_fit.relim()
+        self.ax_fit.autoscale_view()
 
+        # --- History Plot ---
+        if display_results.freq_shift_ghz is not None:
+            self.history_data.append(display_results.freq_shift_ghz)
+            self.history_line.set_data(range(len(self.history_data)), list(self.history_data))
+            self.ax_history.relim()
+            self.ax_history.autoscale_view()
+
+        # --- Spectrum Title ---
         if interpeak is not None and freq_shift_ghz is not None:
             title = f"Spectrum Fit | Interpeak: {interpeak:.2f} px / {freq_shift_ghz:.3f} GHz"
         elif interpeak is not None:
@@ -804,12 +851,11 @@ class BrillouinEyeViewerFrontend(QWidget):
             title = f"Spectrum Fit | Interpeak: - px / {freq_shift_ghz:.3f} GHz"
         else:
             title = "Spectrum Fit | Interpeak: - px / - GHz"
-
         self.ax_fit.set_title(title)
-        self.canvas.draw()
+
+        # --- Redraw once ---
+        self.canvas.draw_idle()
         self.brillouin_signaller.gui_ready_received.emit()
-
-
 
     # ---------------- Handlers ---------------- #
 
@@ -915,6 +961,23 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.shift_scan_combo.clear()
         self.shift_scan_combo.addItems(scan_list)
 
+    def on_show_axial_scan_clicked(self):
+        selected_scan = self.shift_scan_combo.currentText()
+        if not selected_scan:
+            print("[Brillouin Viewer] No axial available.")
+            return
+
+        i = int(selected_scan.split(" - ")[0])
+
+        self.request_axial_scan_data.emit(i)
+
+    def handle_received_axial_scan_data(self, scan_data: AxialScan):
+        self.axial_viewer = AxialScanViewer(scan_data)
+        self.axial_viewer.resize(900, 900)
+        self.axial_viewer.show()
+
+
+
     def run_calibration(self):
         self.run_calibration_requested.emit()
 
@@ -982,13 +1045,12 @@ class BrillouinEyeViewerFrontend(QWidget):
     def take_axial_scan(self):
         try:
             id_str = self.axial_id_input.text().strip()
-            power = float(self.axial_power_input.text())
             n_meas = int(self.axial_num_input.text())
             step = float(self.axial_step_input.text())
 
             # Log info
             print(
-                f"[Brillouin Viewer] Axial Scan Request | ID: {id_str}, Power: {power} mW, N: {n_meas}, Step: {step} µm")
+                f"[Brillouin Viewer] Axial Scan Request | ID: {id_str}, N: {n_meas}, Step: {step} µm")
 
             # Stop live view before scanning
             self.stop_live_requested.emit()
@@ -996,7 +1058,6 @@ class BrillouinEyeViewerFrontend(QWidget):
 
             request = RequestAxialScan(
                 id=id_str,
-                power_mW=power,
                 n_measurements=n_meas,
                 step_size_um=step,
             )

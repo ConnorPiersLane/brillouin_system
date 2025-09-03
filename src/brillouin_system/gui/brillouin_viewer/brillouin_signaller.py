@@ -57,6 +57,7 @@ class BrillouinSignaller(QObject):
     calibration_result_ready = pyqtSignal(object)
     flir_frame_ready = pyqtSignal(np.ndarray)
     send_update_stored_axial_scans = pyqtSignal(list)
+    axial_scan_data_ready = pyqtSignal(object)
 
 
 
@@ -243,11 +244,9 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot(float)
     def move_zaber_eye_lens_relative(self, step: float):
-        #TODO: update this
         try:
             self.backend.zaber_eye_lens.move_rel(step)
             pos = self.backend.zaber_eye_lens.get_position()
-            self.log_message.emit(f"Zaber Lens moved by {step} µm to {pos:.2f} µm")
             self.zaber_lens_position_updated.emit(pos)
         except Exception as e:
             self.log_message.emit(f"Zaber movement failed: {e}")
@@ -417,6 +416,14 @@ class BrillouinSignaller(QObject):
         finally:
             self.update_system_state(new_state=old_state)
             self.restart_live_view_when_ready()
+
+    @pyqtSlot(int)
+    def handle_request_axial_scan_data(self, index: int):
+        scan_data = self.backend.get_axial_scan_data(index)  # pure Python call
+        if scan_data is not None:
+            self.axial_scan_data_ready.emit(scan_data)
+        else:
+            print(f"[Signaller] Requested scan index {index} not found.")
 
     # Flir Camera
     @pyqtSlot(object)

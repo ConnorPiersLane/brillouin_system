@@ -15,7 +15,6 @@ class CalibrationConfig:
     stop: float
     step: float
     reference: str  # "left", "right", or "distance"
-    safe_each_scan: bool
 
     @property
     def calibration_freqs(self) -> list[float]:
@@ -34,7 +33,7 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         stop=raw["stop"],
         step=raw["step"],
         reference=raw["reference"],
-        safe_each_scan=raw.get("safe_each_scan", False)  # <-- added
+
     )
 
 
@@ -44,7 +43,7 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
 
     raw = asdict(config.get_raw())
     data["calibration"] = {
-        k: raw[k] for k in ["n_per_freq", "degree", "start", "stop", "step", "reference", "safe_each_scan"]
+        k: raw[k] for k in ["n_per_freq", "degree", "start", "stop", "step", "reference"]
     }
 
     with path.open("wb") as f:

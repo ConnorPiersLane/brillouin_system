@@ -33,7 +33,7 @@ class AnalyzerManager:
     def get_current_calibration(self, use_series: bool, selected_index: int):
         if use_series:
             if 0 <= selected_index < len(self.stored_axial_scans):
-                return self.stored_axial_scans[selected_index].calibration_data
+                return self.stored_axial_scans[selected_index].calibration_params
             else:
                 raise ValueError(f"index out of range: {selected_index} from {len(self.stored_axial_scans)}")
         return self.calibration_data_from_file
@@ -106,11 +106,11 @@ class AnalyzerManager:
                            ) -> AnalyzedAxialScan | None:
 
         if is_use_own_calibration_data:
-            if axial_scan.calibration_data is None:
+            if axial_scan.calibration_params is None:
                 print("No Calibration Data available in this measurement series")
                 return None
             else:
-                calibration_calculator = get_calibration_calculator_from_data(axial_scan.calibration_data)
+                calibration_calculator = get_calibration_calculator_from_data(axial_scan.calibration_params)
         else:
             if self.calibration_calculator_from_file is None:
                 print("No Calibration available from file. Load File and Calibrate")

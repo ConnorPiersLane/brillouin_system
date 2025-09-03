@@ -16,6 +16,8 @@ from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
+from brillouin_system.devices.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
+    ZaberHumanInterfaceDummy
 from brillouin_system.devices.zaber_microscope.led_config.led_config import LEDConfig, led_config
 from brillouin_system.devices.zaber_microscope.zaber_microscope import ZaberMicroscope, DummyZaberMicroscope
 from brillouin_system.spectrum_fitting.helpers.compute_sample_freqs import compute_freq_shift
@@ -24,7 +26,7 @@ from brillouin_system.my_dataclasses.display_results import DisplayResults
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, MeasurementPoint, AxialScan
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
-    CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, get_calibration_calculator_from_data
+    CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 
@@ -60,6 +62,7 @@ class BrillouinBackend:
                  microwave: Microwave | MicrowaveDummy,
                  zaber_eye_lens: None | ZaberEyeLens | ZaberEyeLensDummy = None,
                  zaber_microscope: None | ZaberMicroscope | DummyZaberMicroscope= None,
+                 zaber_hi: None | ZaberHumanInterface | ZaberHumanInterfaceDummy = None,
                  flir_cam_worker: None | FlirWorker = None,
                  is_sample_illumination_continuous: bool = False,
                  ):
@@ -92,6 +95,7 @@ class BrillouinBackend:
         if self.zaber_microscope is not None:
             self.zaber_microscope.set_led_illumination(led_config=led_config.get())
 
+        self.zaber_hi = zaber_hi
 
         self.flir_cam_worker = flir_cam_worker
         if self.flir_cam_worker is not None:
@@ -105,6 +109,7 @@ class BrillouinBackend:
 
         # Calibration
         self.calibration_data: CalibrationData | None = None
+        self.calibration_poly_fit_params: CalibrationPolyfitParameters | None = None
         self.calibration_calculator: CalibrationCalculator | None = None
 
         # Background (BG) Image and dark_image for the sample
@@ -256,7 +261,7 @@ class BrillouinBackend:
         if not self.is_background_image_available():
             print("[AcquisitionManager] No background image available")
             return frame
-        return subtract_background(frame=frame, bg_frame=self.bg_image.mean_image)
+        return subtract_background(frame=frame, bg_frame=self.bg_image)
 
 
     def take_n_images(self, n_images) -> np.ndarray:
@@ -390,9 +395,11 @@ class BrillouinBackend:
 
     def update_calibration_calculator(self):
         if self.calibration_data is None:
+            self.calibration_poly_fit_params = None
             self.calibration_calculator = None
         else:
-            self.calibration_calculator: CalibrationCalculator = get_calibration_calculator_from_data(self.calibration_data)
+            self.calibration_poly_fit_params = calibrate(data=self.calibration_data)
+            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(parameters=self.calibration_poly_fit_params)
 
 
     def take_one_measurement(self) -> MeasurementPoint:
@@ -411,7 +418,7 @@ class BrillouinBackend:
 
         print(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
               f"step size: {request_axial_scan.step_size_um} µm, "
-              f"ID: {request_axial_scan.id}, power: {request_axial_scan.power_mW:.2f} mW")
+              f"ID: {request_axial_scan.id}")
 
         all_results = []
 
@@ -448,22 +455,21 @@ class BrillouinBackend:
 
         self._i_axial_scans += 1
 
-        cali_config: CalibrationConfig = calibration_config.get()
-        if cali_config.safe_each_scan:
-            calibration_data = self.calibration_data
-        else:
-            calibration_data = None
-
         axial_scan = AxialScan(
             i=self._i_axial_scans,
             id=request_axial_scan.id,
-            power_mW=request_axial_scan.power_mW,
             measurements=all_results,
             system_state=self.get_current_system_state(),
-            calibration_data=calibration_data,
+            calibration_params=self.calibration_poly_fit_params,
             eye_location= None
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
+
+    def get_axial_scan_data(self, index: int):
+        try:
+            return self.axial_scan_dict[index]
+        except (IndexError, KeyError):
+            return None
 
     def get_freq_shift(self, fitting: FittedSpectrum) -> float | None:
         return compute_freq_shift(fitting=fitting, calibration_calculator=self.calibration_calculator)

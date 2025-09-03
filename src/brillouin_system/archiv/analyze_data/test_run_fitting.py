@@ -35,7 +35,7 @@ for series in series_list:
 
 slines = [mp.fitting_results.sline for mp in s.measurements]
 
-cali = s.calibration_data.peak_distance
+cali = s.calibration_params.peak_distance
 
 fitted_spectras = [get_fitted_spectrum_from_sline_only_lorentzian(sline, None, False) for sline in slines]
 freqs = [cali.get_freq(fs.inter_peak_distance) for fs in fitted_spectras]

@@ -2,13 +2,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
+from brillouin_system.calibration.calibration import CalibrationCalculator, CalibrationPolyfitParameters
 from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, \
     calculate_photon_counts_from_fitted_spectrum
-from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
+from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
@@ -17,7 +17,6 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 @dataclass
 class RequestAxialScan:
     id: str
-    power_mW: float
     n_measurements: int
     step_size_um: float
 
@@ -38,10 +37,9 @@ class EyeLocation:
 class AxialScan:
     i: int  # internal tracker
     id: str
-    power_mW: float
     measurements: list[MeasurementPoint]
     system_state: SystemState
-    calibration_data: CalibrationData | None
+    calibration_params: CalibrationPolyfitParameters | None
     eye_location: None | EyeLocation = None
 
 # -------------- Scan Fitting --------------
@@ -59,12 +57,11 @@ class AnalysedAxialScan:
     freq_shifts: list[AnalyzedFreqShifts]
 
 # -------------- Functions --------------
-def fit_axial_scan(scan: AxialScan,
-                    do_bg_subtraction: None | bool = None) -> FittedAxialScan:
+def fit_axial_scan(scan: AxialScan) -> FittedAxialScan:
     spectrum_fitter = SpectrumFitter()
 
-    if do_bg_subtraction is None:
-        do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
+
+    do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
 
     is_reference_mode = scan.system_state.is_reference_mode
 
@@ -75,9 +72,9 @@ def fit_axial_scan(scan: AxialScan,
         frame = measurement.frame_andor.copy()
 
         if do_bg_subtraction:
-            if scan.system_state.bg_image is None:
-                raise ValueError(f"No Background image available for this scan")
-            frame = subtract_background(frame=frame, bg_frame=scan.system_state.bg_image.mean_image)
+            frame = subtract_background(frame=frame, bg_frame=scan.system_state.bg_image)
+        else:
+            frame = subtract_darknoise(frame=frame, darknoise_frame=scan.system_state.dark_image)
 
         # Generate sline
         sline = spectrum_fitter.get_sline_from_image(frame)
@@ -93,16 +90,17 @@ def fit_axial_scan(scan: AxialScan,
         fitted_measurement_points.append(fitting)
         photons_points.append(photons)
 
-        return FittedAxialScan(
-            axial_scan=scan,
-            fitted_spectras=fitted_measurement_points,
-            fitted_photon_counts=photons_points
-        )
+    return FittedAxialScan(
+        axial_scan=scan,
+        fitted_spectras=fitted_measurement_points,
+        fitted_photon_counts=photons_points
+    )
 
 
 
-def analyze_axial_scan(fitted_scan: FittedAxialScan,
-                       calibration_calculator: CalibrationCalculator) -> AnalysedAxialScan:
+def analyze_axial_scan(fitted_scan: FittedAxialScan) -> AnalysedAxialScan:
+    calibration_calculator = CalibrationCalculator(fitted_scan.axial_scan.calibration_params)
+
     spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
     analyzed_freqs_shifts = []

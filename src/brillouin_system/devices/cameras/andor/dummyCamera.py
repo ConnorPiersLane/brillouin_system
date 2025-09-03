@@ -12,7 +12,6 @@ class DummyCamera(BaseCamera):
         self.gain = 1
         self.roi = (0, 160, 0, 20)
         self.binning = (1, 1)
-        self.frame_shape = (20, 160)
         self.verbose = True
 
         # NEW ATTRIBUTES
@@ -60,15 +59,15 @@ class DummyCamera(BaseCamera):
         return frame
 
     def _generate_plastic_image(self) -> np.ndarray:
-        h, w = self.frame_shape
+        h, w = self.get_frame_shape()
         image = np.random.normal(loc=150, scale=10, size=(h, w))
 
         def lorentzian(xx, amp, cen, wid):
             return amp * wid ** 2 / ((xx - cen) ** 2 + wid ** 2)
 
         x = np.arange(w)
-        peak1 = lorentzian(x, amp=1000, cen=w // 2 - 30, wid=4)
-        peak2 = lorentzian(x, amp=1000, cen=w // 2 + 30, wid=4)
+        peak1 = lorentzian(x, amp=1000, cen=w // 2 - 20, wid=4)
+        peak2 = lorentzian(x, amp=1000, cen=w // 2 + 20, wid=4)
         spectrum_line = peak1 + peak2 + 200 + np.random.normal(0, 15, size=w)
 
         band_y = h // 2 + np.random.randint(-2, 2)
@@ -109,7 +108,7 @@ class DummyCamera(BaseCamera):
         print("[DummyCamera] Closed.")
 
     def get_frame_shape(self) -> tuple[int, int]:
-        return self.frame_shape
+        return self.roi[3]-self.roi[2], self.roi[1]-self.roi[0]
 
     def get_verbose(self) -> bool:
         return self.verbose
@@ -119,7 +118,7 @@ class DummyCamera(BaseCamera):
         print(f"[DummyCamera] set to self.verbose={self.verbose}")
 
     def get_preamp_gain(self) -> int:
-        return 1.0
+        return 1
 
     def get_amp_mode(self) -> str:
         return f"DummyAmpMode(preamp_mode={self._pre_amp_mode})"
@@ -154,7 +153,7 @@ class DummyCamera(BaseCamera):
     def set_from_config_file(self, config: AndorConfig) -> None:
 
         if self.verbose:
-            print("[IxonUltra] Applying settings from config...")
+            print("[DummyCamera] Applying settings from config...")
 
 
         self.set_verbose(config.verbose)

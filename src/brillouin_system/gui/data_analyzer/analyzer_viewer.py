@@ -281,7 +281,7 @@ class AnalyzerViewer(QWidget):
 
             index = self.series_list_widget.row(selected_items[0])
             series = self.analyze_manager.stored_axial_scans[index]
-            calibration_data = series.calibration_data
+            calibration_data = series.calibration_params
         else:
             calibration_data = self.analyze_manager.calibration_data_from_file
 

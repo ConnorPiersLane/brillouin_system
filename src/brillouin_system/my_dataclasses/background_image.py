@@ -6,10 +6,12 @@ import numpy as np
 def generate_image_statistics_dataclass(images: list[np.ndarray] | np.ndarray):
     mean_image: np.ndarray = np.mean(images, axis=0)
     std_image: np.ndarray = np.std(images, axis=0)
+    median_image: np.ndarray = np.median(images, axis=0)
     n_images: list[np.ndarray] | np.ndarray = images
     return ImageStatistics(
         mean_image=mean_image,
         std_image=std_image,
+        median_image=median_image,
         n=len(n_images),
     )
 
@@ -17,6 +19,7 @@ def generate_image_statistics_dataclass(images: list[np.ndarray] | np.ndarray):
 class ImageStatistics:
     mean_image: np.ndarray
     std_image: np.ndarray
+    median_image: np.ndarray
     n: int
 
 @dataclass

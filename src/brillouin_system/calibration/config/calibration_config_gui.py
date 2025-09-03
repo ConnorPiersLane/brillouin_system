@@ -1,7 +1,7 @@
 # calibration_config_gui.py
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton,
-    QButtonGroup, QPushButton, QLabel, QMessageBox, QCheckBox
+    QButtonGroup, QPushButton, QLabel, QMessageBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 
@@ -40,15 +40,12 @@ class CalibrationConfigDialog(QDialog):
         toggle_layout.addWidget(self.right_radio)
         toggle_layout.addWidget(self.dist_radio)
 
-        self.safe_checkbox = QCheckBox("Safe Calibration Data for each Scan")
-
         form.addRow("n_per_freq:", self.n_per_freq_input)
         form.addRow("Polynomial Degree:", self.degree_input)
         form.addRow("Start Frequency (GHz):", self.start_input)
         form.addRow("Stop Frequency (GHz):", self.stop_input)
         form.addRow("Step (GHz):", self.step_input)
         form.addRow(QLabel("Reference Method:"), toggle_layout)
-        form.addRow(self.safe_checkbox)
 
         layout.addLayout(form)
 
@@ -74,7 +71,6 @@ class CalibrationConfigDialog(QDialog):
         else:
             self.dist_radio.setChecked(True)
 
-        self.safe_checkbox.setChecked(cfg.safe_each_scan)
 
     def save_config(self):
         try:
@@ -91,7 +87,6 @@ class CalibrationConfigDialog(QDialog):
                 stop=float(self.stop_input.text()),
                 step=float(self.step_input.text()),
                 reference=reference,
-                safe_each_scan=self.safe_checkbox.isChecked()
             )
 
             save_calibration_config(CALIBRATION_TOML_PATH, calibration_config)
