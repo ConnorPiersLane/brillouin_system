@@ -65,6 +65,9 @@ class BrillouinSignaller(QObject):
     # Signals to Frontend
     update_system_state_in_frontend = pyqtSignal(SystemState)
 
+    # Eye Tracking
+    eye_tracking_result_ready = pyqtSignal(object)
+
 
     def __init__(self, manager: BrillouinBackend):
         super().__init__()
