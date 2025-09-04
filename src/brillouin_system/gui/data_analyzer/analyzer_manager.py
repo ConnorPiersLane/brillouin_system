@@ -3,7 +3,7 @@
 import pickle
 from PyQt5.QtWidgets import QFileDialog
 
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalyzedAxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalysedAxialScan
 from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator, \
     get_calibration_calculator_from_data
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
@@ -18,7 +18,7 @@ class AnalyzerManager:
         self.stored_axial_scans = []
         self.series_filenames: dict[int, str] = {}  # Maps series index to filename
 
-        self.analyzed_series_lookup: dict[int, AnalyzedAxialScan] = {}
+        self.analyzed_series_lookup: dict[int, AnalysedAxialScan] = {}
 
     def load_measurement_series(self, axial_scan: AxialScan):
         self.stored_axial_scans.append(axial_scan)
@@ -103,7 +103,7 @@ class AnalyzerManager:
                            axial_scan: AxialScan,
                            is_do_bg_subtraction: bool,
                            is_use_own_calibration_data: bool,
-                           ) -> AnalyzedAxialScan | None:
+                           ) -> AnalysedAxialScan | None:
 
         if is_use_own_calibration_data:
             if axial_scan.calibration_params is None:

@@ -24,12 +24,7 @@ _VERSION = "1.0"
 # Dataclass Registry (Auto-Register via Decorator)
 # =============================================================================
 
-known_classes: dict[str, Any] = {}
 
-def register_dataclass(cls):
-    """Register a dataclass so it can be rehydrated from HDF5."""
-    known_classes[cls.__name__] = cls
-    return cls
 
 # =============================================================================
 # Serialization Functions

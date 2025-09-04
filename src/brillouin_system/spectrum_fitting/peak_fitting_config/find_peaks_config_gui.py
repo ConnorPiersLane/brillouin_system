@@ -14,7 +14,7 @@ class FindPeaksConfigDialog(QDialog):
     def __init__(self, on_apply=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Find Peaks Configuration")
-        self.setMinimumSize(500, 500)
+        # self.setMinimumSize(500, 500)
 
         self.sample_inputs = {}
         self.reference_inputs = {}

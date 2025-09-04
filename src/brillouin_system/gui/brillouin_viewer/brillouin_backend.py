@@ -384,7 +384,7 @@ class BrillouinBackend:
         else:
             sline = self.spectrum_fitter.get_sline_from_image(frame)
 
-        if not self.do_live_fitting:
+        if not self.do_live_fitting and not self.is_reference_mode:
             return self.spectrum_fitter.get_empty_fitting(sline)
 
         try:
@@ -413,28 +413,17 @@ class BrillouinBackend:
         )
 
     def take_axial_scan(self, request_axial_scan: RequestAxialScan):
-        lens_x0 = self.zaber_eye_lens.get_position()
-        dx = request_axial_scan.step_size_um
 
-        print(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
-              f"step size: {request_axial_scan.step_size_um} µm, "
-              f"ID: {request_axial_scan.id}")
+        if self.is_reference_mode:
+            print(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
+            lens_x0 = self.zaber_eye_lens.get_position()
 
-        all_results = []
-
-        try:
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.open()
+            all_results = []
 
             for i in range(request_axial_scan.n_measurements):
                 if self.f2b_cancel_callback():
-                    print(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
-                    self.zaber_eye_lens.move_rel(lens_x0)
+                    print(f"[Axial Scan] Cancelled during step {i}.")
                     return False
-
-                self.zaber_eye_lens.move_rel(dx)
-                zaber_pos = self.zaber_eye_lens.get_position()
-                self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
                 frame = self._get_andor_camera_snap()
 
@@ -444,14 +433,51 @@ class BrillouinBackend:
                 all_results.append(
                     MeasurementPoint(
                     frame_andor=frame,
-                    lens_zaber_position=zaber_pos,
+                    lens_zaber_position=lens_x0,
                     frame_left_allied=None,
                     frame_right_allied=None,)
                 )
 
-        finally:
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.close()
+        else:
+            lens_x0 = self.zaber_eye_lens.get_position()
+            dx = request_axial_scan.step_size_um
+
+            print(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
+                  f"step size: {request_axial_scan.step_size_um} µm, "
+                  f"ID: {request_axial_scan.id}")
+
+            all_results = []
+
+            try:
+                if not self.is_sample_illumination_continuous:
+                    self.shutter_manager.sample.open()
+
+                for i in range(request_axial_scan.n_measurements):
+                    if self.f2b_cancel_callback():
+                        print(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
+                        self.zaber_eye_lens.move_rel(lens_x0)
+                        return False
+
+                    self.zaber_eye_lens.move_rel(dx)
+                    zaber_pos = self.zaber_eye_lens.get_position()
+                    self.b2f_emit_update_zaber_lens_position(zaber_pos)
+
+                    frame = self._get_andor_camera_snap()
+
+                    fs = self.get_fitted_spectrum(frame)
+                    self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
+
+                    all_results.append(
+                        MeasurementPoint(
+                        frame_andor=frame,
+                        lens_zaber_position=zaber_pos,
+                        frame_left_allied=None,
+                        frame_right_allied=None,)
+                    )
+
+            finally:
+                if not self.is_sample_illumination_continuous:
+                    self.shutter_manager.sample.close()
 
         self._i_axial_scans += 1
 

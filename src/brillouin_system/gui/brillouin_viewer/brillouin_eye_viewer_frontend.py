@@ -1010,7 +1010,6 @@ class BrillouinEyeViewerFrontend(QWidget):
 
     def handle_received_axial_scan_data(self, scan_data: AxialScan):
         self.axial_viewer = AxialScanViewer(scan_data)
-        self.axial_viewer.resize(900, 900)
         self.axial_viewer.show()
 
 

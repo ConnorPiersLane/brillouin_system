@@ -1,6 +1,7 @@
 import sys
 import pickle
 import numpy as np
+import scipy
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout,
@@ -10,11 +11,15 @@ from PyQt5.QtCore import Qt
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from scipy.stats import norm
 
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, analyze_axial_scan
 )
+from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
+
 
 #
 # plt.rcParams.update({
@@ -39,6 +44,7 @@ class AxialScanViewer(QWidget):
         self.current_index = 0
 
         self.init_ui()
+        self.print_scan_overview()
         self.update_display()
 
     def init_ui(self):
@@ -54,9 +60,21 @@ class AxialScanViewer(QWidget):
         plot_group = QGroupBox("Axial Scan Data")
         plot_layout = QVBoxLayout()
 
-        self.fig, (self.ax_img, self.ax_spec, self.ax_axial) = plt.subplots(3, 1, figsize=(8, 6))
+        # Create independent figure (no global plt state)
+        self.fig = Figure(figsize=(8, 6))
+
+        # Create subplots explicitly
+        self.ax_img = self.fig.add_subplot(311)
+        self.ax_spec = self.fig.add_subplot(312)
+        self.ax_axial = self.fig.add_subplot(313)
+
+        # Adjust layout
         self.fig.subplots_adjust(hspace=1, bottom=0.15)
+
+        # Wrap in a Qt canvas
         self.canvas = FigureCanvas(self.fig)
+
+        # Add to layout
         plot_layout.addWidget(self.canvas)
         plot_group.setLayout(plot_layout)
         outer_layout.addWidget(plot_group)
@@ -78,11 +96,16 @@ class AxialScanViewer(QWidget):
         self.right_btn.clicked.connect(self.on_right_clicked)
         nav_layout.addWidget(self.right_btn)
 
+        self.analyze_btn = QPushButton("Analyze SNR")
+        self.analyze_btn.clicked.connect(self.on_analyze_snr)
+        nav_layout.addWidget(self.analyze_btn)
+
         nav_layout.addStretch()
         outer_layout.addLayout(nav_layout)
 
     def update_display(self):
         mp = self.axial_scan.measurements[self.current_index]
+        self.print_measurement_info(self.current_index)
         frame = mp.frame_andor
 
         self.info_label.setText(
@@ -153,11 +176,115 @@ class AxialScanViewer(QWidget):
             self.current_index += 1
             self.index_spinner.setValue(self.current_index)
 
+    def on_analyze_snr(self):
+        """Plot histogram of frequency shifts with Gaussian fit."""
+        config = calibration_config.get()
+
+        if config.reference == 'left':
+            freq_shifts = [fs.freq_shift_left_peak_ghz for fs in self.analyzed_data.freq_shifts]
+        elif config.reference == 'right':
+            freq_shifts = [fs.freq_shift_right_peak_ghz for fs in self.analyzed_data.freq_shifts]
+        else:
+            freq_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
+
+        freq_shifts = np.array(freq_shifts)
+
+        # --- Compute stats ---
+        mu = np.mean(freq_shifts)
+        sigma = np.std(freq_shifts, ddof=1)  # sample std
+        n = len(freq_shifts)
+
+        print("==== Analyze SNR ====")
+        print(f"Mean: {mu:.3f} GHz")
+        print(f"Std: {sigma:.3f} GHz")
+        print(f"n: {n}")
+        print(f"Reference Peak (left, right, distance): {config.reference}")
+        print("=====================")
+
+        # --- Plot histogram ---
+        fig = Figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
+        counts, bins, patches = ax.hist(freq_shifts, bins=15, color="skyblue", edgecolor="black", density=False,
+                                        alpha=0.6)
+
+        # Gaussian fit overlay
+        x = np.linspace(min(freq_shifts), max(freq_shifts), 200)
+        bin_width = bins[1] - bins[0]
+        pdf = norm.pdf(x, mu, sigma) * n * bin_width
+        ax.plot(x, pdf, "r-", lw=2, label=f"Gaussian Fit\nμ={mu:.2f}, σ={sigma:.2f}")
+
+        ax.set_xlabel("Frequency Shift (GHz)")
+        ax.set_ylabel("Density")
+        ax.set_title("Histogram of Frequency Shifts with Gaussian Fit")
+        ax.legend()
+
+        # --- Show histogram in a new window ---
+        hist_window = QWidget()
+        hist_window.setWindowTitle("Analyze SNR - Frequency Shift Histogram")
+        layout = QVBoxLayout(hist_window)
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        hist_window.setLayout(layout)
+        hist_window.resize(600, 400)
+        hist_window.show()
+
+        # Keep reference
+        if not hasattr(self, "open_hist_windows"):
+            self.open_hist_windows = []
+        self.open_hist_windows.append(hist_window)
+
+    def print_scan_overview(self):
+        """Print static information about the scan (once at init)."""
+        scan = self.axial_scan
+        print("==== Axial Scan Overview ====")
+        print(f"Internal tracker i: {scan.i}")
+        print(f"ID: {scan.id}")
+        print(f"Number of measurements: {len(scan.measurements)}")
+
+        if scan.calibration_params:
+            print(f"Calibration Params: {scan.calibration_params}")
+        else:
+            print("Calibration Params: None")
+
+        if scan.eye_location:
+            print(f"Eye Location index: {scan.eye_location.index}")
+        else:
+            print("Eye Location: None")
+
+        ss = scan.system_state
+        print(f"System State: reference_mode={ss.is_reference_mode}, "
+              f"bg_subtraction={ss.is_do_bg_subtraction_active}, "
+              f"exposure={ss.andor_camera_info.exposure}, "
+              f"gain={ss.andor_camera_info.gain}")
+        print("=============================")
+
+    def print_measurement_info(self, index: int):
+        """Print info for the given measurement index (depends on current_index)."""
+        mp = self.axial_scan.measurements[index]
+        freq_shift = self.analyzed_data.freq_shifts[index]
+        photons: PhotonsCounts = self.analyzed_data.fitted_scan.fitted_photon_counts[index]
+
+        print(f"--- Measurement {index} ---")
+        print(f"Zaber position: {mp.lens_zaber_position:.2f} µm")
+        print(f"Freq shifts: left={freq_shift.freq_shift_left_peak_ghz:.3f}, "
+              f"right={freq_shift.freq_shift_right_peak_ghz:.3f}, "
+              f"distance={freq_shift.freq_shift_peak_distance_ghz:.3f}")
+        print(f"FWHM: left={freq_shift.fwhm_left_peak_ghz:.3f}, "
+              f"right={freq_shift.fwhm_right_peak_ghz:.3f}")
+        print(f"Photons: left={photons.left_peak_photons}, "
+              f"right={photons.right_peak_photons}, "
+              f"total={photons.total_photons}")
+        print("----------------------------")
+
+
 
 def load_axial_scan_from_file(path: str) -> AxialScan:
     with open(path, "rb") as f:
         scan = pickle.load(f)
     return scan
+
+
+
 
 
 if __name__ == "__main__":
