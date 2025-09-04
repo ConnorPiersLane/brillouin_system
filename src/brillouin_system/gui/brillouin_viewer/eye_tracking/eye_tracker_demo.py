@@ -9,6 +9,8 @@ from eye_tracker_proxy import EyeTrackerProxy
 
 
 
+
+
 def numpy_to_qpixmap(arr: np.ndarray) -> QPixmap:
     """Convert grayscale numpy image to QPixmap."""
     h, w = arr.shape

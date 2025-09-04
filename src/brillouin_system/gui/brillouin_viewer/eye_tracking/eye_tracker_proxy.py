@@ -11,6 +11,7 @@ class EyeTrackerProxy:
         self.evt_q: Optional[mp.Queue] = None
         self.proc: Optional[mp.Process] = None
 
+
         # Local state
         self.left_ring: Optional[ShmRing] = None
         self.right_ring: Optional[ShmRing] = None

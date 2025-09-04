@@ -29,7 +29,7 @@ class ShmRing:
         assert arr.shape == self.spec.shape, f"Shape mismatch: arr {arr.shape}, spec {self.spec.shape}"
         start = idx * self.item_nbytes
         mv = memoryview(self.buf)[start:start + self.item_nbytes]
-        mv[:] = arr.tobytes()  # <-- FIX: use tobytes, not arr.view('B')
+        mv[:] = arr.tobytes()
 
     def read_slot(self, idx: int) -> np.ndarray:
         assert 0 <= idx < self.spec.slots
