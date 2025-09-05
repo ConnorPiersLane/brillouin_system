@@ -193,17 +193,18 @@ class AxialScanViewer(QWidget):
         else:
             freq_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
 
-        # Drop None values
-        freq_shifts = [fs for fs in freq_shifts if fs is not None]
+        # Drop None + NaN
+        freq_shifts = np.array([fs for fs in freq_shifts if fs is not None], dtype=float)
+        freq_shifts = freq_shifts[~np.isnan(freq_shifts)]
 
-        if not freq_shifts:
-            print("[Warning] No valid frequency shifts available.")
-            mu, sigma, n = None, None, 0
-        else:
-            freq_shifts = np.array(freq_shifts, dtype=float)
-            mu = np.mean(freq_shifts)
-            sigma = np.std(freq_shifts, ddof=1)  # sample std
-            n = len(freq_shifts)
+        if freq_shifts.size == 0:
+            print("[Warning] No valid frequency shifts to plot.")
+            return
+
+        # Stats
+        mu = np.mean(freq_shifts)
+        sigma = np.std(freq_shifts, ddof=1) if freq_shifts.size > 1 else 0.0
+        n = freq_shifts.size
 
         def fmt(val, precision=3, unit=""):
             return f"{val:.{precision}f}{unit}" if val is not None else "N/A"
@@ -215,24 +216,28 @@ class AxialScanViewer(QWidget):
         print(f"Reference Peak (left, right, distance): {config.reference}")
         print("=====================")
 
-        if not freq_shifts:  # nothing valid to plot
-            print("[Warning] No valid frequency shifts to plot.")
-            return
-
         # --- Plot histogram ---
         fig = Figure(figsize=(6, 4))
         ax = fig.add_subplot(111)
-        counts, bins, patches = ax.hist(freq_shifts, bins=15, color="skyblue", edgecolor="black", density=False,
-                                        alpha=0.6)
+        counts, bins, patches = ax.hist(
+            freq_shifts, bins=15, color="skyblue", edgecolor="black", alpha=0.6
+        )
 
-        # Gaussian fit overlay
-        x = np.linspace(min(freq_shifts), max(freq_shifts), 200)
-        bin_width = bins[1] - bins[0]
-        pdf = norm.pdf(x, mu, sigma) * n * bin_width
-        ax.plot(x, pdf, "r-", lw=2, label=f"Gaussian Fit\nμ={mu:.3f}, σ={sigma:.3f}")
+        # Gaussian fit overlay (only if sigma > 0)
+        if sigma > 0:
+            x = np.linspace(min(freq_shifts), max(freq_shifts), 200)
+            bin_width = bins[1] - bins[0]
+            pdf = norm.pdf(x, mu, sigma) * n * bin_width
+            ax.plot(x, pdf, "r-", lw=2, label=f"Gaussian Fit\nμ={mu:.3f}, σ={sigma:.3f}")
+        else:
+            ax.text(
+                0.5, 0.9,
+                "σ = 0 → no spread",
+                ha="center", va="center", transform=ax.transAxes, color="red"
+            )
 
         ax.set_xlabel("Frequency Shift (GHz)")
-        ax.set_ylabel("Density")
+        ax.set_ylabel("Count")
         ax.set_title("Histogram of Frequency Shifts with Gaussian Fit")
         ax.legend()
 
@@ -246,7 +251,7 @@ class AxialScanViewer(QWidget):
         hist_window.resize(600, 400)
         hist_window.show()
 
-        # Keep reference
+        # Keep reference so it doesn’t get garbage-collected
         if not hasattr(self, "open_hist_windows"):
             self.open_hist_windows = []
         self.open_hist_windows.append(hist_window)
