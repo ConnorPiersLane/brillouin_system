@@ -458,6 +458,7 @@ class BrillouinBackend:
                         self.zaber_eye_lens.move_rel(lens_x0)
                         return False
 
+                    print(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
                     self.zaber_eye_lens.move_rel(dx)
                     zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)

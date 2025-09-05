@@ -260,22 +260,31 @@ class AxialScanViewer(QWidget):
 
     def print_measurement_info(self, index: int):
         """Print info for the given measurement index (depends on current_index)."""
+
+        def fmt(val, precision=3):
+            return f"{val:.{precision}f}" if val is not None else "N/A"
+
         mp = self.axial_scan.measurements[index]
         freq_shift = self.analyzed_data.freq_shifts[index]
         photons: PhotonsCounts = self.analyzed_data.fitted_scan.fitted_photon_counts[index]
 
         print(f"--- Measurement {index} ---")
         print(f"Zaber position: {mp.lens_zaber_position:.2f} µm")
-        print(f"Freq shifts: left={freq_shift.freq_shift_left_peak_ghz:.3f}, "
-              f"right={freq_shift.freq_shift_right_peak_ghz:.3f}, "
-              f"distance={freq_shift.freq_shift_peak_distance_ghz:.3f}")
-        print(f"FWHM: left={freq_shift.fwhm_left_peak_ghz:.3f}, "
-              f"right={freq_shift.fwhm_right_peak_ghz:.3f}")
-        print(f"Photons: left={photons.left_peak_photons}, "
-              f"right={photons.right_peak_photons}, "
-              f"total={photons.total_photons}")
+        print(
+            f"Freq shifts: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
+            f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
+            f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}"
+        )
+        print(
+            f"FWHM: left={fmt(freq_shift.fwhm_left_peak_ghz)}, "
+            f"right={fmt(freq_shift.fwhm_right_peak_ghz)}"
+        )
+        print(
+            f"Photons: left={fmt(photons.left_peak_photons)}, "
+            f"right={fmt(photons.right_peak_photons)}, "
+            f"total={fmt(photons.total_photons)}"
+        )
         print("----------------------------")
-
 
 
 def load_axial_scan_from_file(path: str) -> AxialScan:

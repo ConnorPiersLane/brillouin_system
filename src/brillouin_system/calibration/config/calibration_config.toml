@@ -1,5 +1,5 @@
 [calibration]
-n_per_freq = 1
+n_per_freq = 5
 degree = 1
 start = 4.0
 stop = 8.0

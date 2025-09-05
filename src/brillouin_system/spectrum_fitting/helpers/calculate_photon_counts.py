@@ -24,7 +24,10 @@ def calculate_photon_counts_from_fitted_spectrum(fs: FittedSpectrum,
         )
 
 
-    count_to_electron_factor = preamp_gain / emccd_gain
+    if emccd_gain == 0:
+        count_to_electron_factor = preamp_gain
+    else:
+        count_to_electron_factor = preamp_gain / emccd_gain
 
     amp_l = fs.left_peak_amplitude
     amp_r = fs.right_peak_amplitude

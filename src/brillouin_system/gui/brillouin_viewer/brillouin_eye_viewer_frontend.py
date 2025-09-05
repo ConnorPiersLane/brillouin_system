@@ -19,14 +19,15 @@ from brillouin_system.calibration.config.calibration_config_gui import Calibrati
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
 from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
 from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
-from brillouin_system.devices.microwave_device import MicrowaveDummy
-from brillouin_system.devices.shutter_device import ShutterManagerDummy
+from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
+from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
 from brillouin_system.gui.helpers.show_axial_scan import AxialScanViewer
 
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
@@ -45,34 +46,37 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 ## Testing
-brillouin_manager = BrillouinBackend(
-    system_type='human_interface',
-        camera=DummyCamera(),
-    shutter_manager=ShutterManagerDummy('human_interface'),
-    microwave=MicrowaveDummy(),
-    zaber_eye_lens=ZaberEyeLensDummy(),
-    zaber_hi=ZaberHumanInterfaceDummy(),
-    is_sample_illumination_continuous=True
-)
-
-
-# # # Real
 # brillouin_manager = BrillouinBackend(
-#         camera=IxonUltra(
-#             index = 0,
-#             temperature = -80, #"off"
-#             fan_mode = "full",
-#             x_start = 40, x_end  = 120,
-#             y_start= 300, y_end  = 315,
-#             vbin= 1, hbin  = 1,
-#             verbose = True,
-#             advanced_gain_option=False
-#         ),
-#     shutter_manager=ShutterManager('human_interface'),
-#     microwave=Microwave(),
-#     zaber=ZaberLinearController(),
+#     system_type='human_interface',
+#         camera=DummyCamera(),
+#     shutter_manager=ShutterManagerDummy('human_interface'),
+#     microwave=MicrowaveDummy(),
+#     zaber_eye_lens=ZaberEyeLensDummy(),
+#     zaber_hi=ZaberHumanInterfaceDummy(),
 #     is_sample_illumination_continuous=True
 # )
+#
+
+
+
+brillouin_manager = BrillouinBackend(
+    system_type = 'human_interface',
+    camera=IxonUltra(
+        index = 0,
+        temperature = "off", #"off"
+        fan_mode = "full",
+        x_start = 40, x_end  = 120,
+        y_start= 300, y_end  = 315,
+        vbin= 1, hbin  = 1,
+        verbose = True,
+        advanced_gain_option=False
+    ),
+    shutter_manager=ShutterManager('human_interface'),
+    microwave=Microwave(),
+    zaber_eye_lens=ZaberEyeLens(),
+    zaber_hi=ZaberHumanInterface(),
+    is_sample_illumination_continuous=True
+)
 
 
 class BrillouinEyeViewerFrontend(QWidget):
@@ -858,7 +862,7 @@ class BrillouinEyeViewerFrontend(QWidget):
             self._last_img_shape = (h, w)
         else:
             self.img_artist.set_data(frame)
-
+        self.img_artist.set_clim(vmin=frame.min(), vmax=frame.max())
         # --- Spectrum Plot ---
         self.spectrum_line.set_data(x_px, spectrum)
         interpeak, freq_shift_ghz = None, None
