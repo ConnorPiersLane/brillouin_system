@@ -149,8 +149,13 @@ class AxialScanViewer(QWidget):
         else:
             freq_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
 
+        freq_shifts = [fs if fs is not None else np.nan for fs in freq_shifts]
+
         self.ax_axial.plot(range(len(freq_shifts)), freq_shifts, 'bo-', label="Frequency Shift")
-        self.ax_axial.plot(self.current_index, freq_shifts[self.current_index], 'ro', markersize=10, label="Current")
+        # --- Highlight current only if valid
+        y_val = freq_shifts[self.current_index]
+        if not np.isnan(y_val):
+            self.ax_axial.plot(self.current_index, y_val, 'ro', markersize=10, label="Current")
 
         self.ax_axial.set_xticks(range(len(positions)))
         self.ax_axial.set_xticklabels([f"{i}\n{pos:.1f}" for i, pos in enumerate(positions)], rotation=45)
@@ -187,19 +192,31 @@ class AxialScanViewer(QWidget):
         else:
             freq_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
 
-        freq_shifts = np.array(freq_shifts)
+        # Drop None values
+        freq_shifts = [fs for fs in freq_shifts if fs is not None]
 
-        # --- Compute stats ---
-        mu = np.mean(freq_shifts)
-        sigma = np.std(freq_shifts, ddof=1)  # sample std
-        n = len(freq_shifts)
+        if not freq_shifts:
+            print("[Warning] No valid frequency shifts available.")
+            mu, sigma, n = None, None, 0
+        else:
+            freq_shifts = np.array(freq_shifts, dtype=float)
+            mu = np.mean(freq_shifts)
+            sigma = np.std(freq_shifts, ddof=1)  # sample std
+            n = len(freq_shifts)
+
+        def fmt(val, precision=3, unit=""):
+            return f"{val:.{precision}f}{unit}" if val is not None else "N/A"
 
         print("==== Analyze SNR ====")
-        print(f"Mean: {mu:.3f} GHz")
-        print(f"Std: {sigma:.3f} GHz")
+        print(f"Mean: {fmt(mu, 3, ' GHz')}")
+        print(f"Std: {fmt(sigma, 3, ' GHz')}")
         print(f"n: {n}")
         print(f"Reference Peak (left, right, distance): {config.reference}")
         print("=====================")
+
+        if not freq_shifts:  # nothing valid to plot
+            print("[Warning] No valid frequency shifts to plot.")
+            return
 
         # --- Plot histogram ---
         fig = Figure(figsize=(6, 4))
@@ -211,7 +228,7 @@ class AxialScanViewer(QWidget):
         x = np.linspace(min(freq_shifts), max(freq_shifts), 200)
         bin_width = bins[1] - bins[0]
         pdf = norm.pdf(x, mu, sigma) * n * bin_width
-        ax.plot(x, pdf, "r-", lw=2, label=f"Gaussian Fit\nμ={mu:.2f}, σ={sigma:.2f}")
+        ax.plot(x, pdf, "r-", lw=2, label=f"Gaussian Fit\nμ={mu:.3f}, σ={sigma:.3f}")
 
         ax.set_xlabel("Frequency Shift (GHz)")
         ax.set_ylabel("Density")

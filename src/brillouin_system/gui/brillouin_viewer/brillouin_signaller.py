@@ -54,6 +54,7 @@ class BrillouinSignaller(QObject):
     flir_frame_ready = pyqtSignal(np.ndarray)
     send_update_stored_axial_scans = pyqtSignal(list)
     axial_scan_data_ready = pyqtSignal(object)
+    send_axial_scans_to_save = pyqtSignal(list)
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -481,7 +482,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def save_all_axial_scans(self):
         scans = list(self.backend.axial_scan_dict.values())
-        self._save_axial_scan_list_to_file(scans)
+        self.send_axial_scans_to_save.emit(scans)
 
     @pyqtSlot(list)
     def save_multiple_axial_scans(self, indices: list[int]):
@@ -489,41 +490,8 @@ class BrillouinSignaller(QObject):
             scan for i, scan in self.backend.axial_scan_dict.items()
             if i in indices
         ]
-        self._save_axial_scan_list_to_file(scans)
+        self.send_axial_scans_to_save.emit(scans)
 
-    def _save_axial_scan_list_to_file(self, scans: list):
-        from PyQt5.QtWidgets import QFileDialog
-        from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
-            dataclass_to_hdf5_native_dict, save_dict_to_hdf5
-        )
-
-        if not scans:
-            self.log_message.emit("[Save] No axial scans to save.")
-            return
-
-        base_path, _ = QFileDialog.getSaveFileName(
-            None,
-            "Save Axial Scans (base name)",
-            filter="All Files (*)"
-        )
-        if not base_path:
-            return
-
-        try:
-            # Save as Pickle
-            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-            with open(pkl_path, "wb") as f:
-                pickle.dump(scans, f)
-            self.log_message.emit(f"[✓] Pickle saved to: {pkl_path}")
-
-            # Save as HDF5
-            h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
-            native_dict = dataclass_to_hdf5_native_dict(scans)
-            save_dict_to_hdf5(h5_path, native_dict)
-            self.log_message.emit(f"[✓] HDF5 saved to: {h5_path}")
-
-        except Exception as e:
-            self.log_message.emit(f"[Error] Failed to save axial scans: {e}")
 
     @pyqtSlot(list)
     def remove_selected_axial_scans(self, indices: list[int]):

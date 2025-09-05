@@ -99,13 +99,29 @@ def fit_axial_scan(scan: AxialScan) -> FittedAxialScan:
 
 
 def analyze_axial_scan(fitted_scan: FittedAxialScan) -> AnalysedAxialScan:
-    calibration_calculator = CalibrationCalculator(fitted_scan.axial_scan.calibration_params)
-
-    spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
     analyzed_freqs_shifts = []
-    for fitting in fitted_scan.fitted_spectras:
-        analyzed_freqs_shifts.append(spectrum_analyzer.analyze_spectrum(fitting))
+
+    if fitted_scan.axial_scan.calibration_params is None:
+
+        none_shifts = AnalyzedFreqShifts(
+            freq_shift_left_peak_ghz=None,
+            freq_shift_right_peak_ghz=None,
+            freq_shift_peak_distance_ghz=None,
+            fwhm_left_peak_ghz=None,
+            fwhm_right_peak_ghz=None,
+        )
+
+        for _ in fitted_scan.fitted_spectras:
+            analyzed_freqs_shifts.append(none_shifts)
+    else:
+        calibration_calculator = CalibrationCalculator(fitted_scan.axial_scan.calibration_params)
+
+        spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
+
+        analyzed_freqs_shifts = []
+        for fitting in fitted_scan.fitted_spectras:
+            analyzed_freqs_shifts.append(spectrum_analyzer.analyze_spectrum(fitting))
 
     return AnalysedAxialScan(
         fitted_scan=fitted_scan,

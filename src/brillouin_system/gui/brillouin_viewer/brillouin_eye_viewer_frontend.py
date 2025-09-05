@@ -46,37 +46,37 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 ## Testing
-# brillouin_manager = BrillouinBackend(
-#     system_type='human_interface',
-#         camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber_eye_lens=ZaberEyeLensDummy(),
-#     zaber_hi=ZaberHumanInterfaceDummy(),
-#     is_sample_illumination_continuous=True
-# )
-#
-
-
-
 brillouin_manager = BrillouinBackend(
-    system_type = 'human_interface',
-    camera=IxonUltra(
-        index = 0,
-        temperature = "off", #"off"
-        fan_mode = "full",
-        x_start = 40, x_end  = 120,
-        y_start= 300, y_end  = 315,
-        vbin= 1, hbin  = 1,
-        verbose = True,
-        advanced_gain_option=False
-    ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber_eye_lens=ZaberEyeLens(),
-    zaber_hi=ZaberHumanInterface(),
+    system_type='human_interface',
+        camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
+    zaber_eye_lens=ZaberEyeLensDummy(),
+    zaber_hi=ZaberHumanInterfaceDummy(),
     is_sample_illumination_continuous=True
 )
+
+
+
+
+# brillouin_manager = BrillouinBackend(
+#     system_type = 'human_interface',
+#     camera=IxonUltra(
+#         index = 0,
+#         temperature = "off", #"off"
+#         fan_mode = "full",
+#         x_start = 40, x_end  = 120,
+#         y_start= 300, y_end  = 315,
+#         vbin= 1, hbin  = 1,
+#         verbose = True,
+#         advanced_gain_option=False
+#     ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber_eye_lens=ZaberEyeLens(),
+#     zaber_hi=ZaberHumanInterface(),
+#     is_sample_illumination_continuous=True
+# )
 
 
 class BrillouinEyeViewerFrontend(QWidget):
@@ -183,6 +183,7 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
+        self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
 
         # Saving Signals
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
@@ -715,6 +716,40 @@ class BrillouinEyeViewerFrontend(QWidget):
 
         indices = [int(item.text().split(" - ")[0]) for item in selected_items]
         self.save_selected_axial_scans_requested.emit(indices)
+
+    def save_axial_scan_list_to_file(self, scans: list):
+        from PyQt5.QtWidgets import QFileDialog
+        from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+            dataclass_to_hdf5_native_dict, save_dict_to_hdf5
+        )
+
+        if not scans:
+            self.log_message.emit("[Save] No axial scans to save.")
+            return
+
+        base_path, _ = QFileDialog.getSaveFileName(
+            None,
+            "Save Axial Scans (base name)",
+            filter="All Files (*)"
+        )
+        if not base_path:
+            return
+
+        try:
+            # Save as Pickle
+            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
+            with open(pkl_path, "wb") as f:
+                pickle.dump(scans, f)
+            print(f"[✓] Pickle saved to: {pkl_path}")
+
+            # Save as HDF5
+            h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
+            native_dict = dataclass_to_hdf5_native_dict(scans)
+            save_dict_to_hdf5(h5_path, native_dict)
+            print(f"[✓] HDF5 saved to: {h5_path}")
+
+        except Exception as e:
+            print(f"[Error] Failed to save axial scans: {e}")
 
     def move_zaber_lens_by(self, direction: int):
         try:
