@@ -49,9 +49,6 @@ class AxialScanManager(QWidget):
         self.show_btn.clicked.connect(self.show_scan)
         btn_row.addWidget(self.show_btn)
 
-        self.analyze_btn = QPushButton("Analyze SNR (1 Scan)")
-        self.analyze_btn.clicked.connect(self.analyze_snr)
-        btn_row.addWidget(self.analyze_btn)
 
         self.remove_btn = QPushButton("Remove Selected")
         self.remove_btn.clicked.connect(self.remove_selected)
@@ -126,28 +123,29 @@ class AxialScanManager(QWidget):
         for item in items:
             idx = item.data(Qt.UserRole)
             scan = self.scans.get(idx)
-            if scan:
-                # if already open, just raise it
-                if idx in self.open_viewers:
+            if not scan:
+                continue
+
+            if idx in self.open_viewers:
+                try:
                     self.open_viewers[idx].raise_()
                     self.open_viewers[idx].activateWindow()
-                else:
-                    viewer = AxialScanViewer(scan)  # could also pass parent=self
-                    viewer.setAttribute(Qt.WA_DeleteOnClose, True)  # auto clean on close
+                    print(f"⚠️ Scan {idx} is already open. Not opening a second viewer.")
+                except RuntimeError:
+                    print(f"⚠️ Viewer for scan {idx} was closed unexpectedly. Reopening...")
+                    viewer = AxialScanViewer(scan)
+                    viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+                    viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
                     viewer.show()
                     viewer.raise_()
                     self.open_viewers[idx] = viewer
-
-    def analyze_snr(self):
-        item = self.scan_list.currentItem()
-        if not item:
-            QMessageBox.information(self, "No Selection", "Select a scan first.")
-            return
-        idx = item.data(Qt.UserRole)
-        scan = self.scans.get(idx)
-        if scan:
-            # Placeholder: you can implement SNR analysis here later
-            print(f"[Analyze SNR] Internal idx={idx}, Scan ID={scan.id}")
+            else:
+                viewer = AxialScanViewer(scan)
+                viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+                viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
+                viewer.show()
+                viewer.raise_()
+                self.open_viewers[idx] = viewer
 
     def remove_selected(self):
         selected_items = self.scan_list.selectedItems()

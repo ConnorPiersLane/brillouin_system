@@ -186,7 +186,7 @@ class IxonUltra(BaseCamera):
             # if status == "stabilized":
             #     print("[IxonUltra] Cooling stabilized.")
             #     return
-            if temp < target_temp + 3:
+            if temp < target_temp + 8:
                 print("[IxonUltra] Target Temperature reached")
                 return
             time.sleep(10)
