@@ -1,6 +1,6 @@
 [global]
-pixel_offset_left = 1
-pixel_offset_right = 0
+pixel_offset_left = 15
+pixel_offset_right = 18
 selected_rows = [
     2,
     3,

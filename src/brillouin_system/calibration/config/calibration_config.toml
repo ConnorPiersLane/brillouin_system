@@ -4,4 +4,4 @@ degree = 1
 start = 4.0
 stop = 8.0
 step = 1.0
-reference = "distance"
+reference = "left"

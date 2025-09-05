@@ -455,7 +455,7 @@ class BrillouinBackend:
                 for i in range(request_axial_scan.n_measurements):
                     if self.f2b_cancel_callback():
                         print(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
-                        self.zaber_eye_lens.move_rel(lens_x0)
+                        self.zaber_eye_lens.move_abs(lens_x0)
                         return False
 
                     print(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")

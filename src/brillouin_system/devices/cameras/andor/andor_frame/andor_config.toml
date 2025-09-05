@@ -12,4 +12,4 @@ temperature = -80.0
 flip_image_horizontally = true
 verbose = true
 n_dark_images = 2
-n_bg_images = 10
+n_bg_images = 20

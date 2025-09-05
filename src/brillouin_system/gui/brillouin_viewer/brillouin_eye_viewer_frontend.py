@@ -46,37 +46,37 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 ## Testing
-brillouin_manager = BrillouinBackend(
-    system_type='human_interface',
-        camera=DummyCamera(),
-    shutter_manager=ShutterManagerDummy('human_interface'),
-    microwave=MicrowaveDummy(),
-    zaber_eye_lens=ZaberEyeLensDummy(),
-    zaber_hi=ZaberHumanInterfaceDummy(),
-    is_sample_illumination_continuous=True
-)
-
-
-
-
 # brillouin_manager = BrillouinBackend(
-#     system_type = 'human_interface',
-#     camera=IxonUltra(
-#         index = 0,
-#         temperature = "off", #"off"
-#         fan_mode = "full",
-#         x_start = 40, x_end  = 120,
-#         y_start= 300, y_end  = 315,
-#         vbin= 1, hbin  = 1,
-#         verbose = True,
-#         advanced_gain_option=False
-#     ),
-#     shutter_manager=ShutterManager('human_interface'),
-#     microwave=Microwave(),
-#     zaber_eye_lens=ZaberEyeLens(),
-#     zaber_hi=ZaberHumanInterface(),
+#     system_type='human_interface',
+#         camera=DummyCamera(),
+#     shutter_manager=ShutterManagerDummy('human_interface'),
+#     microwave=MicrowaveDummy(),
+#     zaber_eye_lens=ZaberEyeLensDummy(),
+#     zaber_hi=ZaberHumanInterfaceDummy(),
 #     is_sample_illumination_continuous=True
 # )
+
+
+
+
+brillouin_manager = BrillouinBackend(
+    system_type = 'human_interface',
+    camera=IxonUltra(
+        index = 0,
+        temperature = "off", #"off"
+        fan_mode = "full",
+        x_start = 40, x_end  = 120,
+        y_start= 300, y_end  = 315,
+        vbin= 1, hbin  = 1,
+        verbose = True,
+        advanced_gain_option=False
+    ),
+    shutter_manager=ShutterManager('human_interface'),
+    microwave=Microwave(),
+    zaber_eye_lens=ZaberEyeLens(),
+    zaber_hi=ZaberHumanInterface(),
+    is_sample_illumination_continuous=True
+)
 
 
 class BrillouinEyeViewerFrontend(QWidget):
@@ -1048,8 +1048,11 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.request_axial_scan_data.emit(i)
 
     def handle_received_axial_scan_data(self, scan_data: AxialScan):
-        self.axial_viewer = AxialScanViewer(scan_data)
-        self.axial_viewer.show()
+        try:
+            self.axial_viewer = AxialScanViewer(scan_data)
+            self.axial_viewer.show()
+        except:
+            pass
 
 
 
