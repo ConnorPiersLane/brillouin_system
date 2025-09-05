@@ -8,8 +8,9 @@ from vimba import VimbaFeatureError, PixelFormat
 from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
 from brillouin_system.devices.cameras.allied.single.allied_vision_camera import AlliedVisionCamera
 
-frame_q0 = queue.Queue()
-frame_q1 = queue.Queue()
+frame_q0 = queue.Queue(maxsize=20)
+frame_q1 = queue.Queue(maxsize=20)
+
 
 def _handler0(cam, frame):
     if frame.get_status() != 0:
@@ -55,14 +56,14 @@ class DualAlliedVisionCameras(BaseDualCameras):
 
 
     def trigger_both(self):
-        # self.cam0.camera.get_feature_by_name("TriggerSoftware").run()
-        # self.cam1.camera.get_feature_by_name("TriggerSoftware").run()
-        t1 = threading.Thread(target=lambda: self.cam0.camera.get_feature_by_name("TriggerSoftware").run())
-        t2 = threading.Thread(target=lambda: self.cam1.camera.get_feature_by_name("TriggerSoftware").run())
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
+        self.cam0.camera.get_feature_by_name("TriggerSoftware").run()
+        self.cam1.camera.get_feature_by_name("TriggerSoftware").run()
+        # t1 = threading.Thread(target=lambda: self.cam0.camera.get_feature_by_name("TriggerSoftware").run())
+        # t2 = threading.Thread(target=lambda: self.cam1.camera.get_feature_by_name("TriggerSoftware").run())
+        # t1.start()
+        # t2.start()
+        # t1.join()
+        # t2.join()
 
     def start_stream(self):
         """Start streaming once and keep queues ready."""

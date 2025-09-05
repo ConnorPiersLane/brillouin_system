@@ -1,6 +1,6 @@
 import time
 
-from brillouin_system.devices.cameras.allied.allied_vision_camera import AlliedVisionCamera
+from brillouin_system.devices.cameras.allied.single.allied_vision_camera import AlliedVisionCamera
 
 
 # Replace with actual import path

@@ -15,7 +15,9 @@ Note: This script does not display images.
 """
 
 import time
-from allied_vision_camera import AlliedVisionCamera
+
+from brillouin_system.devices.cameras.allied.single.allied_vision_camera import AlliedVisionCamera
+
 
 def main():
     # Replace with your actual camera ID
@@ -52,6 +54,22 @@ def main():
         cam.set_gamma(mid_gamma)
         print("Gamma set to:", cam.get_gamma())
 
+    print("\n=== Pixel Format Tests ===")
+    formats = cam.get_available_pixel_formats()
+    print("Available pixel formats:", formats)
+    current_format = cam.get_pixel_format()
+    print("Current pixel format:", current_format)
+    # Try switching to another format if available
+    if formats:
+        alt_format = formats[0] if formats[0] != current_format else (formats[1] if len(formats) > 1 else None)
+        if alt_format:
+            cam.set_pixel_format(alt_format)
+            print("Pixel format after set:", cam.get_pixel_format())
+            # Reset back to original
+            cam.set_pixel_format(current_format)
+            print("Pixel format reset to:", cam.get_pixel_format())
+
+
     print("\n=== Auto Exposure Tests ===")
     for mode in ["Off", "Once", "Continuous"]:
         cam.set_auto_exposure(mode)
@@ -62,6 +80,7 @@ def main():
         cam.set_acquisition_mode(mode)
 
     print("\n=== Snap Test ===")
+    cam.set_software_trigger()
     frame = cam.snap()
     print("Captured frame object:", type(frame))
 
@@ -69,12 +88,12 @@ def main():
     def on_frame(frame):
         print("Stream callback: got frame object", type(frame))
         # Stop stream after first callback
-        cam.stop_stream()
 
     cam.start_stream(on_frame, buffer_count=3)
 
     # Give stream a moment to run
     time.sleep(1)
+    cam.stop_stream()
 
     print("\n=== Closing Camera ===")
     cam.close()

@@ -4,6 +4,46 @@ from vimba import Vimba, VimbaFeatureError, VimbaCameraError
 from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
 
 class AlliedVisionCamera(BaseAlliedVisionCamera):
+    """
+    Allied Vision Camera Test Configuration and Parameter Ranges
+    ============================================================
+
+    This test script verifies functionality of the Allied Vision camera
+    using the Vimba SDK. The following ranges were observed from the device:
+
+    - ROI (Region of Interest)
+      - Current ROI:  OffsetX=0, OffsetY=0, Width=2048, Height=2048
+      - Max ROI:      OffsetX=0, OffsetY=0, Width=2048, Height=2048
+
+    - Exposure
+      - Range:        1.0 µs  → 153,391,689.0 µs (~153 s)
+      - Example set:  500,000.0 µs
+
+    - Gain
+      - Range:        0.0 dB  → 26.0 dB
+      - Example set:  13.0 dB
+
+    - Gamma
+      - Range:        0.25    → 4.0
+      - Example set:  2.125
+
+    - Auto Exposure Modes
+      - Off
+      - Once
+      - Continuous
+
+    - Acquisition Modes
+      - SingleFrame
+      - Continuous
+
+    Notes
+    -----
+    - Snap (single-frame capture) successfully returns a `vimba.frame.Frame`.
+    - Streaming delivers frames via callback. The stream should be stopped
+      outside of the callback to avoid `VmbError.InvalidCall`.
+    - ROI may be hardware-limited to full sensor size (2048x2048 in this test).
+    """
+
     def __init__(self, id="DEV_000F315BC084"):
         print("[AVCamera] Connecting to Allied Vision Camera...")
         self.stack = ExitStack()
@@ -43,7 +83,6 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             self.camera.get_feature_by_name('TriggerMode').set('On')
             self.camera.get_feature_by_name('TriggerSource').set('Software')
             self.camera.get_feature_by_name('AcquisitionMode').set('Continuous')
-            print("[AVCamera] Camera set to Software Trigger.")
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set Software Trigger: {e}")
 
@@ -198,18 +237,19 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
 
 
 
-    def snap(self):
-        """Capture a single frame. Temporarily stops streaming if needed."""
+    def snap(self, timeout_ms=2000):
+        """Capture a single frame in freerun (continuous) mode."""
         was_streaming = self.streaming
         if was_streaming:
             self.stop_stream()
 
-        self.set_acquisition_mode("SingleFrame")
+        # Ensure camera is in freerun
+        self.set_freerun_mode()
 
-        frame = self.camera.get_frame()
+        # Grab one frame
+        frame = self.camera.get_frame(timeout_ms=timeout_ms)
 
         if was_streaming:
-            self.set_acquisition_mode("Continuous")
             self.start_stream(self._last_callback)
 
         return frame
@@ -223,6 +263,47 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             print(f"[AVCamera] Acquisition mode set to {mode}")
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set AcquisitionMode to {mode}: {e}")
+
+
+    def get_available_pixel_formats(self):
+        """
+        Return a list of available pixel formats as strings.
+        """
+        try:
+            feat = self.camera.get_feature_by_name("PixelFormat")
+            entries = feat.get_all_entry_names()
+            return entries
+        except Exception as e:
+            print(f"[AVCamera] Failed to get available pixel formats: {e}")
+            return []
+
+    def get_pixel_format(self):
+        """
+        Return the current pixel format as a string.
+        """
+        try:
+            return str(self.camera.get_feature_by_name("PixelFormat").get())
+        except Exception as e:
+            print(f"[AVCamera] Failed to get pixel format: {e}")
+            return None
+
+    def set_pixel_format(self, format_str: str):
+        """
+        Set the pixel format (e.g. 'Mono8', 'Mono12', 'BayerRG8', etc.).
+
+        Args:
+            format_str (str): must be in get_available_pixel_formats()
+        """
+        try:
+            feat = self.camera.get_feature_by_name("PixelFormat")
+            available = feat.get_all_entry_names()
+            if format_str not in available:
+                raise ValueError(f"'{format_str}' not in available formats: {available}")
+            feat.set(format_str)
+            print(f"[AVCamera] Pixel format set to {format_str}")
+        except Exception as e:
+            print(f"[AVCamera] Failed to set pixel format: {e}")
+
 
 
     def start_stream(self, frame_callback, buffer_count=5):
@@ -252,6 +333,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         self.camera.stop_streaming()
         self.streaming = False
         print("[AVCamera] Stopped streaming.")
+
 
     def close(self):
         if self.streaming:
