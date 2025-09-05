@@ -5,7 +5,8 @@ import time
 import cv2
 from vimba import VimbaFeatureError, PixelFormat
 
-from allied_vision_camera import AlliedVisionCamera
+from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
+from brillouin_system.devices.cameras.allied.single.allied_vision_camera import AlliedVisionCamera
 
 frame_q0 = queue.Queue()
 frame_q1 = queue.Queue()
@@ -23,7 +24,7 @@ def _handler1(cam, frame):
     frame_q1.put(frame)
     cam.queue_frame(frame)
 
-class DualAlliedVisionCameras:
+class DualAlliedVisionCameras(BaseDualCameras):
     def __init__(self, id0="DEV_000F315BC084", id1="DEV_000F315BDC0C"):
         print("[DualCamera] Initializing two Allied Vision cameras...")
 

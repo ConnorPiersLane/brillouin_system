@@ -1,7 +1,7 @@
 from contextlib import ExitStack
 
 from vimba import Vimba, VimbaFeatureError, VimbaCameraError
-from brillouin_system.devices.cameras.allied.base_mako import BaseAlliedVisionCamera
+from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
 
 class AlliedVisionCamera(BaseAlliedVisionCamera):
     def __init__(self, id="DEV_000F315BC084"):
@@ -74,6 +74,28 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             print("[AVCamera] Auto Exposure feature not available.")
             return None
 
+    def get_exposure_range(self):
+        """
+        Return (min, max) range of exposure time in microseconds.
+        """
+        try:
+            feat = self.camera.get_feature_by_name("ExposureTimeAbs")
+            return feat.get_range()
+        except Exception as e:
+            print(f"[AVCamera] Failed to get exposure range: {e}")
+            return None
+
+    def get_gain_range(self):
+        """
+        Return (min, max) range of gain in dB.
+        """
+        try:
+            feat = self.camera.get_feature_by_name("Gain")
+            return feat.get_range()
+        except Exception as e:
+            print(f"[AVCamera] Failed to get gain range: {e}")
+            return None
+
     def set_gain(self, gain_db):
         try:
             self.camera.get_feature_by_name("Gain").set(gain_db)
@@ -137,6 +159,44 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             print("[AVCamera] Set to max ROI.")
         else:
             print("[AVCamera] Could not retrieve max ROI to set.")
+
+    def set_gamma(self, value: float):
+        """
+        Set gamma correction.
+        Typical range: ~0.1 to 4.0 (depends on camera).
+        """
+        try:
+            feat = self.camera.get_feature_by_name("Gamma")
+            min_val, max_val = feat.get_range()
+            if not (min_val <= value <= max_val):
+                raise ValueError(f"Gamma must be between {min_val} and {max_val}")
+            feat.set(value)
+            print(f"[AVCamera] Gamma set to {value}")
+        except Exception as e:
+            print(f"[AVCamera] Failed to set Gamma: {e}")
+
+    def get_gamma(self) -> float:
+        """
+        Get current gamma value.
+        """
+        try:
+            return float(self.camera.get_feature_by_name("Gamma").get())
+        except Exception as e:
+            print(f"[AVCamera] Failed to get Gamma: {e}")
+            return None
+
+    def get_gamma_range(self):
+        """
+        Return (min, max) range of gamma values.
+        """
+        try:
+            feat = self.camera.get_feature_by_name("Gamma")
+            return feat.get_range()
+        except Exception as e:
+            print(f"[AVCamera] Failed to get Gamma range: {e}")
+            return None
+
+
 
     def snap(self):
         """Capture a single frame. Temporarily stops streaming if needed."""

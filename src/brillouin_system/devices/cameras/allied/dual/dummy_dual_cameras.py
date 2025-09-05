@@ -1,7 +1,7 @@
 import numpy as np
 
 
-from brillouin_system.devices.cameras.allied.base_dual_cameras import BaseDualCameras
+from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
 
 
 class DummyDualCameras(BaseDualCameras):

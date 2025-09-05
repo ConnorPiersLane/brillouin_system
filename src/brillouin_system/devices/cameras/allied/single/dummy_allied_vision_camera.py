@@ -3,7 +3,7 @@ import threading
 import numpy as np
 import time
 
-from brillouin_system.devices.cameras.allied.base_mako import BaseAlliedVisionCamera
+from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
 
 
 
