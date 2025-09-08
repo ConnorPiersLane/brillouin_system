@@ -5,8 +5,8 @@ import tomli
 import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
-FITTING_MODELS_SAMPLE = ["lorentzian", "lorentzian_quad_bg"]
-FITTING_MODELS_REFERENCE = ["lorentzian"]
+FITTING_MODELS_SAMPLE = ["lorentzian", "lorentzian_quad_bg", "lorentzian_window"]
+FITTING_MODELS_REFERENCE = ["lorentzian", "lorentzian_window"]
 
 @dataclass
 class FindPeaksConfig:
@@ -16,6 +16,7 @@ class FindPeaksConfig:
     rel_height: float
     wlen_pixels: int
     fitting_model: str
+    beta: float = 4.0
 
 @dataclass
 class SlineFromFrameConfig:

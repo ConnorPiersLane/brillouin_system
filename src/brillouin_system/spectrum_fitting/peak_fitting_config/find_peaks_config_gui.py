@@ -32,7 +32,7 @@ class FindPeaksConfigDialog(QDialog):
     def field_names(self):
         return [
             "prominence_fraction", "min_peak_width", "min_peak_height",
-            "rel_height", "wlen_pixels"
+            "rel_height", "wlen_pixels", "beta"  # added beta
         ]
 
     def create_dual_form(self):
@@ -48,8 +48,9 @@ class FindPeaksConfigDialog(QDialog):
             row = QHBoxLayout()
             row.addWidget(QLabel(field.replace("_", " ").capitalize()))
             edit = QLineEdit()
-            if "fraction" in field or "rel" in field:
-                edit.setValidator(QDoubleValidator(0.0, 1.0, 5))
+            if "fraction" in field or "rel" in field or field == "beta":
+                # beta is a float (>=0), allow up to 100.0 with 5 decimal precision
+                edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
             else:
                 edit.setValidator(QIntValidator(0, 9999))
             inputs[field] = edit
@@ -146,16 +147,12 @@ class FindPeaksConfigDialog(QDialog):
             sline_from_frame_config.update(**global_kwargs)
 
             if self.on_apply:
-
                 fitting_configs = FittingConfigs(
                     sline_config=sline_from_frame_config.get(),
                     sample_config=find_peaks_sample_config.get(),
                     reference_config=find_peaks_reference_config.get(),
                 )
-
-                self.on_apply(
-                    fitting_configs
-                )
+                self.on_apply(fitting_configs)
 
             QMessageBox.information(self, "Applied", "Settings applied (not saved to disk).")
 

@@ -130,6 +130,7 @@ class AxialScanViewer(QWidget):
 
         self.ax_spec.plot(fit.x_pixels, fit.sline, 'k.', label="Spectrum")
         if fit.is_success:
+            self.ax_spec.plot(fit.x_masked, fit.y_masked, 'r.', label="Spectrum (used)")
             self.ax_spec.plot(fit.x_fit_refined, fit.y_fit_refined, 'r--', label="Fit")
 
         self.ax_spec.set_title(f"Spectrum at Z = {mp.lens_zaber_position:.2f} µm")

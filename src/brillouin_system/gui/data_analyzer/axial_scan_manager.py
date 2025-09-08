@@ -26,6 +26,8 @@ class AxialScanManager(QWidget):
         self.scans: dict[int, AxialScan] = {}   # internal tracker → scan
         self.next_index: int = 0
 
+
+
         self.init_ui()
 
     def init_ui(self):
@@ -161,8 +163,13 @@ class AxialScanManager(QWidget):
         dlg.exec_()
 
     def open_fitting_config(self):
-        dlg = FindPeaksConfigDialog(self)
+        def on_apply(_):
+            # No need to update anything locally
+            print("[AxialScanManager] Pressed Apply — configs are live globally.")
+
+        dlg = FindPeaksConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
