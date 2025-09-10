@@ -1,6 +1,8 @@
 
 import sys
 import pickle
+from collections import deque
+
 import numpy as np
 
 from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
@@ -28,7 +30,7 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
 from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
-from brillouin_system.gui.helpers.show_axial_scan import AxialScanViewer
+from brillouin_system.gui.data_analyzer.show_axial_scan import AxialScanViewer
 
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan
@@ -46,37 +48,37 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 ## Testing
-# brillouin_manager = BrillouinBackend(
-#     system_type='human_interface',
-#         camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber_eye_lens=ZaberEyeLensDummy(),
-#     zaber_hi=ZaberHumanInterfaceDummy(),
-#     is_sample_illumination_continuous=True
-# )
-
-
-
-
 brillouin_manager = BrillouinBackend(
-    system_type = 'human_interface',
-    camera=IxonUltra(
-        index = 0,
-        temperature = "off", #"off"
-        fan_mode = "full",
-        x_start = 40, x_end  = 120,
-        y_start= 300, y_end  = 315,
-        vbin= 1, hbin  = 1,
-        verbose = True,
-        advanced_gain_option=False
-    ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber_eye_lens=ZaberEyeLens(),
-    zaber_hi=ZaberHumanInterface(),
+    system_type='human_interface',
+        camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
+    zaber_eye_lens=ZaberEyeLensDummy(),
+    zaber_hi=ZaberHumanInterfaceDummy(),
     is_sample_illumination_continuous=True
 )
+
+
+
+#
+# brillouin_manager = BrillouinBackend(
+#     system_type = 'human_interface',
+#     camera=IxonUltra(
+#         index = 0,
+#         temperature = "off", #"off"
+#         fan_mode = "full",
+#         x_start = 40, x_end  = 120,
+#         y_start= 300, y_end  = 315,
+#         vbin= 1, hbin  = 1,
+#         verbose = True,
+#         advanced_gain_option=False
+#     ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber_eye_lens=ZaberEyeLens(),
+#     zaber_hi=ZaberHumanInterface(),
+#     is_sample_illumination_continuous=True
+# )
 
 
 class BrillouinEyeViewerFrontend(QWidget):
@@ -334,7 +336,7 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.fitting_config_btn = QPushButton("Config")
         self.fitting_config_btn.clicked.connect(self.on_fitting_configs_clicked)
 
-        self.do_live_fitting_checkbox = QCheckBox("Do Live Fitting")
+        self.do_live_fitting_checkbox = QCheckBox("Do Live Sample Fitting")
         self.do_live_fitting_checkbox.stateChanged.connect(self.on_do_live_fitting_toggled)
 
         # Horizontal layout for button + checkbox
@@ -571,7 +573,6 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.fig.subplots_adjust(hspace=0.9)
         self.canvas = FigureCanvas(self.fig)
 
-        import numpy as np
         dummy_frame = np.zeros((10, 10))
         self.img_artist = self.ax_img.imshow(
             dummy_frame,
@@ -590,8 +591,13 @@ class BrillouinEyeViewerFrontend(QWidget):
         self.ax_fit.set_xlabel("Pixel (X)")
         self.ax_fit.set_ylabel("Intensity")
 
+        self.mask_points_line, = self.ax_fit.plot(
+            [], [], linestyle="None", marker=".", markersize=3,
+            color="red", label="Spectrum (used)"
+        )
+
+
         # history line
-        from collections import deque
         self.history_data = deque(maxlen=100)
         (self.history_line,) = self.ax_history.plot([], [], "b-")
         self.ax_history.set_title("Last 100 Fits (Frequency Shift)")
@@ -884,11 +890,7 @@ class BrillouinEyeViewerFrontend(QWidget):
         if (h, w) != self._last_img_shape:
             self.ax_img.clear()
             self.img_artist = self.ax_img.imshow(
-                frame,
-                cmap="gray",
-                aspect="equal",
-                interpolation="none",
-                origin="upper"
+                frame, cmap="gray", aspect="equal", interpolation="none", origin="upper"
             )
             self.ax_img.set_xticks(np.arange(0, w, 10))
             self.ax_img.set_yticks(np.arange(0, h, 5))
@@ -898,8 +900,31 @@ class BrillouinEyeViewerFrontend(QWidget):
         else:
             self.img_artist.set_data(frame)
         self.img_artist.set_clim(vmin=frame.min(), vmax=frame.max())
+
         # --- Spectrum Plot ---
         self.spectrum_line.set_data(x_px, spectrum)
+
+        # highlight the points used for fitting (in red)
+        mask = display_results.mask_for_fitting # make sure DisplayResults carries this
+        if mask is not None:
+            mask = np.asarray(mask, dtype=bool)
+            x_all = np.asarray(x_px)
+            y_all = np.asarray(spectrum)
+            if mask.shape[0] != x_all.shape[0]:
+                # be defensive about mismatches
+                n = min(mask.shape[0], x_all.shape[0])
+                x_used = x_all[:n][mask[:n]]
+                y_used = y_all[:n][mask[:n]]
+            else:
+                x_used = x_all[mask]
+                y_used = y_all[mask]
+            self.mask_points_line.set_data(x_used, y_used)
+            self.mask_points_line.set_visible(True)
+        else:
+            # hide if no mask provided
+            self.mask_points_line.set_data([], [])
+            self.mask_points_line.set_visible(False)
+
         interpeak, freq_shift_ghz = None, None
         if display_results.is_fitting_available:
             self.fit_line.set_data(display_results.x_fit_refined, display_results.y_fit_refined)
@@ -908,6 +933,7 @@ class BrillouinEyeViewerFrontend(QWidget):
             self.ax_fit.legend()
         else:
             self.fit_line.set_data([], [])
+
         self.ax_fit.relim()
         self.ax_fit.autoscale_view()
 

@@ -7,7 +7,6 @@ from brillouin_system.calibration.calibration import (
     CalibrationData, MeasurementsPerFreq, CalibrationMeasurementPoint, CalibrationPolyfitParameters
 )
 from brillouin_system.my_dataclasses.system_state import SystemState
-from brillouin_system.my_dataclasses.camera_settings import AndorCameraSettings
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, BackgroundImage
 from brillouin_system.devices.zaber_engines.zaber_position import ZaberPosition
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
@@ -18,7 +17,7 @@ known_classes = {
         AxialScan, MeasurementPoint, EyeLocation,
         CalibrationData, MeasurementsPerFreq, CalibrationMeasurementPoint,
         CalibrationPolyfitParameters,
-        SystemState, AndorCameraSettings,
+        SystemState,
         ImageStatistics, BackgroundImage,
         ZaberPosition,
         FittedSpectrum, DisplayResults,

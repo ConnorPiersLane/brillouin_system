@@ -77,10 +77,10 @@ def fit_axial_scan(scan: AxialScan) -> FittedAxialScan:
             frame = subtract_darknoise(frame=frame, darknoise_frame=scan.system_state.dark_image)
 
         # Generate sline
-        sline = spectrum_fitter.get_sline_from_image(frame)
+        px, sline = spectrum_fitter.get_px_sline_from_image(frame)
 
         # Fit spectrum
-        fitting = spectrum_fitter.fit(sline=sline, is_reference_mode=is_reference_mode)
+        fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode)
 
         # Photon counts
         photons = calculate_photon_counts_from_fitted_spectrum(fs=fitting,

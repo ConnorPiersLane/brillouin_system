@@ -1,7 +1,7 @@
 import sys
 import pickle
 import numpy as np
-import scipy
+
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout,
@@ -15,6 +15,7 @@ from matplotlib.figure import Figure
 from scipy.stats import norm
 
 from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, analyze_axial_scan
 )
@@ -126,11 +127,13 @@ class AxialScanViewer(QWidget):
         # --- Spectrum + Fit (middle subplot) ---
         self.ax_spec.clear()
 
-        fit = self.analyzed_data.fitted_scan.fitted_spectras[self.current_index]
+        fit: FittedSpectrum = self.analyzed_data.fitted_scan.fitted_spectras[self.current_index]
 
         self.ax_spec.plot(fit.x_pixels, fit.sline, 'k.', label="Spectrum")
         if fit.is_success:
-            self.ax_spec.plot(fit.x_masked, fit.y_masked, 'r.', label="Spectrum (used)")
+            x_used = fit.x_pixels[fit.mask_for_fitting]
+            y_used = fit.sline[fit.mask_for_fitting]
+            self.ax_spec.plot(x_used, y_used, 'r.', label="Spectrum (used)")
             self.ax_spec.plot(fit.x_fit_refined, fit.y_fit_refined, 'r--', label="Fit")
 
         self.ax_spec.set_title(f"Spectrum at Z = {mp.lens_zaber_position:.2f} µm")
@@ -140,18 +143,43 @@ class AxialScanViewer(QWidget):
 
         # --- Axial Scan Results (bottom subplot) ---
         self.ax_axial.clear()
-        positions = [m.lens_zaber_position for m in self.axial_scan.measurements]
+        positions = [m.lens_zaber_position-self.axial_scan.measurements[0].lens_zaber_position for m in self.axial_scan.measurements]
 
         config = calibration_config.get()
 
-        if config.reference == 'left':
-            freq_shifts = [fs.freq_shift_left_peak_ghz for fs in self.analyzed_data.freq_shifts]
-        elif config.reference == 'right':
-            freq_shifts = [fs.freq_shift_right_peak_ghz for fs in self.analyzed_data.freq_shifts]
-        else:
-            freq_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
 
-        freq_shifts = [fs if fs is not None else np.nan for fs in freq_shifts]
+
+        left_shifts = [fs.freq_shift_left_peak_ghz for fs in self.analyzed_data.freq_shifts]
+        left_shifts = [fs if fs is not None else np.nan for fs in left_shifts]
+
+        right_shifts = [fs.freq_shift_right_peak_ghz for fs in self.analyzed_data.freq_shifts]
+        right_shifts = [fs if fs is not None else np.nan for fs in right_shifts]
+
+        dist_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
+        dist_shifts = [fs if fs is not None else np.nan for fs in dist_shifts]
+
+        all_means = []
+        for fs in self.analyzed_data.freq_shifts:
+            vals = [
+                fs.freq_shift_left_peak_ghz,
+                fs.freq_shift_right_peak_ghz,
+                fs.freq_shift_peak_distance_ghz,
+            ]
+            # Drop None and NaN
+            vals = [v for v in vals if v is not None and not np.isnan(v)]
+            if len(vals) > 0:
+                all_means.append(np.mean(vals))
+            else:
+                all_means.append(np.nan)  # or skip if you prefer
+
+        self.all_means = np.array(all_means, dtype=float)
+
+        if config.reference == 'left':
+            freq_shifts = left_shifts
+        elif config.reference == 'right':
+            freq_shifts = right_shifts
+        else:
+            freq_shifts = dist_shifts
 
         self.ax_axial.plot(range(len(freq_shifts)), freq_shifts, 'bo-', label="Frequency Shift")
         # --- Highlight current only if valid
@@ -163,7 +191,7 @@ class AxialScanViewer(QWidget):
         self.ax_axial.set_xticklabels([f"{i}\n{pos:.1f}" for i, pos in enumerate(positions)], rotation=45)
         self.ax_axial.set_xlabel("Index / Zaber Position (µm)")
         self.ax_axial.set_ylabel("Frequency Shift (GHz)")
-        self.ax_axial.set_title("Axial Scan Result")
+        self.ax_axial.set_title(f"Freq (GHz):{y_val:.3f}")
         self.ax_axial.legend()
         self.ax_axial.grid(True)
 
@@ -195,6 +223,7 @@ class AxialScanViewer(QWidget):
             freq_shifts = [fs.freq_shift_peak_distance_ghz for fs in self.analyzed_data.freq_shifts]
 
         # Drop None + NaN
+        freq_shifts = freq_shifts
         freq_shifts = np.array([fs for fs in freq_shifts if fs is not None], dtype=float)
         freq_shifts = freq_shifts[~np.isnan(freq_shifts)]
 

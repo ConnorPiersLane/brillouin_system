@@ -378,17 +378,19 @@ class BrillouinBackend:
             FittedSpectrum: Dataclass containing fit results and metadata.
         """
 
+        if not self.do_live_fitting and not self.is_reference_mode:
+            return self.spectrum_fitter.get_empty_fitting(frame)
+
+
         if self.do_background_subtraction:
             frame_with_sub_bg = self.subtract_background(frame)
-            sline = self.spectrum_fitter.get_sline_from_image(frame_with_sub_bg)
+            px, sline = self.spectrum_fitter.get_px_sline_from_image(frame_with_sub_bg)
         else:
-            sline = self.spectrum_fitter.get_sline_from_image(frame)
+            px, sline = self.spectrum_fitter.get_px_sline_from_image(frame)
 
-        if not self.do_live_fitting and not self.is_reference_mode:
-            return self.spectrum_fitter.get_empty_fitting(sline)
 
         try:
-            return self.spectrum_fitter.fit(sline, is_reference_mode=self.is_reference_mode)
+            return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode)
         except Exception as e:
             print(f"[BrillouinBackend] Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(sline)
@@ -516,6 +518,7 @@ class BrillouinBackend:
                 frame=frame,
                 x_pixels=fitting.x_pixels,
                 sline=fitting.sline,
+                mask_for_fitting=fitting.mask_for_fitting,
                 x_fit_refined=fitting.x_fit_refined,
                 y_fit_refined=fitting.y_fit_refined,
                 inter_peak_distance=fitting.inter_peak_distance,

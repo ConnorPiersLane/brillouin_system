@@ -1,6 +1,6 @@
 import os
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import matplotlib
@@ -53,8 +53,10 @@ class CalibrationPolyfitParameters:
     freq_left_peak: np.ndarray
     freq_right_peak: np.ndarray
     freq_peak_distance: np.ndarray
+    freq_peak_centroid: np.ndarray
     calibration_width_left_peak: np.ndarray
     calibration_width_right_peak: np.ndarray
+    freq_delta_centroid: np.ndarray = field(default=None)
 
 
 class CalibrationCalculator:
@@ -93,6 +95,10 @@ class CalibrationCalculator:
     def freq_peak_distance(self, px):
         """Frequency distance between left and right peaks [GHz] at pixel position px."""
         return np.polyval(self.p.freq_peak_distance, px)
+
+    def freq_peak_centroid(self, px):
+        """Frequency distance between left and right peaks [GHz] at pixel position px."""
+        return np.polyval(self.p.freq_peak_centroid, px)
 
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
@@ -181,6 +187,7 @@ def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
     left_px = np.array([fs.left_peak_center_px for fs in all_fits])
     right_px = np.array([fs.right_peak_center_px for fs in all_fits])
     inter_px = np.array([fs.inter_peak_distance for fs in all_fits])
+    centroid_px = np.array([(fs.left_peak_center_px +  fs.right_peak_center_px)/2 for fs in all_fits])
     left_width = np.array([fs.left_peak_width_px for fs in all_fits])
     right_width = np.array([fs.right_peak_width_px for fs in all_fits])
 
@@ -195,6 +202,7 @@ def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
         freq_left_peak=safe_polyfit(left_px, freqs, degree),
         freq_right_peak=safe_polyfit(right_px, freqs, degree),
         freq_peak_distance=safe_polyfit(inter_px, freqs, degree),
+        freq_peak_centroid=safe_polyfit(centroid_px, freqs, degree),
         calibration_width_left_peak=safe_polyfit(left_px, left_width, degree),
         calibration_width_right_peak=safe_polyfit(right_px, right_width, degree),
     )
