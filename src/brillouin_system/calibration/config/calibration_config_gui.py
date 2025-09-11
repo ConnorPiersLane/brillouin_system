@@ -30,15 +30,21 @@ class CalibrationConfigDialog(QDialog):
         self.left_radio = QRadioButton("Left Peak")
         self.right_radio = QRadioButton("Right Peak")
         self.dist_radio = QRadioButton("Peak Distance")
+        self.centroid_radio = QRadioButton("Centroid")
+        self.dc_radio = QRadioButton("DC Model")
 
         self.ref_group.addButton(self.left_radio)
         self.ref_group.addButton(self.right_radio)
         self.ref_group.addButton(self.dist_radio)
+        self.ref_group.addButton(self.centroid_radio)
+        self.ref_group.addButton(self.dc_radio)
 
         toggle_layout = QVBoxLayout()
         toggle_layout.addWidget(self.left_radio)
         toggle_layout.addWidget(self.right_radio)
         toggle_layout.addWidget(self.dist_radio)
+        toggle_layout.addWidget(self.centroid_radio)
+        toggle_layout.addWidget(self.dc_radio)
 
         form.addRow("n_per_freq:", self.n_per_freq_input)
         form.addRow("Polynomial Degree:", self.degree_input)
@@ -68,16 +74,21 @@ class CalibrationConfigDialog(QDialog):
             self.left_radio.setChecked(True)
         elif cfg.reference == "right":
             self.right_radio.setChecked(True)
-        else:
+        elif cfg.reference == "distance":
             self.dist_radio.setChecked(True)
-
+        elif cfg.reference == "centroid":
+            self.centroid_radio.setChecked(True)
+        elif cfg.reference == "dc":
+            self.dc_radio.setChecked(True)
 
     def save_config(self):
         try:
             reference = (
                 "left" if self.left_radio.isChecked() else
                 "right" if self.right_radio.isChecked() else
-                "distance"
+                "distance" if self.dist_radio.isChecked() else
+                "centroid" if self.centroid_radio.isChecked() else
+                "dc"
             )
 
             calibration_config.update(

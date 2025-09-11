@@ -56,7 +56,18 @@ class CalibrationPolyfitParameters:
     freq_peak_centroid: np.ndarray
     calibration_width_left_peak: np.ndarray
     calibration_width_right_peak: np.ndarray
-    freq_delta_centroid: np.ndarray = field(default=None)
+    freq_DC_model: np.ndarray = field(default=None)
+    """
+    Linear regression coefficients [a, b, c] for the joint Distance–Centroid model:
+
+        Freq ≈ a*D + b*C + c
+
+    where
+      D = (x2 - x1)   : inter-peak distance in pixels
+      C = (x1 + x2)/2 : centroid in pixels
+
+    Stored as a NumPy array of length 3: [a, b, c].
+    """
 
 
 class CalibrationCalculator:
@@ -73,6 +84,28 @@ class CalibrationCalculator:
     def __init__(self, parameters: CalibrationPolyfitParameters):
         """Initialize the calculator with polynomial fit parameters."""
         self.p = parameters
+
+    def compute_freq_shift(self, fitting: FittedSpectrum,) -> float | None:
+        if not fitting.is_success:
+            return None
+
+        config = calibration_config.get()
+
+        if config.reference == "left":
+            return float(self.freq_left_peak(fitting.left_peak_center_px))
+        elif config.reference == "right":
+            return float(self.freq_right_peak(fitting.right_peak_center_px))
+        elif config.reference == "distance":
+            return float(self.freq_peak_distance(fitting.inter_peak_distance))
+        elif config.reference == "centroid":
+            return float(self.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2))
+        elif config.reference == "dc":
+            return self.freq_DC_model(
+                D=fitting.inter_peak_distance,
+                C=(fitting.right_peak_center_px+fitting.left_peak_center_px)/2,
+            )
+        else:
+            return None
 
     def freq_left_peak(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""
@@ -97,8 +130,28 @@ class CalibrationCalculator:
         return np.polyval(self.p.freq_peak_distance, px)
 
     def freq_peak_centroid(self, px):
-        """Frequency distance between left and right peaks [GHz] at pixel position px."""
+        """Frequency Centroid: left and right peaks [GHz] at pixel position px: (x2+x1)/2"""
         return np.polyval(self.p.freq_peak_centroid, px)
+
+    def freq_DC_model(self, D: float, C: float):
+        """
+        Predict frequency [GHz] from measured inter-peak distance and centroid
+        using the stored Distance–Centroid model.
+
+        Parameters
+        ----------
+        D : float or ndarray
+            Inter-peak distance (x2 - x1) in pixels.
+        C : float or ndarray
+            Centroid (x1 + x2)/2 in pixels.
+
+        Returns
+        -------
+        freq : float or ndarray
+            Predicted frequency [GHz] from the fitted model.
+        """
+        a, b, c = self.p.freq_DC_model
+        return DC_model(a=a, b=b, c=c, D=D, C=C)
 
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
@@ -205,14 +258,77 @@ def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
         freq_peak_centroid=safe_polyfit(centroid_px, freqs, degree),
         calibration_width_left_peak=safe_polyfit(left_px, left_width, degree),
         calibration_width_right_peak=safe_polyfit(right_px, right_width, degree),
+        freq_DC_model=np.array(fit_DC_model(inter_px, centroid_px, freqs)),
     )
 
     return params
 
 
 
+def fit_DC_model(D, C, Freqs):
+    """
+    Fit the joint Distance–Centroid model:
+
+        Freqs = a*D + b*C + c
+
+    using ordinary least squares.
+
+    Parameters
+    ----------
+    D : array_like
+        Inter-peak distances (x2 - x1) in pixels.
+    C : array_like
+        Centroids (x1 + x2)/2 in pixels.
+    Freqs : array_like
+        Measured microwave frequencies in GHz.
+
+    Returns
+    -------
+    a, b, c : floats
+        Regression coefficients such that
+        predicted Freq = a*D + b*C + c
+    """
+    D = np.asarray(D)
+    C = np.asarray(C)
+    Freqs = np.asarray(Freqs)
+
+    # Design matrix with columns [D, C, 1]
+    X = np.column_stack([D, C, np.ones_like(D)])
+
+    # Solve least-squares problem
+    coeffs, *_ = np.linalg.lstsq(X, Freqs, rcond=None)
+    a, b, c = coeffs
+    return a, b, c
+
+def DC_model(a, b, c, D, C) -> float:
+    """
+    Evaluate the Distance–Centroid model:
+
+        Freq = a*D + b*C + c
+
+    Parameters
+    ----------
+    a, b, c : float
+        Model coefficients from `fit_DC_model`.
+    D : float or ndarray
+        Inter-peak distance (x2 - x1) in pixels.
+    C : float or ndarray
+        Centroid (x1 + x2)/2 in pixels.
+
+    Returns
+    -------
+    freq : float or ndarray
+        Predicted frequency [GHz].
+    """
+    freq = a*D + b*C + c
+    return freq
+
+
 def get_calibration_fig(calibration_data: CalibrationData, calculator: CalibrationCalculator, reference: str) -> Figure:
-    assert reference in ["left", "right", "distance"], "Invalid reference type"
+    assert reference in ["left", "right", "distance", "centroid", "dc"], "Invalid reference type"
+
+    if reference == "dc":
+        return _get_calibration_fig_dc3d(calibration_data, calculator)
 
     def extract(fs: FittedSpectrum) -> float:
         return {
@@ -266,6 +382,66 @@ def get_calibration_fig(calibration_data: CalibrationData, calculator: Calibrati
     ax.set_title(f"Calibration Fit ({reference.capitalize()})")
     ax.grid(True)
     ax.legend()
+
+    return fig
+
+def _get_calibration_fig_dc3d(calibration_data: CalibrationData, calculator: CalibrationCalculator) -> Figure:
+    """
+    3D visualization of the Distance–Centroid model:
+        Freq ≈ a*D + b*C + c
+    Plots measured points (D, C, Freq) and the fitted plane.
+    """
+    # Gather data
+    D_list, C_list, F_list = [], [], []
+    for freq_block in calibration_data.measured_freqs:
+        for point in freq_block.cali_meas_points:
+            fs = point.fitting_results
+            if getattr(fs, "is_success", False):
+                D = fs.inter_peak_distance
+                C = 0.5 * (fs.left_peak_center_px + fs.right_peak_center_px)
+                F = point.microwave_freq
+                if np.isfinite(D) and np.isfinite(C) and np.isfinite(F):
+                    D_list.append(D)
+                    C_list.append(C)
+                    F_list.append(F)
+
+    if not D_list:
+        raise ValueError("No successful calibration data to display for DC model.")
+
+    D = np.asarray(D_list)
+    C = np.asarray(C_list)
+    F = np.asarray(F_list)
+
+    # Coefficients a, b, c
+    if calculator.p.freq_DC_model is not None and len(calculator.p.freq_DC_model) == 3:
+        a, b, c = calculator.p.freq_DC_model
+    else:
+        # Fallback: fit from the gathered points (useful if not stored)
+        a, b, c = fit_DC_model(D, C, F)
+
+    # Create 3D figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Scatter of measured data
+    ax.scatter(D, C, F, s=15, alpha=0.7, label="Measured Points")
+
+    # Fitted plane
+    D_lin = np.linspace(D.min(), D.max(), 30)
+    C_lin = np.linspace(C.min(), C.max(), 30)
+    Dg, Cg = np.meshgrid(D_lin, C_lin)
+    Fg = a * Dg + b * Cg + c
+    ax.plot_surface(Dg, Cg, Fg, alpha=0.25, edgecolor='none')
+
+    # Labels & title
+    ax.set_xlabel("Distance D (px)")
+    ax.set_ylabel("Centroid C (px)")
+    ax.set_zlabel("Frequency (GHz)")
+    ax.set_title("Calibration Fit (Distance–Centroid, 3D)")
+    ax.legend(loc="upper left")
+
+    # Show plane equation in figure corner
+    ax.text2D(0.02, 0.98, f"Freq ≈ {a:.3g}·D + {b:.3g}·C + {c:.3g}", transform=ax.transAxes, va="top")
 
     return fig
 

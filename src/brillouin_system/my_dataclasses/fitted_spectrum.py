@@ -20,6 +20,7 @@ class FittedSpectrum:
     right_peak_width_px: float = None
     right_peak_amplitude: float = None
     inter_peak_distance: float = None
+    offset: float = None
 
 
 

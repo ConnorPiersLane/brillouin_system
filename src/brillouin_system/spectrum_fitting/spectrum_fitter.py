@@ -205,7 +205,7 @@ class SpectrumFitter:
 
 
     def _build_result(self, px, sline, model_func, popt, model: str, mask: np.ndarray) -> FittedSpectrum:
-        amp1, cen1, wid1, amp2, cen2, wid2 = popt[:6]
+        amp1, cen1, wid1, amp2, cen2, wid2, offset = popt[:7]
         fitted = model_func(px, *popt)
 
         x_fit, y_fit = refine_fitted_spectrum(model_func, px, popt, factor=10)
@@ -227,6 +227,7 @@ class SpectrumFitter:
             right_peak_width_px=float(wid2),
             right_peak_amplitude=float(amp2),
             inter_peak_distance=abs(cen2 - cen1),
+            offset=offset,
         )
 
     @staticmethod

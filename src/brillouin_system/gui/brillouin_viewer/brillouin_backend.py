@@ -20,7 +20,7 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_in
     ZaberHumanInterfaceDummy
 from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig, led_config
 from brillouin_system.devices.zaber_engines.zaber_microscope.zaber_microscope import ZaberMicroscope, DummyZaberMicroscope
-from brillouin_system.spectrum_fitting.helpers.compute_sample_freqs import compute_freq_shift
+
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, MeasurementPoint, AxialScan
@@ -501,7 +501,10 @@ class BrillouinBackend:
             return None
 
     def get_freq_shift(self, fitting: FittedSpectrum) -> float | None:
-        return compute_freq_shift(fitting=fitting, calibration_calculator=self.calibration_calculator)
+        if self.calibration_calculator is None:
+            return None
+        else:
+            return self.calibration_calculator.compute_freq_shift(fitting=fitting)
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
