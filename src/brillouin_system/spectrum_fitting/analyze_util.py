@@ -6,7 +6,7 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
-def get_background_values(bg_frame: np.ndarray, fit: FittedSpectrum, k: float = 2.0) -> dict:
+def get_background_values(bg_frame: np.ndarray, fit: FittedSpectrum, k: float = 2.0) -> dict | None:
     """
     Estimate background values near the left and right peaks.
 
@@ -28,6 +28,8 @@ def get_background_values(bg_frame: np.ndarray, fit: FittedSpectrum, k: float = 
             "right_peak_bg": float
         }
     """
+    if bg_frame is None:
+        return None
     spectrum_fitter = SpectrumFitter()
     px, sline = spectrum_fitter.get_px_sline_from_image(bg_frame)
 

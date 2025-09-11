@@ -7,19 +7,19 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout,
     QHBoxLayout, QSpinBox, QFileDialog, QGroupBox, QPushButton
 )
-from PyQt5.QtCore import Qt
 
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from scipy.stats import norm
 
+from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, analyze_axial_scan
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
+from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
 
 
 #
@@ -245,6 +245,25 @@ class AxialScanViewer(QWidget):
         print(f"n: {n}")
         print(f"Reference Peak (left, right, distance): {config.reference}")
         print("=====================")
+
+        # # --- New integration ---
+        # calibration_calculator = CalibrationCalculator(self.axial_scan.calibration_params)
+        # analyzer = SpectrumAnalyzer(calibration_calculator)
+        #
+        # # Theoretical precision for *one* fitted spectrum (e.g., current index)
+        # fit = self.analyzed_data.fitted_scan.fitted_spectras[self.current_index]
+        # photons = self.analyzed_data.fitted_scan.fitted_photon_counts[self.current_index]
+        # tpse = analyzer.theoretical_precision(fit, photons, self.axial_scan.system_state.bg_image.median_image)
+        # SpectrumAnalyzer.print_theoretical_precision(tpse)
+        #
+        # # Measured precision across all
+        # ms = analyzer.measured_precision(
+        #     self.analyzed_data.fitted_scan.fitted_spectras,
+        #     self.analyzed_data.freq_shifts
+        # )
+        # if ms is not None:
+        #     SpectrumAnalyzer.print_measured_precision(ms)
+
 
         # --- Plot histogram ---
         fig = Figure(figsize=(6, 4))
