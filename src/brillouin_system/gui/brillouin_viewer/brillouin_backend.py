@@ -378,8 +378,7 @@ class BrillouinBackend:
             FittedSpectrum: Dataclass containing fit results and metadata.
         """
 
-        if not self.do_live_fitting and not self.is_reference_mode:
-            return self.spectrum_fitter.get_empty_fitting(frame)
+
 
 
         if self.do_background_subtraction:
@@ -388,12 +387,14 @@ class BrillouinBackend:
         else:
             px, sline = self.spectrum_fitter.get_px_sline_from_image(frame)
 
+        if not self.do_live_fitting and not self.is_reference_mode:
+            return self.spectrum_fitter.get_empty_fitting(px, sline)
 
         try:
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode)
         except Exception as e:
             print(f"[BrillouinBackend] Fitting error: {e}")
-            return self.spectrum_fitter.get_empty_fitting(sline)
+            return self.spectrum_fitter.get_empty_fitting(px, sline)
 
     def update_calibration_calculator(self):
         if self.calibration_data is None:

@@ -1,6 +1,6 @@
 [global]
-pixel_offset_left = 10
-pixel_offset_right = 10
+pixel_offset_left = 0
+pixel_offset_right = 0
 selected_rows = [
     2,
     3,
@@ -19,7 +19,7 @@ min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
 fitting_model = "lorentzian_window"
-beta = 2
+beta = 4
 
 [reference]
 prominence_fraction = 0.05

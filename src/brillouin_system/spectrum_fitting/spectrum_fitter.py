@@ -89,8 +89,8 @@ class SpectrumFitter:
 
         return px, sline
 
-    def get_empty_fitting(self, frame) -> FittedSpectrum:
-        px, sline = self.get_px_sline_from_image(frame)
+    # ToDo: if no fitting active, then bg must still be substracted
+    def get_empty_fitting(self, px, sline) -> FittedSpectrum:
         return FittedSpectrum(
             is_success=False,
             x_pixels=px,
