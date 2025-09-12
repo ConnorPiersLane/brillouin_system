@@ -53,9 +53,9 @@ class CalibrationPolyfitParameters:
     freq_left_peak: np.ndarray
     freq_right_peak: np.ndarray
     freq_peak_distance: np.ndarray
-    freq_peak_centroid: np.ndarray
     calibration_width_left_peak: np.ndarray
     calibration_width_right_peak: np.ndarray
+    freq_peak_centroid: np.ndarray = field(default=None)
     freq_DC_model: np.ndarray = field(default=None)
     """
     Linear regression coefficients [a, b, c] for the joint Distance–Centroid model:
@@ -131,7 +131,10 @@ class CalibrationCalculator:
 
     def freq_peak_centroid(self, px):
         """Frequency Centroid: left and right peaks [GHz] at pixel position px: (x2+x1)/2"""
-        return np.polyval(self.p.freq_peak_centroid, px)
+        if self.p.freq_DC_model is None:
+            return None
+        else:
+            return np.polyval(self.p.freq_peak_centroid, px)
 
     def freq_DC_model(self, D: float, C: float):
         """
@@ -150,8 +153,11 @@ class CalibrationCalculator:
         freq : float or ndarray
             Predicted frequency [GHz] from the fitted model.
         """
-        a, b, c = self.p.freq_DC_model
-        return DC_model(a=a, b=b, c=c, D=D, C=C)
+        if self.p.freq_DC_model is None:
+            return None
+        else:
+            a, b, c = self.p.freq_DC_model
+            return DC_model(a=a, b=b, c=c, D=D, C=C)
 
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
@@ -214,6 +220,66 @@ class CalibrationCalculator:
         """
         dpx = self.calibration_width_right_peak_dpx(px)
         return self.df_right_peak(px, dpx)
+
+    def print_current_model(self):
+        """Print only the currently active reference model from config."""
+        ref = calibration_config.get().reference
+        print(f"==== Calibration Model: {ref.upper()} ====")
+
+        if ref == "left":
+            self._print_poly("Left Peak", self.p.freq_left_peak)
+        elif ref == "right":
+            self._print_poly("Right Peak", self.p.freq_right_peak)
+        elif ref == "distance":
+            self._print_poly("Inter-Peak Distance", self.p.freq_peak_distance)
+        elif ref == "centroid":
+            self._print_poly("Centroid", self.p.freq_peak_centroid)
+        elif ref == "dc":
+            self._print_dc_model()
+        else:
+            print(f"[Warning] Unknown reference type: {ref}")
+        print("===================================")
+
+    def print_all_models(self):
+        """Print all available calibration models."""
+        print("==== All Calibration Models ====")
+        self._print_poly("Left Peak", self.p.freq_left_peak)
+        self._print_poly("Right Peak", self.p.freq_right_peak)
+        self._print_poly("Inter-Peak Distance", self.p.freq_peak_distance)
+        self._print_poly("Centroid", self.p.freq_peak_centroid)
+        self._print_dc_model()
+        print("================================")
+
+    # --- Internal helpers ---
+    @staticmethod
+    def _poly_to_str(coeffs: np.ndarray) -> str:
+        if coeffs is None or not np.all(np.isfinite(coeffs)):
+            return "N/A"
+        terms = []
+        deg = len(coeffs) - 1
+        for i, c in enumerate(coeffs):
+            power = deg - i
+            if abs(c) < 1e-12:
+                continue
+            if power == 0:
+                terms.append(f"{c:.4g}")
+            elif power == 1:
+                terms.append(f"{c:.4g}·x")
+            else:
+                terms.append(f"{c:.4g}·x^{power}")
+        return " + ".join(terms) if terms else "0"
+
+    def _print_poly(self, name: str, coeffs: np.ndarray):
+        eq = self._poly_to_str(coeffs)
+        print(f"{name}: f(x) ≈ {eq}  [GHz]")
+
+    def _print_dc_model(self):
+        if self.p.freq_DC_model is None:
+            print("Distance–Centroid model: N/A")
+        else:
+            a, b, c = self.p.freq_DC_model
+            print(f"Distance–Centroid: f(D,C) ≈ {a:.4g}·D + {b:.4g}·C + {c:.4g}  [GHz]")
+
 
 
 
@@ -334,13 +400,15 @@ def get_calibration_fig(calibration_data: CalibrationData, calculator: Calibrati
         return {
             "left": fs.left_peak_center_px,
             "right": fs.right_peak_center_px,
-            "distance": fs.inter_peak_distance
+            "distance": fs.inter_peak_distance,
+            "centroid": 0.5 * (fs.left_peak_center_px + fs.right_peak_center_px),  # <-- ADD THIS
         }[reference]
 
     func_map = {
         "left": (calculator.freq_left_peak, "Left Peak Position (px)"),
         "right": (calculator.freq_right_peak, "Right Peak Position (px)"),
         "distance": (calculator.freq_peak_distance, "Inter-Peak Distance (px)"),
+        "centroid": (calculator.freq_peak_centroid, "Centroid (px)"),
     }
     func, y_label = func_map[reference]
 

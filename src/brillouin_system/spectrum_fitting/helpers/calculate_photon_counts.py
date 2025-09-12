@@ -12,10 +12,19 @@ class PhotonsCounts:
     total_photons: float | None
 
 
+def count_to_electrons(counts: int | float,
+                       preamp_gain: int | float,
+                       emccd_gain: int | float) -> float:
+    if emccd_gain == 0:
+        count_to_electron_factor = preamp_gain
+    else:
+        count_to_electron_factor = preamp_gain / emccd_gain
+    return count_to_electron_factor * counts
+
+
 def calculate_photon_counts_from_fitted_spectrum(fs: FittedSpectrum,
                                                  preamp_gain: int | float,
                                                  emccd_gain: int | float) -> PhotonsCounts:
-
     if not fs.is_success:
         return PhotonsCounts(
             left_peak_photons=None,
@@ -23,18 +32,17 @@ def calculate_photon_counts_from_fitted_spectrum(fs: FittedSpectrum,
             total_photons=None,
         )
 
+    left_peak_photons = count_to_electrons(
+        counts=np.pi * fs.left_peak_amplitude * fs.left_peak_width_px,
+        preamp_gain=preamp_gain,
+        emccd_gain=emccd_gain,
+    )
+    right_peak_photons = count_to_electrons(
+        counts=np.pi * fs.right_peak_amplitude * fs.right_peak_width_px,
+        preamp_gain=preamp_gain,
+        emccd_gain=emccd_gain,
+    )
 
-    if emccd_gain == 0:
-        count_to_electron_factor = preamp_gain
-    else:
-        count_to_electron_factor = preamp_gain / emccd_gain
-
-    amp_l = fs.left_peak_amplitude
-    amp_r = fs.right_peak_amplitude
-    width_l = fs.left_peak_width_px
-    width_r = fs.right_peak_width_px
-    left_peak_photons = np.pi * amp_l * width_l * count_to_electron_factor
-    right_peak_photons = np.pi * amp_r * width_r * count_to_electron_factor
     return PhotonsCounts(
         left_peak_photons=left_peak_photons,
         right_peak_photons=right_peak_photons,

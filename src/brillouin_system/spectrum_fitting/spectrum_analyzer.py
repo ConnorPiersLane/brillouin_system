@@ -6,11 +6,13 @@ import numpy as np
 from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.spectrum_fitting.analyze_util import get_background_values
-from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
+from brillouin_system.spectrum_fitting.analyze_util import get_b_values
+from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, count_to_electrons
+
 
 @dataclass
 class TheoreticalPeakStdError:
+    """ All Values in MHz"""
     left_peak_photons: float
     left_peak_pixelation: float
     left_peak_bg: float
@@ -24,16 +26,14 @@ class TheoreticalPeakStdError:
 
 @dataclass
 class MeasuredStatistics:
-    x1_std: float
-    x2_std: float
-    D_std: float
-    C_std: float
-    cov_x1x2: float
-    freq_shift_left_peak_ghz_std: float
-    freq_shift_right_peak_ghz_std: float
-    freq_shift_peak_distance_ghz_std: float
-    freq_shift_dc_ghz_std: float
-    freq_shift_centroid_ghz_std: float
+    """ All Values in MHz, MHz², or -"""
+    freq_shift_left_peak_mhz_std: float
+    freq_shift_right_peak_mhz_std: float
+    freq_shift_peak_distance_mhz_std: float
+    freq_shift_dc_mhz_std: float
+    freq_shift_centroid_mhz_std: float
+    freq_cov_left_right: float  # MHz²
+    freq_corr_left_right: float # Dimensionless
 
 
 class SpectrumAnalyzer:
@@ -83,12 +83,17 @@ class SpectrumAnalyzer:
                 D=fitting.inter_peak_distance,
                 C=(fitting.right_peak_center_px+fitting.left_peak_center_px)/2,
             ),
-            freq_shift_centroid_ghz=float(self.calibration_calculator.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2))
+            freq_shift_centroid_ghz=self.calibration_calculator.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2)
 
         )
 
 
-    def theoretical_precision(self, fs: FittedSpectrum, photons: PhotonsCounts, bg_frame):
+    def theoretical_precision(self, fs: FittedSpectrum,
+                              photons: PhotonsCounts,
+                              bg_frame_std,
+                              preamp_gain: int | float,
+                              emccd_gain: int | float,
+                              ):
         """ See paper: Precise nanometer Localization Analysis for Individual Fluorescent Probes """
 
         analyzed_spec = self.analyze_spectrum(fitting=fs)
@@ -103,100 +108,67 @@ class SpectrumAnalyzer:
         N_l = photons.left_peak_photons
         N_r = photons.right_peak_photons
 
-        result = get_background_values(bg_frame=bg_frame, fit=fs)
-        b_l, b_r = result['left_peak_bg'], result['right_peak_bg']
+        b_counts_l, b_counts_r = get_b_values(std_image=bg_frame_std, fit=fs)
+        b_l = count_to_electrons(b_counts_l, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
+        b_r = count_to_electrons(b_counts_r, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
 
         dx_l_photons = math.sqrt(            s_l ** 2 / N_l        )
         dx_l_pixelation = math.sqrt(  (a_l**2/12) / N_l)
         dx_l_bg =math.sqrt(  4*math.sqrt(math.pi) * s_l**3*b_l**2 / (a_l * N_l**2) )
-        dx_l_total = dx_l_photons + dx_l_pixelation + dx_l_bg
+        dx_l_total =math.sqrt( dx_l_photons**2 + dx_l_pixelation**2 + dx_l_bg**2 )
 
         dx_r_photons = math.sqrt(            s_r ** 2 / N_r        )
         dx_r_pixelation = math.sqrt(  (a_r**2/12) / N_r)
         dx_r_bg =math.sqrt(  4*math.sqrt(math.pi) * s_r**3*b_r**2 / (a_r * N_r**2) )
-        dx_r_total = dx_r_photons + dx_r_pixelation + dx_r_bg
+        dx_r_total =math.sqrt( dx_r_photons**2 + dx_r_pixelation**2 + dx_r_bg**2)
 
         return TheoreticalPeakStdError(
-            left_peak_photons= dx_l_photons,
-            left_peak_pixelation= dx_l_pixelation,
-            left_peak_bg= dx_l_bg,
-            left_peak_total= dx_l_total,
-            right_peak_photons= dx_r_photons,
-            right_peak_pixelation= dx_r_pixelation,
-            right_peak_bg= dx_r_bg,
-            right_peak_total= dx_r_total,
+            left_peak_photons= dx_l_photons*1000,
+            left_peak_pixelation= dx_l_pixelation*1000,
+            left_peak_bg= dx_l_bg*1000,
+            left_peak_total= dx_l_total*1000,
+            right_peak_photons= dx_r_photons*1000,
+            right_peak_pixelation= dx_r_pixelation*1000,
+            right_peak_bg= dx_r_bg*1000,
+            right_peak_total= dx_r_total*1000,
         )
 
-    def measured_precision(self, fs: list[FittedSpectrum],
-                           shifts: list[AnalyzedFreqShifts]) -> MeasuredStatistics | None:
-        if not fs or not shifts:
+
+    def measured_precision(self, shifts: list[AnalyzedFreqShifts]) -> MeasuredStatistics | None:
+        if not shifts:
             return None
 
-        x1 = [f.left_peak_center_px for f in fs]
-        x2 = [f.right_peak_center_px for f in fs]
-        D = [f.inter_peak_distance for f in fs]
-        C = [(f.left_peak_center_px + f.right_peak_center_px) / 2 for f in fs]
+        # Collect arrays (GHz values)
+        left_shifts = [s.freq_shift_left_peak_ghz for s in shifts if s.freq_shift_left_peak_ghz is not None]
+        right_shifts = [s.freq_shift_right_peak_ghz for s in shifts if s.freq_shift_right_peak_ghz is not None]
+        dist_shifts = [s.freq_shift_peak_distance_ghz for s in shifts if s.freq_shift_peak_distance_ghz is not None]
+        dc_shifts = [s.freq_shift_dc_ghz for s in shifts if s.freq_shift_dc_ghz is not None]
+        centroid_shifts = [s.freq_shift_centroid_ghz for s in shifts if s.freq_shift_centroid_ghz is not None]
 
-        # Covariance matrix (2x2)
-        cov_matrix = np.cov(x1, x2, bias=False)
+        # --- Std devs in MHz ---
+        freq_shift_left_peak_std_mhz = float(np.std(left_shifts, ddof=1) * 1e3) if len(left_shifts) > 1 else None
+        freq_shift_right_peak_std_mhz = float(np.std(right_shifts, ddof=1) * 1e3) if len(right_shifts) > 1 else None
+        freq_shift_peak_distance_std_mhz = float(np.std(dist_shifts, ddof=1) * 1e3) if len(dist_shifts) > 1 else None
+        freq_shift_dc_std_mhz = float(np.std(dc_shifts, ddof=1) * 1e3) if len(dc_shifts) > 1 else None
+        freq_shift_centroid_std_mhz = float(np.std(centroid_shifts, ddof=1) * 1e3) if len(centroid_shifts) > 1 else None
 
-        # Extract covariance and variances
-        cov_x1x2 = cov_matrix[0, 1]
-        x1_std = math.sqrt(cov_matrix[0, 0])
-        x2_std = math.sqrt(cov_matrix[1, 1])
-
-        # Std for derived quantities
-        D_std_m = float(np.std(D, ddof=1))  # sample std
-        C_std_m = float(np.std(C, ddof=1))
-
-        # Std for frequency shifts
-        freq_shift_left_peak_ghz_std = float(
-            np.std([s.freq_shift_left_peak_ghz for s in shifts if s.freq_shift_left_peak_ghz is not None], ddof=1))
-        freq_shift_right_peak_ghz_std = float(
-            np.std([s.freq_shift_right_peak_ghz for s in shifts if s.freq_shift_right_peak_ghz is not None], ddof=1))
-        freq_shift_peak_distance_ghz_std = float(
-            np.std([s.freq_shift_peak_distance_ghz for s in shifts if s.freq_shift_peak_distance_ghz is not None],
-                   ddof=1))
-        freq_shift_dc_ghz_std = float(
-            np.std([s.freq_shift_dc_ghz for s in shifts if s.freq_shift_dc_ghz is not None], ddof=1))
-        freq_shift_centroid_ghz_std = float(
-            np.std([s.freq_shift_centroid_ghz for s in shifts if s.freq_shift_centroid_ghz is not None], ddof=1))
+        # --- Covariance & correlation (MHz² and dimensionless) ---
+        freq_cov_left_right_mhz2 = None
+        freq_corr_left_right = None
+        if len(left_shifts) > 1 and len(right_shifts) > 1:
+            cov_matrix = np.cov(left_shifts, right_shifts, ddof=1)
+            freq_cov_left_right_mhz2 = float(cov_matrix[0, 1] * 1e6)  # GHz² → MHz²
+            if freq_shift_left_peak_std_mhz and freq_shift_right_peak_std_mhz:
+                freq_corr_left_right = freq_cov_left_right_mhz2 / (
+                        freq_shift_left_peak_std_mhz * freq_shift_right_peak_std_mhz
+                )
 
         return MeasuredStatistics(
-            x1_std=x1_std,
-            x2_std=x2_std,
-            D_std=D_std_m,
-            C_std=C_std_m,
-            cov_x1x2=float(cov_x1x2),
-            freq_shift_left_peak_ghz_std=freq_shift_left_peak_ghz_std,
-            freq_shift_right_peak_ghz_std=freq_shift_right_peak_ghz_std,
-            freq_shift_peak_distance_ghz_std=freq_shift_peak_distance_ghz_std,
-            freq_shift_dc_ghz_std=freq_shift_dc_ghz_std,
-            freq_shift_centroid_ghz_std=freq_shift_centroid_ghz_std,
+            freq_shift_left_peak_mhz_std=freq_shift_left_peak_std_mhz,
+            freq_shift_right_peak_mhz_std=freq_shift_right_peak_std_mhz,
+            freq_shift_peak_distance_mhz_std=freq_shift_peak_distance_std_mhz,
+            freq_shift_dc_mhz_std=freq_shift_dc_std_mhz,
+            freq_shift_centroid_mhz_std=freq_shift_centroid_std_mhz,
+            freq_cov_left_right=freq_cov_left_right_mhz2,  # MHz²
+            freq_corr_left_right=freq_corr_left_right,  # dimensionless
         )
-
-    # --- New helpers ---
-    @staticmethod
-    def print_theoretical_precision(tpse: TheoreticalPeakStdError):
-        print("==== Theoretical Peak Std Error ====")
-        print(f"Left Peak: photons={tpse.left_peak_photons:.4g}, "
-              f"pixelation={tpse.left_peak_pixelation:.4g}, "
-              f"bg={tpse.left_peak_bg:.4g}, "
-              f"total={tpse.left_peak_total:.4g}")
-        print(f"Right Peak: photons={tpse.right_peak_photons:.4g}, "
-              f"pixelation={tpse.right_peak_pixelation:.4g}, "
-              f"bg={tpse.right_peak_bg:.4g}, "
-              f"total={tpse.right_peak_total:.4g}")
-        print("===================================")
-
-    @staticmethod
-    def print_measured_precision(ms: MeasuredStatistics):
-        print("==== Measured Statistics ====")
-        print(f"x1 std = {ms.x1_std:.4g}, x2 std = {ms.x2_std:.4g}, cov(x1,x2)={ms.cov_x1x2:.4g}")
-        print(f"D std = {ms.D_std:.4g}, C std = {ms.C_std:.4g}")
-        print(f"Freq shifts: left={ms.freq_shift_left_peak_ghz_std:.4g}, "
-              f"right={ms.freq_shift_right_peak_ghz_std:.4g}, "
-              f"distance={ms.freq_shift_peak_distance_ghz_std:.4g}, "
-              f"dc={ms.freq_shift_dc_ghz_std:.4g}, "
-              f"centroid={ms.freq_shift_centroid_ghz_std:.4g}")
-        print("===============================")

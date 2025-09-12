@@ -89,7 +89,7 @@ class SpectrumFitter:
 
         return px, sline
 
-    # ToDo: if no fitting active, then bg must still be substracted
+
     def get_empty_fitting(self, px, sline) -> FittedSpectrum:
         return FittedSpectrum(
             is_success=False,

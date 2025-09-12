@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.calibration.calibration import CalibrationCalculator, CalibrationPolyfitParameters
+from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -56,6 +57,24 @@ class AnalysedAxialScan:
     fitted_scan: FittedAxialScan
     freq_shifts: list[AnalyzedFreqShifts]
 
+
+def get_freq_shift(analyzed_freq_shift: AnalyzedFreqShifts):
+    config = calibration_config.get()
+
+    if config.reference == "left":
+        return analyzed_freq_shift.freq_shift_left_peak_ghz
+    elif config.reference == "right":
+        return analyzed_freq_shift.freq_shift_right_peak_ghz
+    elif config.reference == "distance":
+        return analyzed_freq_shift.freq_shift_peak_distance_ghz
+    elif config.reference == "centroid":
+        return analyzed_freq_shift.freq_shift_centroid_ghz
+    elif config.reference == "dc":
+        return analyzed_freq_shift.freq_shift_dc_ghz
+    else:
+        return None
+
+
 # -------------- Functions --------------
 def fit_axial_scan(scan: AxialScan) -> FittedAxialScan:
     spectrum_fitter = SpectrumFitter()
@@ -103,7 +122,6 @@ def analyze_axial_scan(fitted_scan: FittedAxialScan) -> AnalysedAxialScan:
     analyzed_freqs_shifts = []
 
     if fitted_scan.axial_scan.calibration_params is None:
-
         none_shifts = AnalyzedFreqShifts(
             freq_shift_left_peak_ghz=None,
             freq_shift_right_peak_ghz=None,
