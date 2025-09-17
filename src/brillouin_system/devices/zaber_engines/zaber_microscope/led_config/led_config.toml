@@ -1,0 +1,9 @@
+[led]
+intensity_led_white_below = 31
+intensity_led_blue_385_below = 34
+intensity_led_red_625_below = 40
+intensity_led_white_top = 56
+is_led_white_below = false
+is_led_blue_385_below = false
+is_led_red_625_below = false
+is_led_white_top = true

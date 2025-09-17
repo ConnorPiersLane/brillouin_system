@@ -3,14 +3,26 @@ from dataclasses import dataclass
 import numpy as np
 
 
-
-class ImageStatistics:
-    def __init__(self, images: list[np.ndarray] | np.ndarray):
-        self.mean_image: np.ndarray = np.mean(images, axis=0)
-        self.std_image: np.ndarray = np.std(images, axis=0)
-        self.n: int = len(images)
+def generate_image_statistics_dataclass(images: list[np.ndarray] | np.ndarray):
+    mean_image: np.ndarray = np.mean(images, axis=0)
+    std_image: np.ndarray = np.std(images, axis=0)
+    median_image: np.ndarray = np.median(images, axis=0)
+    n_images: list[np.ndarray] | np.ndarray = images
+    return ImageStatistics(
+        mean_image=mean_image,
+        std_image=std_image,
+        median_image=median_image,
+        n=len(n_images),
+    )
 
 @dataclass
-class BackGroundImage:
-    dark_image: ImageStatistics
-    bg_image: ImageStatistics
+class ImageStatistics:
+    mean_image: np.ndarray
+    std_image: np.ndarray
+    median_image: np.ndarray
+    n: int
+
+@dataclass
+class BackgroundImage:
+    dark_image: ImageStatistics | None = None
+    bg_image: ImageStatistics | None = None

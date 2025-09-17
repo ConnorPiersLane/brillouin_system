@@ -1,0 +1,15 @@
+[andor_frame]
+advanced_gain_option = false
+x_start = 40
+x_end = 110
+y_start = 300
+y_end = 315
+vbin = 1
+hbin = 1
+pre_amp_mode = 18
+vss_index = 4
+temperature = 20.0
+flip_image_horizontally = true
+verbose = true
+n_dark_images = 2
+n_bg_images = 20

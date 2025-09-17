@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.shutter_device import (
+from brillouin_system.devices.shutter_device import (
     Shutter,
     ShutterDummy,
     ShutterManager,
