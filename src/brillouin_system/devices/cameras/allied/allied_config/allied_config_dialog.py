@@ -10,17 +10,17 @@ from brillouin_system.devices.cameras.allied.allied_config.allied_config import 
 )
 
 class AlliedConfigDialog(QDialog):
-    def __init__(self, side: str, allied_update_config, parent=None):
+    def __init__(self, cam_id: str, allied_update_config, parent=None):
         """
         Args:
-            side: "left" or "right"
+            cam_id: "left" or "right"
             allied_update_config: pyqtSignal(object)
         """
         super().__init__(parent)
-        self.setWindowTitle(f"Allied Vision Camera Settings ({side})")
+        self.setWindowTitle(f"Allied Vision Camera Settings ({cam_id})")
         self.setMinimumSize(360, 320)
 
-        self.side = side
+        self.cam_id = cam_id
         self.allied_update_config = allied_update_config
 
         self.inputs = {}
@@ -45,7 +45,7 @@ class AlliedConfigDialog(QDialog):
 
         # ---- Sliders ----
         self.slider_layout = QVBoxLayout()
-        cfg = allied_config[self.side].get_raw()
+        cfg = allied_config[self.cam_id].get_raw()
 
         self.add_camera_slider("Exposure Time (µs)", "exposure", 10, 1000000, int(cfg.exposure))
         self.add_camera_slider("Gain (dB)", "gain", 0, 50, int(cfg.gain))
@@ -114,7 +114,7 @@ class AlliedConfigDialog(QDialog):
         self.current_slider_values[key] = real_val if key == "gamma" else val
 
     def load_values(self):
-        cfg = allied_config[self.side].get()
+        cfg = allied_config[self.cam_id].get()
         self.inputs["id"].setText(cfg.id)
         self.inputs["offset_x"].setText(str(cfg.offset_x))
         self.inputs["offset_y"].setText(str(cfg.offset_y))
@@ -132,7 +132,7 @@ class AlliedConfigDialog(QDialog):
             exposure = self.slider_controls["exposure"].value()
             gamma = self.slider_controls["gamma"].value() / 100
 
-            allied_config[self.side].update(
+            allied_config[self.cam_id].update(
                 id=id_str,
                 offset_x=offset_x,
                 offset_y=offset_y,
@@ -143,8 +143,8 @@ class AlliedConfigDialog(QDialog):
                 gamma=gamma,
             )
 
-            self.allied_update_config(allied_config[self.side].get())
-            print(f"[Allied Config] Settings applied for {self.side}.")
+            self.allied_update_config(allied_config[self.cam_id].get())
+            print(f"[Allied Config] Settings applied for {self.cam_id}.")
 
         except Exception as e:
             QMessageBox.critical(self, "Apply Error", f"Failed to apply settings:\n{e}")
@@ -165,5 +165,5 @@ if __name__ == "__main__":
         print(f"[Function Call] Config updated: {cfg}")
 
     app = QApplication(sys.argv)
-    dialog = AlliedConfigDialog("left", allied_update_config)
+    dialog = AlliedConfigDialog("DEV_000F315BC084", allied_update_config)
     dialog.exec_()

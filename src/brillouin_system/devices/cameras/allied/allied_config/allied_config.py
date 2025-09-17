@@ -37,6 +37,6 @@ def save_allied_settings(path: Path, config_map: dict):
 
 # Global configs for left & right cameras
 allied_config = {
-    "left": ThreadSafeConfig(load_allied_settings(allied_config_toml_path, "left")),
-    "right": ThreadSafeConfig(load_allied_settings(allied_config_toml_path, "right")),
+    "DEV_000F315BC084": ThreadSafeConfig(load_allied_settings(allied_config_toml_path, "DEV_000F315BC084")),
+    "DEV_000F315BC0A5": ThreadSafeConfig(load_allied_settings(allied_config_toml_path, "DEV_000F315BC0A5")),
 }

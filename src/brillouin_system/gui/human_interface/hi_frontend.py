@@ -24,8 +24,8 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog impo
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
-from brillouin_system.gui.brillouin_viewer.brillouin_backend import BrillouinBackend
-from brillouin_system.gui.brillouin_viewer.brillouin_signaller import BrillouinSignaller
+from brillouin_system.gui.human_interface.hi_backend import HiBackend
+from brillouin_system.gui.human_interface.hi_signaller import HiSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
@@ -47,41 +47,39 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-## Testing
-# brillouin_manager = BrillouinBackend(
-#     system_type='human_interface',
-#         camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber_eye_lens=ZaberEyeLensDummy(),
-#     zaber_hi=ZaberHumanInterfaceDummy(),
-#     is_sample_illumination_continuous=True
-# )
-
-
-
-## Running
-brillouin_manager = BrillouinBackend(
-    system_type = 'human_interface',
-    camera=IxonUltra(
-        index = 0,
-        temperature = "off", #"off"
-        fan_mode = "full",
-        x_start = 40, x_end  = 120,
-        y_start= 300, y_end  = 315,
-        vbin= 1, hbin  = 1,
-        verbose = True,
-        advanced_gain_option=False
-    ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber_eye_lens=ZaberEyeLens(),
-    zaber_hi=ZaberHumanInterface(),
+# Testing
+brillouin_manager = HiBackend(
+    camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
+    zaber_eye_lens=ZaberEyeLensDummy(),
+    zaber_hi=ZaberHumanInterfaceDummy(),
     is_sample_illumination_continuous=True
 )
 
 
-class BrillouinEyeViewerFrontend(QWidget):
+
+# ## Running
+# brillouin_manager = HiBackend(
+#     camera=IxonUltra(
+#         index = 0,
+#         temperature = "off", #"off"
+#         fan_mode = "full",
+#         x_start = 40, x_end  = 120,
+#         y_start= 300, y_end  = 315,
+#         vbin= 1, hbin  = 1,
+#         verbose = True,
+#         advanced_gain_option=False
+#     ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber_eye_lens=ZaberEyeLens(),
+#     zaber_hi=ZaberHumanInterface(),
+#     is_sample_illumination_continuous=True
+# )
+
+
+class HiFrontend(QWidget):
 
     # Signals Outgoing
     gui_ready = pyqtSignal()
@@ -129,7 +127,7 @@ class BrillouinEyeViewerFrontend(QWidget):
 
         self.setWindowTitle("Brillouin Viewer (Live)")
 
-        self.brillouin_signaller = BrillouinSignaller(manager=brillouin_manager)
+        self.brillouin_signaller = HiSignaller(manager=brillouin_manager)
         self.brillouin_signaller_thread = QThread()
         self.brillouin_signaller.moveToThread(self.brillouin_signaller_thread)
 
@@ -1238,6 +1236,6 @@ if __name__ == "__main__":
             font-size: 8pt;
         }
     """)
-    viewer = BrillouinEyeViewerFrontend()
+    viewer = HiFrontend()
     viewer.show()
     sys.exit(app.exec_())

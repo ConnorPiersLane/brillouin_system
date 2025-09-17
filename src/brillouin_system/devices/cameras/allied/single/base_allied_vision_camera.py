@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
+
+
 class BaseAlliedVisionCamera(ABC):
     @abstractmethod
     def set_exposure(self, exposure_us: float):
@@ -44,6 +47,10 @@ class BaseAlliedVisionCamera(ABC):
     @abstractmethod
     def stop_stream(self):
         """Stop streaming."""
+        pass
+
+    @abstractmethod
+    def set_config(self, cfg: AlliedConfig):
         pass
 
     @abstractmethod

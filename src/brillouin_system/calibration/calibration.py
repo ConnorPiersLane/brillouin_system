@@ -137,27 +137,9 @@ class CalibrationCalculator:
             return np.polyval(self.p.freq_peak_centroid, px)
 
     def freq_DC_model(self, D: float, C: float):
-        """
-        Predict frequency [GHz] from measured inter-peak distance and centroid
-        using the stored Distance–Centroid model.
-
-        Parameters
-        ----------
-        D : float or ndarray
-            Inter-peak distance (x2 - x1) in pixels.
-        C : float or ndarray
-            Centroid (x1 + x2)/2 in pixels.
-
-        Returns
-        -------
-        freq : float or ndarray
-            Predicted frequency [GHz] from the fitted model.
-        """
         if self.p.freq_DC_model is None:
             return None
-        else:
-            a, b, c = self.p.freq_DC_model
-            return DC_model(a=a, b=b, c=c, D=D, C=C)
+        return DC_model(self.p.freq_DC_model, D, C)
 
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
@@ -274,13 +256,23 @@ class CalibrationCalculator:
         print(f"{name}: f(x) ≈ {eq}  [GHz]")
 
     def _print_dc_model(self):
-        if self.p.freq_DC_model is None:
-            print("Distance–Centroid model: N/A")
+        coeffs = self.p.freq_DC_model
+        if coeffs is None:
+            print("Distance–Centroid model: N/A");
+            return
+        n = len(coeffs)
+        if n == 3:
+            d, e, f = coeffs
+            print(f"Distance–Centroid (linear): f ≈ {d:.4g}·D + {e:.4g}·C + {f:.4g} [GHz]")
+        elif n == 4:
+            b, d, e, f = coeffs
+            print(f"Distance–Centroid (hybrid C²): f ≈ {b:.4g}·C² + {d:.4g}·D + {e:.4g}·C + {f:.4g} [GHz]")
+        elif n == 6:
+            a, b, c, d, e, f = coeffs
+            print(f"Distance–Centroid (quadratic): f ≈ {a:.4g}·D² + {b:.4g}·C² + {c:.4g}·D·C + "
+                  f"{d:.4g}·D + {e:.4g}·C + {f:.4g} [GHz]")
         else:
-            a, b, c = self.p.freq_DC_model
-            print(f"Distance–Centroid: f(D,C) ≈ {a:.4g}·D + {b:.4g}·C + {c:.4g}  [GHz]")
-
-
+            print(f"[Warning] Unexpected DC coeffs length {n}: {coeffs}")
 
 
 def get_calibration_calculator_from_data(calibration_data: CalibrationData) -> CalibrationCalculator:
@@ -331,63 +323,54 @@ def calibrate(data: CalibrationData) -> CalibrationPolyfitParameters:
 
 
 
-def fit_DC_model(D, C, Freqs):
+def fit_DC_model(D, C, Freqs, order: str = "linear"):
     """
-    Fit the joint Distance–Centroid model:
-
-        Freqs = a*D + b*C + c
-
-    using ordinary least squares.
-
-    Parameters
-    ----------
-    D : array_like
-        Inter-peak distances (x2 - x1) in pixels.
-    C : array_like
-        Centroids (x1 + x2)/2 in pixels.
-    Freqs : array_like
-        Measured microwave frequencies in GHz.
-
-    Returns
-    -------
-    a, b, c : floats
-        Regression coefficients such that
-        predicted Freq = a*D + b*C + c
+    Fit Distance–Centroid models:
+      - order="linear":  F ≈ d*D + e*C + f
+      - order="quadratic": F ≈ a*D^2 + b*C^2 + c*D*C + d*D + e*C + f
+      - order="hybrid_c2": F ≈ b*C^2 + d*D + e*C + f   (linear in D, quadratic in C)
+    Returns coeff array in the natural term order for that model.
     """
-    D = np.asarray(D)
-    C = np.asarray(C)
-    Freqs = np.asarray(Freqs)
+    D = np.asarray(D); C = np.asarray(C); F = np.asarray(Freqs)
 
-    # Design matrix with columns [D, C, 1]
-    X = np.column_stack([D, C, np.ones_like(D)])
+    if order == "linear":
+        X = np.column_stack([D, C, np.ones_like(D)])
+        terms = ["D", "C", "1"]
+    elif order == "quadratic":
+        X = np.column_stack([D**2, C**2, D*C, D, C, np.ones_like(D)])
+        terms = ["D2", "C2", "DC", "D", "C", "1"]
+    elif order == "hybrid_c2":
+        X = np.column_stack([C**2, D, C, np.ones_like(D)])
+        terms = ["C2", "D", "C", "1"]
+    else:
+        raise ValueError(f"Unsupported order: {order}")
 
-    # Solve least-squares problem
-    coeffs, *_ = np.linalg.lstsq(X, Freqs, rcond=None)
-    a, b, c = coeffs
-    return a, b, c
+    coeffs, *_ = np.linalg.lstsq(X, F, rcond=None)
+    return coeffs
 
-def DC_model(a, b, c, D, C) -> float:
+
+def DC_model(coeffs, D, C):
     """
-    Evaluate the Distance–Centroid model:
-
-        Freq = a*D + b*C + c
-
-    Parameters
-    ----------
-    a, b, c : float
-        Model coefficients from `fit_DC_model`.
-    D : float or ndarray
-        Inter-peak distance (x2 - x1) in pixels.
-    C : float or ndarray
-        Centroid (x1 + x2)/2 in pixels.
-
-    Returns
-    -------
-    freq : float or ndarray
-        Predicted frequency [GHz].
+    Evaluate any of the three models based on coeff length.
+    lens:
+      3 -> [d, e, f]     linear
+      4 -> [b, d, e, f]  hybrid_c2 (C^2, D, C, 1)
+      6 -> [a, b, c, d, e, f] quadratic
     """
-    freq = a*D + b*C + c
-    return freq
+    D = np.asarray(D); C = np.asarray(C)
+    n = len(coeffs)
+    if n == 3:
+        d, e, f = coeffs
+        return d*D + e*C + f
+    elif n == 4:
+        b, d, e, f = coeffs
+        return b*C**2 + d*D + e*C + f
+    elif n == 6:
+        a, b, c, d, e, f = coeffs
+        return a*D**2 + b*C**2 + c*D*C + d*D + e*C + f
+    else:
+        raise ValueError(f"Unexpected coefficient length: {n}")
+
 
 
 def get_calibration_fig(calibration_data: CalibrationData, calculator: CalibrationCalculator, reference: str) -> Figure:

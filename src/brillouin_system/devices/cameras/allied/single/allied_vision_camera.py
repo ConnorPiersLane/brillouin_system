@@ -1,6 +1,8 @@
 from contextlib import ExitStack
 
 from vimba import Vimba, VimbaFeatureError, VimbaCameraError
+
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
 from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
 
 class AlliedVisionCamera(BaseAlliedVisionCamera):
@@ -235,7 +237,23 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             print(f"[AVCamera] Failed to get Gamma range: {e}")
             return None
 
+    def set_config(self, cfg: AlliedConfig, restart_stream=True):
+        """Apply a full AlliedConfig object to the camera safely."""
+        was_streaming = self.streaming
+        if was_streaming:
+            self.stop_stream()
 
+        try:
+            self.set_roi(cfg.offset_x, cfg.offset_y, cfg.width, cfg.height)
+            self.set_exposure(cfg.exposure)
+            self.set_gain(cfg.gain)
+            self.set_gamma(cfg.gamma)
+            print(f"[AVCamera] Applied full config for {cfg.id}")
+        except Exception as e:
+            print(f"[AVCamera] Failed to apply full config: {e}")
+
+        if was_streaming and restart_stream:
+            self.start_stream(self._last_callback)
 
     def snap(self, timeout_ms=2000):
         """Capture a single frame in freerun (continuous) mode."""

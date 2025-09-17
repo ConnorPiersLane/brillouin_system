@@ -3,6 +3,7 @@ import threading
 import numpy as np
 import time
 
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
 from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
 
 
@@ -74,6 +75,12 @@ class DummyAlliedVisionCamera(BaseAlliedVisionCamera):
         if self.streaming:
             print("[DummyMakoCamera] Stopped streaming.")
             self.streaming = False
+
+    def set_config(self, cfg: AlliedConfig):
+        self.set_roi(cfg.offset_x, cfg.offset_y, cfg.width, cfg.height)
+        self.set_exposure(cfg.exposure)
+        self.set_gain(cfg.gain)
+        print(f"[DummyMakoCamera] Config applied for {cfg.id}")
 
     def snap(self):
         was_streaming = self.streaming
