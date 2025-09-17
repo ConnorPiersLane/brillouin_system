@@ -15,7 +15,7 @@ def make_colored_sphere(radius=7.7):
     sphere["colors"] = colors
     return sphere
 
-def render_eye(yaw_deg=90, pitch_deg=0, radius=7.7):
+def render_eye(yaw_deg=40, pitch_deg=0, radius=7.7):
     """Render the sphere from a rotated camera view and return as numpy image."""
     sphere = make_colored_sphere(radius)
     plotter = pv.Plotter(off_screen=True, window_size=[400, 400])
@@ -37,7 +37,7 @@ def render_eye(yaw_deg=90, pitch_deg=0, radius=7.7):
 
 # Example usage: sweep yaw and pitch and plot last frame
 if __name__ == "__main__":
-    img = render_eye(yaw_deg=40, pitch_deg=0)
+    img = render_eye(yaw_deg=60, pitch_deg=10)
 
     plt.figure(figsize=(4, 4))
     plt.imshow(img)
