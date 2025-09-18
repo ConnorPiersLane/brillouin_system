@@ -46,7 +46,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
     - ROI may be hardware-limited to full sensor size (2048x2048 in this test).
     """
 
-    def __init__(self, id="DEV_000F315BC084"):
+    def __init__(self, id="DEV_000F315BC084", pixel_format='Mono8'):
         print("[AVCamera] Connecting to Allied Vision Camera...")
         self.stack = ExitStack()
         self.vimba = self.stack.enter_context(Vimba.get_instance())
@@ -68,6 +68,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             raise RuntimeError("[AVCamera] Cannot continue without valid camera.")
 
         print(f"[AVCamera] ...Found camera: {self.camera.get_id()}")
+        self.set_pixel_format(format_str=pixel_format)
         self.set_freerun_mode()
 
     def set_freerun_mode(self):
@@ -237,7 +238,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
             print(f"[AVCamera] Failed to get Gamma range: {e}")
             return None
 
-    def set_config(self, cfg: AlliedConfig, restart_stream=True):
+    def set_config(self, cfg: AlliedConfig):
         """Apply a full AlliedConfig object to the camera safely."""
         was_streaming = self.streaming
         if was_streaming:
@@ -252,7 +253,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         except Exception as e:
             print(f"[AVCamera] Failed to apply full config: {e}")
 
-        if was_streaming and restart_stream:
+        if was_streaming:
             self.start_stream(self._last_callback)
 
     def snap(self, timeout_ms=2000):
@@ -308,6 +309,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
     def set_pixel_format(self, format_str: str):
         """
         Set the pixel format (e.g. 'Mono8', 'Mono12', 'BayerRG8', etc.).
+        PixelFormat.Mono8
 
         Args:
             format_str (str): must be in get_available_pixel_formats()

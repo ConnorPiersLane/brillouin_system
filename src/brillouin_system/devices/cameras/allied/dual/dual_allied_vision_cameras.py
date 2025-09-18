@@ -5,6 +5,7 @@ import time
 import cv2
 from vimba import VimbaFeatureError, PixelFormat
 
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig, allied_config
 from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
 from brillouin_system.devices.cameras.allied.single.allied_vision_camera import AlliedVisionCamera
 
@@ -29,35 +30,31 @@ class DualAlliedVisionCameras(BaseDualCameras):
     def __init__(self, id0="DEV_000F315BC084", id1="DEV_000F315BDC0C"):
         print("[DualCamera] Initializing two Allied Vision cameras...")
 
-        self.cam0 = AlliedVisionCamera(id=id0)
-        self.cam1 = AlliedVisionCamera(id=id1)
+        self.left = AlliedVisionCamera(id=id0)
+        self.right = AlliedVisionCamera(id=id1)
         # self.cam0.set_roi(1000, 1000, 200, 200)
         # self.cam1.set_roi(1000, 1000, 200, 200)
-        self.cam0.set_max_roi()
-        self.cam1.set_max_roi()
+        self.left.set_max_roi()
+        self.right.set_max_roi()
 
-        # Optimization settings for both cameras
-        cams = [self.cam0.camera, self.cam1.camera]
-        for i, cam in enumerate(cams):
-            try:
-                # Pixel Format: Mono8
-                cam.set_pixel_format(PixelFormat.Mono8)
-
-            except VimbaFeatureError as e:
-                print(f"[AVCamera {i}] Optimization failed: {e}")
+        self.set_configs(left_cfg=allied_config["left"], right_cfg=allied_config["right"])
 
         self._setup_snap_mode()
+        self._is_streaming = False
         self.start_stream()
+
+
+
 
     def _setup_snap_mode(self):
         """Configure both cameras for software-triggered snap mode."""
-        for cam in [self.cam0, self.cam1]:
+        for cam in [self.left, self.right]:
             cam.set_software_trigger()
 
 
     def trigger_both(self):
-        self.cam0.camera.get_feature_by_name("TriggerSoftware").run()
-        self.cam1.camera.get_feature_by_name("TriggerSoftware").run()
+        self.left.camera.get_feature_by_name("TriggerSoftware").run()
+        self.right.camera.get_feature_by_name("TriggerSoftware").run()
         # t1 = threading.Thread(target=lambda: self.cam0.camera.get_feature_by_name("TriggerSoftware").run())
         # t2 = threading.Thread(target=lambda: self.cam1.camera.get_feature_by_name("TriggerSoftware").run())
         # t1.start()
@@ -67,19 +64,25 @@ class DualAlliedVisionCameras(BaseDualCameras):
 
     def start_stream(self):
         """Start streaming once and keep queues ready."""
-        self.cam0.camera.start_streaming(_handler0, buffer_count=10)
-        self.cam1.camera.start_streaming(_handler1, buffer_count=10)
+        self.left.camera.start_streaming(_handler0, buffer_count=10)
+        self.right.camera.start_streaming(_handler1, buffer_count=10)
         time.sleep(1)  # Let the queues settle
+        self._is_streaming = True
 
     def stop_stream(self):
-        self.cam0.camera.stop_streaming()
-        self.cam1.camera.stop_streaming()
+        self.left.camera.stop_streaming()
+        self.right.camera.stop_streaming()
+        self._is_streaming = False
 
     def clear_queues(self):
         while not frame_q0.empty(): frame_q0.get_nowait()
         while not frame_q1.empty(): frame_q1.get_nowait()
 
     def snap_once(self, timeout=5.0):
+        if not self._is_streaming:
+            print("Cameras are not streaming. Start streaming first")
+            return None, None
+
         self.clear_queues()
         self.trigger_both()
 
@@ -107,13 +110,39 @@ class DualAlliedVisionCameras(BaseDualCameras):
     #
     #     return f0, f1
 
+    def set_configs(self, left_cfg: AlliedConfig | None, right_cfg: AlliedConfig | None):
+        """
+        Apply configuration objects to both cameras.
 
+        Args:
+            left_cfg (AlliedConfig): Configuration for cam0.
+            right_cfg (AlliedConfig): Configuration for cam1.
+        """
+        print("[DualCamera] Applying configs to both cameras...")
+        was_streaming = self._is_streaming  # track if we were streaming before
+
+        try:
+            if was_streaming:
+                self.stop_stream()
+
+            if left_cfg is not None:
+                self.left.set_config(left_cfg)
+            if right_cfg is not None:
+                self.right.set_config(right_cfg)
+
+            print("[DualCamera] Configs applied successfully.")
+
+        except Exception as e:
+            print(f"[DualCamera] Failed to apply configs: {e}")
+        finally:
+            if was_streaming:
+                self.start_stream()
 
     def close(self):
         """Close both cameras cleanly."""
         self.stop_stream()
-        self.cam0.close()
-        self.cam1.close()
+        self.left.close()
+        self.right.close()
         print("[DualCamera] Cameras closed.")
 
 

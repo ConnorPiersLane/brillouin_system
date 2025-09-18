@@ -1,6 +1,8 @@
 
 import abc
 
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
+
 
 class BaseDualCameras(abc.ABC):
     """
@@ -19,3 +21,6 @@ class BaseDualCameras(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def set_configs(self, left_cfg: AlliedConfig | None, right_cfg: AlliedConfig | None):
+        pass

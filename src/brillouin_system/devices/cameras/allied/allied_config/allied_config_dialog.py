@@ -165,5 +165,5 @@ if __name__ == "__main__":
         print(f"[Function Call] Config updated: {cfg}")
 
     app = QApplication(sys.argv)
-    dialog = AlliedConfigDialog("DEV_000F315BC084", allied_update_config)
+    dialog = AlliedConfigDialog("left", allied_update_config)
     dialog.exec_()
