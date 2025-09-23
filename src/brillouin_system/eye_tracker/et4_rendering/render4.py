@@ -4,7 +4,6 @@ import math
 
 # ---------- Geometry helpers ----------
 
-import numpy as np
 from matplotlib import pyplot as plt
 
 

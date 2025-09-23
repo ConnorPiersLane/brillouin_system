@@ -54,6 +54,7 @@ class HiSignaller(QObject):
     send_update_stored_axial_scans = pyqtSignal(list)
     axial_scan_data_ready = pyqtSignal(object)
     send_axial_scans_to_save = pyqtSignal(list)
+    send_message_to_frontend = pyqtSignal(str, str)
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -369,7 +370,6 @@ class HiSignaller(QObject):
                 self._gui_ready = False
                 self.snap_and_fit()
             QCoreApplication.processEvents()
-            time.sleep(0.03)
 
         self._thread_active = False
         self.log_message.emit("Worker stopped live acquisition loop.")
@@ -432,6 +432,10 @@ class HiSignaller(QObject):
         Generates a series of ZaberPositions using the given axis, n, and step,
         then takes measurements and updates the GUI accordingly.
         """
+        if self.backend.calibration_poly_fit_params is None:
+            self.send_message_to_user('Warning', "No Calibration available. Run Calibration first.")
+            return
+
         old_state = self.system_state
         self.stop_live_view()
         self.update_system_state(new_state=SystemState.BUSY)
@@ -497,6 +501,10 @@ class HiSignaller(QObject):
 
         if removed > 0:
             self.update_stored_axial_scans()
+
+    @pyqtSlot()
+    def send_message_to_user(self, title: str, message: str):
+        self.send_message_to_frontend.emit(title, message)
 
     @pyqtSlot()
     def close(self):

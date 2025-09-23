@@ -1,5 +1,8 @@
 # dual_camera_proxy.py
 import multiprocessing as mp
+
+import numpy as np
+
 from brillouin_system.helpers.frame_ipc_shared import ShmFrameSpec, ShmRing
 
 class DualCameraProxy:
@@ -83,23 +86,83 @@ class DualCameraProxy:
                 # loop to wait for final 'config_applied'
                 continue
 
-    def get_frames(self):
-        """Blocking read of latest frame indices from event queue."""
+    def get_frames(self) -> tuple[np.ndarray, np.ndarray, dict]:
+        """
+        Block until the next paired frame event arrives, then return the images and metadata.
+
+        Behavior
+        --------
+        - Reads a single message from the worker's event queue (evt_q).
+        - When it sees a "frame" event, it pulls the two indices (left_idx/right_idx),
+          reads those slots from the shared-memory rings, makes *copies* (so the caller
+          is not affected by subsequent overwrites), and returns them with metadata.
+        - If it sees a "reshaped" event (the worker reallocated rings due to a config
+          change that altered width/height), it reattaches to the new rings, ACKs the
+          worker, and continues waiting for the first post-reshape frame.
+        - Control events like "started"/"stopped"/"inited"/"config_applied" are ignored.
+
+        Shared-memory note
+        ------------------
+        - The ring readers return arrays that reference shared memory. We call .copy()
+          before returning to detach them, so later writes by the worker won't mutate
+          what you received. If you *want* zero-copy views instead, remove the .copy()
+          calls (but then you must not hold the arrays long).
+
+        Returns
+        -------
+        (left, right, meta)
+            left : np.ndarray
+                Left image as uint8, detached from shared memory.
+            right : np.ndarray
+                Right image as uint8, detached from shared memory.
+            meta : dict
+                Small metadata dict. Keys may include:
+                  - "ts": float wallclock timestamp (worker time.time())
+                  - "seq": int monotonically increasing frame sequence (if worker provides)
+                  - "tleft"/"tright": hardware timestamps if provided by the worker.
+
+        Raises
+        ------
+        RuntimeError
+            If the worker reports an "error" event.
+
+        Notes
+        -----
+        - This returns the *next* announced pair, not necessarily the “latest” in the
+          rings. With your coalescing worker + small evt_q, backlog is tiny, so this
+          is effectively latest under load.
+        """
+        import queue as _q  # local alias to avoid shadowing
+
         while True:
             msg = self.evt_q.get()
             typ = msg.get("type")
+
             if typ == "frame":
-                li = msg["left_idx"]; ri = msg["right_idx"]
-                left  = self.left_ring.read_slot(li)
-                right = self.right_ring.read_slot(ri)
-                return left, right, msg["ts"]
+                li = msg["left_idx"];
+                ri = msg["right_idx"]
+                left = self.left_ring.read_slot(li).copy()  # detach from shared memory
+                right = self.right_ring.read_slot(ri).copy()  # detach from shared memory
+                meta = {}
+                for k in ("ts", "seq", "tleft", "tright"):
+                    if k in msg:
+                        meta[k] = msg[k]
+                return left, right, meta
+
             elif typ == "reshaped":
-                # if a consumer thread is reading, reattach here too
+                # Reattach to new rings and acknowledge so worker can resume.
                 self._attach_rings(msg)
                 self.req_q.put({"type": "reshape_ack"})
+                # Optional: if you want to guarantee the *first* frame you return
+                # is post-reshape, just continue and wait for the next "frame".
+                continue
+
+            elif typ in ("started", "stopped", "inited", "config_applied"):
+                # Control events: nothing to return; keep waiting.
+                continue
+
             elif typ == "error":
-                raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb','')}")
-            # ignore other control events during blocking get
+                raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb', '')}")
 
     def shutdown(self):
         if self.req_q:

@@ -8,7 +8,8 @@ import numpy as np
 from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
-    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget
+    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QGridLayout,
+    QMessageBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -17,7 +18,7 @@ import matplotlib.pyplot as plt
 
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
-
+from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
@@ -184,6 +185,7 @@ class HiFrontend(QWidget):
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
+        self.brillouin_signaller.send_message_to_frontend.connect(self.message_handler)
 
         # Saving Signals
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
@@ -223,7 +225,7 @@ class HiFrontend(QWidget):
         left_column_layout.addStretch()
         outer_layout.addLayout(left_column_layout, 0)
 
-        # RIGHT COLUMN: Plots
+        # Mid COLUMN: Plots
         middle_column_layout = QVBoxLayout()
         middle_column_layout.addWidget(self.create_andor_display_group())
 
@@ -235,6 +237,12 @@ class HiFrontend(QWidget):
 
 
         outer_layout.addLayout(middle_column_layout, 1)
+
+        # FAR RIGHT COLUMN: Eye Tracking
+        right_column_layout = QVBoxLayout()
+        right_column_layout.addWidget(self.create_eye_tracking_group())
+        right_column_layout.addStretch()
+        outer_layout.addLayout(right_column_layout, 0)
 
 
 
@@ -472,17 +480,30 @@ class HiFrontend(QWidget):
         group.setLayout(outer_layout)
         return group
 
-
-
     def create_allied_vision_group(self):
         group = QGroupBox("Allied Vision Cameras")
-        layout = QVBoxLayout()
 
-        self.allied_settings_btn = QPushButton("Settings")
-        self.allied_settings_btn.clicked.connect(self.on_allied_settings_clicked)
+        # Buttons row for Allied Vision Cameras
+        btn_row = QHBoxLayout()
+        self.btn_allied_left = QPushButton("Left")
+        self.btn_allied_right = QPushButton("Right")
+        self.btn_allied_fitting = QPushButton("Fitting")
 
-        layout.addWidget(self.allied_settings_btn)
-        group.setLayout(layout)
+        btn_row.addWidget(self.btn_allied_left)
+        btn_row.addWidget(self.btn_allied_right)
+        btn_row.addWidget(self.btn_allied_fitting)
+        btn_row.addStretch()
+
+        # put the row into a real layout and set it on the group
+        v = QVBoxLayout()
+        v.addLayout(btn_row)
+        group.setLayout(v)
+
+        # wire up
+        self.btn_allied_left.clicked.connect(self.open_allied_left_dialog)
+        self.btn_allied_right.clicked.connect(self.open_allied_right_dialog)
+        self.btn_allied_fitting.clicked.connect(self.open_fitting_dialog)
+
         return group
 
 
@@ -505,6 +526,47 @@ class HiFrontend(QWidget):
 
         group.setLayout(layout)
         return group
+
+    # --- Eye Tracking UI ---
+
+    def create_eye_tracking_group(self):
+        """2x2 grid of black placeholders for future eye-tracking frames."""
+
+        def _make_black_pixmap(width=320, height=240):
+            """Small helper to generate a black placeholder image."""
+            pix = QPixmap(width, height)
+            pix.fill(Qt.black)
+            return pix
+
+
+        group = QGroupBox("Eye Tracking")
+
+        grid = QGridLayout()
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+
+        # create 2x2 black placeholder views
+        self.eye_views = []
+        for i in range(4):
+            lbl = QLabel()
+            lbl.setObjectName(f"eyeView{i+1}")
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setMinimumSize(180, 140)
+            lbl.setStyleSheet(
+                "background-color: black; border: 1px solid #444; border-radius: 6px;"
+            )
+            lbl.setPixmap(_make_black_pixmap(320, 240))
+            lbl.setScaledContents(True)
+
+            grid.addWidget(lbl, i // 2, i % 2)
+            self.eye_views.append(lbl)
+
+        group.setLayout(grid)
+        group.setMinimumWidth(380)  # keeps the column tidy
+        return group
+
+
 
     def create_show_scan_results(self):
         """
@@ -1075,8 +1137,8 @@ class HiFrontend(QWidget):
         try:
             self.axial_viewer = AxialScanViewer(scan_data)
             self.axial_viewer.show()
-        except:
-            pass
+        except Exception as e:
+            print(f"[AxialScanViewer] Failed to show data: {e}")
 
 
 
@@ -1141,6 +1203,7 @@ class HiFrontend(QWidget):
             except Exception as e:
                 print(f"[Error] Failed to save calibration data: {e}")
 
+
         self._show_cali = False
         self._save_cali = True
 
@@ -1154,9 +1217,6 @@ class HiFrontend(QWidget):
             print(
                 f"[Brillouin Viewer] Axial Scan Request | ID: {id_str}, N: {n_meas}, Step: {step} µm")
 
-            # Stop live view before scanning
-            self.stop_live_requested.emit()
-            QApplication.processEvents()
 
             request = RequestAxialScan(
                 id=id_str,
@@ -1209,6 +1269,45 @@ class HiFrontend(QWidget):
         self._stored_measurements.clear()
         self.measurement_series_label.setText("Stored Series: 0")
         print("[Brillouin Viewer] Cleared all stored measurement series.")
+
+    # -- Open Dialog --
+    def message_handler(self, title: str, message: str):
+        QMessageBox.information(self, title, message)
+
+    # ---- Allied config dialogs ----
+
+    def open_allied_left_dialog(self):
+        dlg = AlliedConfigDialog("left", self._apply_allied_left, parent=self)
+        dlg.exec_()
+
+    def open_allied_right_dialog(self):
+        dlg = AlliedConfigDialog("right", self._apply_allied_right, parent=self)
+        dlg.exec_()
+
+    def _apply_allied_left(self, cfg_obj):
+        """
+        Called by AlliedConfigDialog on Apply for LEFT.
+        Sends new config to the dual-camera proxy (handles reshape handshake internally).
+        """
+        pass
+
+    def _apply_allied_right(self, cfg_obj):
+        """
+        Called by AlliedConfigDialog on Apply for RIGHT.
+        """
+        pass
+
+    def _get_dual_proxy(self):
+        """
+        Locate the DualCameraProxy instance.
+        Adjust this if your app stores it differently.
+        """
+        pass
+
+    # ---- Fitting button (placeholder) ----
+    def open_fitting_dialog(self):
+        # Replace with your real fitting/config dialog
+        QMessageBox.information(self, "Fitting", "Fitting configuration dialog not implemented yet.")
 
     def closeEvent(self, event):
         print("[Brillouin Viewer] Shutdown initiated...")
