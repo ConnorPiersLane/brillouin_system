@@ -126,8 +126,8 @@ def analyze_axial_scan(fitted_scan: FittedAxialScan) -> AnalysedAxialScan:
             freq_shift_left_peak_ghz=None,
             freq_shift_right_peak_ghz=None,
             freq_shift_peak_distance_ghz=None,
-            fwhm_left_peak_ghz=None,
-            fwhm_right_peak_ghz=None,
+            hwhm_left_peak_ghz=None,
+            hwhm_right_peak_ghz=None,
         )
 
         for _ in fitted_scan.fitted_spectras:

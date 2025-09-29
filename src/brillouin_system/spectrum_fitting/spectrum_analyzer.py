@@ -47,8 +47,8 @@ class SpectrumAnalyzer:
                 freq_shift_left_peak_ghz=None,
                 freq_shift_right_peak_ghz=None,
                 freq_shift_peak_distance_ghz=None,
-                fwhm_left_peak_ghz=None,
-                fwhm_right_peak_ghz=None,
+                hwhm_left_peak_ghz=None,
+                hwhm_right_peak_ghz=None,
                 freq_shift_dc_ghz=None,
                 freq_shift_centroid_ghz=None,
             )
@@ -63,7 +63,7 @@ class SpectrumAnalyzer:
             freq_shift_peak_distance_ghz=float(
                 self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance)
             ),
-            fwhm_left_peak_ghz=float(
+            hwhm_left_peak_ghz=float(
                 abs(
                     self.calibration_calculator.df_left_peak(
                         fitting.left_peak_center_px,
@@ -71,7 +71,7 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
-            fwhm_right_peak_ghz=float(
+            hwhm_right_peak_ghz=float(
                 abs(
                     self.calibration_calculator.df_right_peak(
                         fitting.right_peak_center_px,
@@ -100,7 +100,7 @@ class SpectrumAnalyzer:
 
         # All values are in GHz, as this is a distance approx for the spectrometer
         # Lorentzian Profile, approximate std with fwhm
-        s_l, s_r = analyzed_spec.fwhm_left_peak_ghz, analyzed_spec.fwhm_right_peak_ghz
+        s_l, s_r = analyzed_spec.hwhm_left_peak_ghz, analyzed_spec.hwhm_right_peak_ghz
 
         a_l = self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1)
         a_r = self.calibration_calculator.df_left_peak(px=fs.right_peak_center_px, dpx=1)

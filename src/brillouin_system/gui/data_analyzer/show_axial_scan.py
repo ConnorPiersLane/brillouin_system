@@ -274,8 +274,8 @@ class AxialScanViewer(QWidget):
         print(f"Freq shifts: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
-        print(f"FWHM: left={fmt(freq_shift.fwhm_left_peak_ghz)}, "
-              f"right={fmt(freq_shift.fwhm_right_peak_ghz)}")
+        print(f"FWHM: left={fmt(2*freq_shift.hwhm_left_peak_ghz)}, "
+              f"right={fmt(2*freq_shift.hwhm_right_peak_ghz)}")
         print(f"Photons: left={fmt(photons.left_peak_photons)}, "
               f"right={fmt(photons.right_peak_photons)}, "
               f"total={fmt(photons.total_photons)}")
