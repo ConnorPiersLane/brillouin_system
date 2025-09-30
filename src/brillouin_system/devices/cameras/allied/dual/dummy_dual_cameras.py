@@ -25,8 +25,8 @@ class DummyDualCameras(BaseDualCameras):
         self._is_streaming = False
 
         # Try to load "left/right" first; fall back to known device IDs if needed
-        left_cfg = allied_config.get("left")
-        right_cfg = allied_config.get("right")
+        left_cfg = allied_config["left"].get()
+        right_cfg = allied_config["right"].get()
 
 
 

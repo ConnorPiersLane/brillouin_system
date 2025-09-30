@@ -38,7 +38,7 @@ class DualCamImageCapture(QWidget):
     # Signal to update status text safely from non-GUI threads
     status_changed = pyqtSignal(str)
 
-    def __init__(self, use_dummy=True):
+    def __init__(self, use_dummy=False):
         super().__init__()
         self.setWindowTitle("Dual Camera Shared-Memory Demo")
 
@@ -451,7 +451,7 @@ if __name__ == "__main__":
     mp.freeze_support()  # Windows
 
     app = QApplication(sys.argv)
-    w = DualCamImageCapture(use_dummy=True)  # set False to use real hardware
+    w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
     w.resize(1000, 560)
     w.show()
     sys.exit(app.exec_())

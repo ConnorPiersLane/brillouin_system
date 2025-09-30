@@ -45,7 +45,7 @@ class AlliedConfigDialog(QDialog):
 
         # ---- Sliders ----
         self.slider_layout = QVBoxLayout()
-        cfg = allied_config[self.cam_id].get_raw()
+        cfg = allied_config[self.cam_id].get()
 
         self.add_camera_slider("Exposure Time (µs)", "exposure", 10, 1000000, int(cfg.exposure))
         self.add_camera_slider("Gain (dB)", "gain", 0, 50, int(cfg.gain))

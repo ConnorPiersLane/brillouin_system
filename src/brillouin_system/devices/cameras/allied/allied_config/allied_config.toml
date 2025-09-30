@@ -2,10 +2,10 @@
 id = "DEV_000F315BC084"
 offset_x = 100
 offset_y = 500
-width = 1000
+width = 200
 height = 500
 gain = 12
-exposure = 20000
+exposure = 168204
 gamma = 1.0
 
 [right]

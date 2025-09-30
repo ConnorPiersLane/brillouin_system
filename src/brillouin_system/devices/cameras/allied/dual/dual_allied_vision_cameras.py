@@ -36,11 +36,14 @@ class DualAlliedVisionCameras(BaseDualCameras):
         # self.cam1.set_roi(1000, 1000, 200, 200)
         self.left.set_max_roi()
         self.right.set_max_roi()
+        self._is_streaming = False
+        left_cfg = allied_config["left"].get()
+        right_cfg = allied_config["right"].get()
 
-        self.set_configs(left_cfg=allied_config["left"], right_cfg=allied_config["right"])
+        self.set_configs(left_cfg=left_cfg, right_cfg=right_cfg)
 
         self._setup_snap_mode()
-        self._is_streaming = False
+
         self.start_stream()
 
 
