@@ -394,6 +394,7 @@ class HiBackend:
             all_results = []
 
             for i in range(request_axial_scan.n_measurements):
+                print(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
                 if self.f2b_cancel_callback():
                     print(f"[Axial Scan] Cancelled during step {i}.")
                     return False
