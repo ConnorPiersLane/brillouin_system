@@ -48,36 +48,36 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-# Testing
-brillouin_manager = HiBackend(
-    camera=DummyCamera(),
-    shutter_manager=ShutterManagerDummy('human_interface'),
-    microwave=MicrowaveDummy(),
-    zaber_eye_lens=ZaberEyeLensDummy(),
-    zaber_hi=ZaberHumanInterfaceDummy(),
-    is_sample_illumination_continuous=True
-)
-
-
-
-# ## Running
+# # Testing
 # brillouin_manager = HiBackend(
-#     camera=IxonUltra(
-#         index = 0,
-#         temperature = "off", #"off"
-#         fan_mode = "full",
-#         x_start = 40, x_end  = 120,
-#         y_start= 300, y_end  = 315,
-#         vbin= 1, hbin  = 1,
-#         verbose = True,
-#         advanced_gain_option=False
-#     ),
-#     shutter_manager=ShutterManager('human_interface'),
-#     microwave=Microwave(),
-#     zaber_eye_lens=ZaberEyeLens(),
-#     zaber_hi=ZaberHumanInterface(),
+#     camera=DummyCamera(),
+#     shutter_manager=ShutterManagerDummy('human_interface'),
+#     microwave=MicrowaveDummy(),
+#     zaber_eye_lens=ZaberEyeLensDummy(),
+#     zaber_hi=ZaberHumanInterfaceDummy(),
 #     is_sample_illumination_continuous=True
 # )
+
+
+
+## Running
+brillouin_manager = HiBackend(
+    camera=IxonUltra(
+        index = 0,
+        temperature = -40, #"off"
+        fan_mode = "full",
+        x_start = 40, x_end  = 120,
+        y_start= 300, y_end  = 315,
+        vbin= 1, hbin  = 1,
+        verbose = True,
+        advanced_gain_option=False
+    ),
+    shutter_manager=ShutterManager('human_interface'),
+    microwave=Microwave(),
+    zaber_eye_lens=ZaberEyeLens(),
+    zaber_hi=ZaberHumanInterface(),
+    is_sample_illumination_continuous=True
+)
 
 
 class HiFrontend(QWidget):

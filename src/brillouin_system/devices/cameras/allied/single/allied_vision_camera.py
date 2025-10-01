@@ -290,7 +290,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
-            entries = feat.get_all_entry_names()
+            entries = feat._EnumFeature__entries
             return entries
         except Exception as e:
             print(f"[AVCamera] Failed to get available pixel formats: {e}")
@@ -316,9 +316,6 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
-            available = feat.get_all_entry_names()
-            if format_str not in available:
-                raise ValueError(f"'{format_str}' not in available formats: {available}")
             feat.set(format_str)
             print(f"[AVCamera] Pixel format set to {format_str}")
         except Exception as e:

@@ -1,7 +1,7 @@
 [left]
 id = "DEV_000F315BC084"
-offset_x = 100
-offset_y = 500
+offset_x = 0
+offset_y = 0
 width = 200
 height = 500
 gain = 12
