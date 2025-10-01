@@ -29,7 +29,7 @@ def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
         arr_rgb = np.ascontiguousarray(arr_rgb)
     bytes_per_line = int(arr_rgb.strides[0])
     qimg = QImage(arr_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-    return QPixmap.fromImage(qimg.copy())
+    return QPixmap.fromImage(qimg)
 
 def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
     # arr: HxW, expects 8-bit for display; shape already 2-D
@@ -38,7 +38,7 @@ def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
         arr = np.ascontiguousarray(arr)
     bytes_per_line = int(arr.strides[0])
     qimg = QImage(arr.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
-    return QPixmap.fromImage(qimg.copy())
+    return QPixmap.fromImage(qimg)
 
 
 class DualCamImageCapture(QWidget):
@@ -242,8 +242,8 @@ class DualCamImageCapture(QWidget):
         except queue.Empty:
             return
 
-        self._last_left = left.copy()
-        self._last_right = right.copy()
+        self._last_left = left
+        self._last_right = right
         self._last_ts = ts
 
         # ...inside on_tick...
@@ -316,8 +316,8 @@ class DualCamImageCapture(QWidget):
             self._saver_q.put_nowait((
                 idx,
                 prefix,
-                self._last_left.copy(),
-                self._last_right.copy(),
+                self._last_left,
+                self._last_right,
                 ts
             ))
             self.status_changed.emit(f"Queued pair {idx:04d}")
@@ -383,8 +383,8 @@ class DualCamImageCapture(QWidget):
             # Write PNGs via Qt
             try:
                 h, w = left.shape
-                qimg_l = QImage(left.data, w, h, w, QImage.Format_Grayscale8).copy()
-                qimg_r = QImage(right.data, w, h, w, QImage.Format_Grayscale8).copy()
+                qimg_l = QImage(left.data, w, h, w, QImage.Format_Grayscale8)
+                qimg_r = QImage(right.data, w, h, w, QImage.Format_Grayscale8)
                 ok_l = qimg_l.save(str(left_path), "PNG")
                 ok_r = qimg_r.save(str(right_path), "PNG")
                 if not (ok_l and ok_r):
