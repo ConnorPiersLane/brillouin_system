@@ -290,7 +290,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
-            entries = (str(entry) for entry in feat._EnumFeature__entries)
+            entries = feat._EnumFeature__entries
             return entries
         except Exception as e:
             print(f"[AVCamera] Failed to get available pixel formats: {e}")

@@ -139,7 +139,7 @@ class DualCameraProxy:
             typ = msg.get("type")
 
             if typ == "frame":
-                li = msg["left_idx"];
+                li = msg["left_idx"]
                 ri = msg["right_idx"]
                 left = self.left_ring.read_slot(li).copy()  # detach from shared memory
                 right = self.right_ring.read_slot(ri).copy()  # detach from shared memory

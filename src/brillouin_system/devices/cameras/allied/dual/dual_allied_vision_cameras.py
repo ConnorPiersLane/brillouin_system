@@ -13,6 +13,12 @@ from brillouin_system.devices.cameras.allied.single.allied_vision_camera import 
 frame_q0 = queue.Queue(maxsize=20)
 frame_q1 = queue.Queue(maxsize=20)
 
+
+def clear_queues():
+    while not frame_q0.empty(): frame_q0.get_nowait()
+    while not frame_q1.empty(): frame_q1.get_nowait()
+
+
 def _push(q, item):
     try:
         q.put_nowait(item)
@@ -23,24 +29,27 @@ def _push(q, item):
             pass
         q.put_nowait(item)
 
+def _to_mono2d(a):
+    """Ensure a 2D (H, W) array for mono images."""
+    a = np.asarray(a)
+    if a.ndim == 3 and a.shape[-1] == 1:
+        a = a[..., 0]   # drop the singleton channel
+    return a
 
 # Put (timestamp, image_copy) into the queues instead of the Frame object.
 def _handler0(cam, frame):
-    status = frame.get_status()
-    if status != 0:
+    if frame.get_status() != 0:
         print(f"Cam0: Incomplete frame: {frame.get_status()}!")
-    ts = frame.get_timestamp()
     img = frame.as_numpy_ndarray().copy()  # deep copy to detach from Vimba buffer
-    _push(frame_q0, (status, ts, img))
+    _push(frame_q0, img)
     cam.queue_frame(frame)
 
 def _handler1(cam, frame):
-    status = frame.get_status()
-    if status != 0:
+    if frame.get_status() != 0:
         print(f"Cam1: Incomplete frame: {frame.get_status()}!")
-    ts = frame.get_timestamp()
+        return
     img = frame.as_numpy_ndarray().copy()
-    _push(frame_q1, (status, ts, img))
+    _push(frame_q1,  img)
     cam.queue_frame(frame)
 
 class DualAlliedVisionCameras(BaseDualCameras):
@@ -51,8 +60,7 @@ class DualAlliedVisionCameras(BaseDualCameras):
         self.right = AlliedVisionCamera(id=id1)
         # self.cam0.set_roi(1000, 1000, 200, 200)
         # self.cam1.set_roi(1000, 1000, 200, 200)
-        self.left.set_max_roi()
-        self.right.set_max_roi()
+
         self._is_streaming = False
 
         left_cfg = allied_config["left"].get()
@@ -100,11 +108,9 @@ class DualAlliedVisionCameras(BaseDualCameras):
         self.right.camera.stop_streaming()
         self._is_streaming = False
 
-    def clear_queues(self):
-        while not frame_q0.empty(): frame_q0.get_nowait()
-        while not frame_q1.empty(): frame_q1.get_nowait()
 
-    def snap_once(self, timeout=5.0, return_info=False) -> tuple:
+
+    def snap_once(self, timeout=5.0) -> tuple:
         """
         Acquire a single synchronized frame from both cameras.
 
@@ -145,15 +151,16 @@ class DualAlliedVisionCameras(BaseDualCameras):
             print("Cameras are not streaming. Start streaming first")
             return None, None
 
-        self.clear_queues()
+        clear_queues()
         self.trigger_both()
 
-        (status0, ts0, f0) = frame_q0.get(timeout=timeout)
-        (status1, ts1, f1) = frame_q1.get(timeout=timeout)
-        if return_info:
-            return f0, f1, ts0, ts1, status0, status1
-        else:
-            return f0, f1
+        f0 = frame_q0.get(timeout=timeout)
+        f1 = frame_q1.get(timeout=timeout)
+
+        f0 = _to_mono2d(f0)
+        f1 = _to_mono2d(f1)
+
+        return f0, f1
 
     # def snap_once(self, timeout=2.0):
     #     # # Switch to SingleFrame mode
@@ -215,11 +222,11 @@ if __name__ == "__main__":
 
     try:
         # First snap
-        f0, f1, ts0, ts1, status0, status1 = cams.snap_once(return_info=True)
+        f0, f1 = cams.snap_once()
         print("First Snap:")
-        print("  Cam0 Frame shape:", f0.shape, " Status:", status0, " Timestamp:", ts0)
-        print("  Cam1 Frame shape:", f1.shape, " Status:", status1, " Timestamp:", ts1)
-        print(f"  Time delta between cams: {(abs(ts0 - ts1)) / 1e6:.3f} ms")
+        print("  Cam0 Frame shape:", f0.shape)
+        print("  Cam1 Frame shape:", f1.shape)
+        # print(f"  Time delta between cams: {(abs(ts0 - ts1)) / 1e6:.3f} ms")
 
         # Show the images
         cv2.imshow("Cam 0", f0)
@@ -229,11 +236,11 @@ if __name__ == "__main__":
         cv2.destroyAllWindows()
 
         # Second snap
-        f0, f1, ts0b, ts1b, status0b, status1b = cams.snap_once(return_info=True)
+        f0, f1 = cams.snap_once()
         print("Second Snap:")
-        print("  Cam0 Frame shape:", f0.shape, " Status:", status0b, " Timestamp:", ts0b)
-        print("  Cam1 Frame shape:", f1.shape, " Status:", status1b, " Timestamp:", ts1b)
-        print(f"  Time delta between cams: {(abs(ts0b - ts1b)) / 1e6:.3f} ms")
+        print("  Cam0 Frame shape:", f0.shape,)
+        print("  Cam1 Frame shape:", f1.shape,)
+
 
         # Show the images
         cv2.imshow("Cam 0", f0)
@@ -242,9 +249,6 @@ if __name__ == "__main__":
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-        # Time delta between snaps (based on cam0 and cam1)
-        print(f"Time between first and second snap (cam0): {(ts0b - ts0) / 1e6:.3f} ms")
-        print(f"Time between first and second snap (cam1): {(ts1b - ts1) / 1e6:.3f} ms")
 
     finally:
         cams.close()

@@ -17,7 +17,7 @@ def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
     return QPixmap.fromImage(qimg.copy())
 
 class DualCamDemo(QWidget):
-    def __init__(self, use_dummy=True):
+    def __init__(self, use_dummy=False):
         super().__init__()
         self.setWindowTitle("Dual Camera Shared-Memory Demo")
 
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     mp.freeze_support()  # Windows
 
     app = QApplication(sys.argv)
-    w = DualCamDemo(use_dummy=True)  # set False to use real hardware
+    w = DualCamDemo(use_dummy=False)  # set False to use real hardware
     w.resize(900, 500)
     w.show()
     sys.exit(app.exec_())

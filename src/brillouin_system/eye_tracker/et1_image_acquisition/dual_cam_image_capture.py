@@ -20,17 +20,24 @@ from dual_camera_proxy import DualCameraProxy
 # ⬇️ import your config dialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 
-# add below numpy_to_qpixmap_gray
+
+
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
     # arr_rgb: HxWx3, uint8, RGB
     h, w, _ = arr_rgb.shape
-    qimg = QImage(arr_rgb.data, w, h, 3*w, QImage.Format_RGB888)
+    if not arr_rgb.flags.c_contiguous:
+        arr_rgb = np.ascontiguousarray(arr_rgb)
+    bytes_per_line = int(arr_rgb.strides[0])
+    qimg = QImage(arr_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg.copy())
 
-
 def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
+    # arr: HxW, expects 8-bit for display; shape already 2-D
     h, w = arr.shape
-    qimg = QImage(arr.data, w, h, w, QImage.Format_Grayscale8)
+    if not arr.flags.c_contiguous:
+        arr = np.ascontiguousarray(arr)
+    bytes_per_line = int(arr.strides[0])
+    qimg = QImage(arr.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
     return QPixmap.fromImage(qimg.copy())
 
 
@@ -153,6 +160,9 @@ class DualCamImageCapture(QWidget):
         # Keyboard shortcut: space bar to save
         QShortcut(QKeySequence("Space"), self, activated=self.on_save_pair)
 
+    def _set_pixmap_fit(self, label: QLabel, pm: QPixmap):
+        label.setPixmap(pm.scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
     def _setup_frame_views(self):
         """
         Define fixed display areas for left/right, black background, and
@@ -236,36 +246,21 @@ class DualCamImageCapture(QWidget):
         self._last_right = right.copy()
         self._last_ts = ts
 
+        # ...inside on_tick...
         if self.overlay_checkbox.isChecked():
-            # throttle detection to every 3rd tick
-            self._detect_counter = (self._detect_counter + 1) % 3
-            if self._detect_counter == 0:
-                cols = int(self.cols_spin.value())
-                rows = int(self.rows_spin.value())
-                pattern = (cols, rows)
-
-                # run detection on the latest frames
-                vis_l = self._draw_corners_overlay(self._last_left, pattern)
-                vis_r = self._draw_corners_overlay(self._last_right, pattern)
-
-                # cache results to reuse between detections
-                self._last_overlay_left = vis_l
-                self._last_overlay_right = vis_r
-
-            # show overlay if present; otherwise show raw
+            # left
             if self._last_overlay_left is not None:
-                self.left_label.setPixmap(numpy_to_qpixmap_rgb(self._last_overlay_left))
+                self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_rgb(self._last_overlay_left))
             else:
-                self.left_label.setPixmap(numpy_to_qpixmap_gray(self._last_left))
-
+                self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_gray(self._last_left))
+            # right
             if self._last_overlay_right is not None:
-                self.right_label.setPixmap(numpy_to_qpixmap_rgb(self._last_overlay_right))
+                self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_rgb(self._last_overlay_right))
             else:
-                self.right_label.setPixmap(numpy_to_qpixmap_gray(self._last_right))
+                self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_gray(self._last_right))
         else:
-            # overlay disabled → raw
-            self.left_label.setPixmap(numpy_to_qpixmap_gray(self._last_left))
-            self.right_label.setPixmap(numpy_to_qpixmap_gray(self._last_right))
+            self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_gray(self._last_left))
+            self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_gray(self._last_right))
 
     # -------- Config dialogs --------
     def open_left_config(self):
