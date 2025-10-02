@@ -1,4 +1,18 @@
 import os
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"  # Qt ≥ 5.14
+
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtCore import Qt
+
+# Must be set before QApplication is constructed:
+QtCore.QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+QtCore.QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
+
+
+
 import sys
 import pickle
 from collections import deque
@@ -624,7 +638,7 @@ class HiFrontend(QWidget):
 
     def create_andor_display_group(self):
         pg.setConfigOptions(
-            useOpenGL=True, antialias=False, imageAxisOrder='row-major',
+            useOpenGL=False, antialias=False, imageAxisOrder='row-major',
             background='w', foreground='k'
         )
 
@@ -1314,19 +1328,23 @@ class HiFrontend(QWidget):
         print("[Brillouin Viewer] GUI shutdown complete.")
         event.accept()
 
-
 def main():
+    # Set rounding policy before constructing QApplication (Qt ≥ 5.14)
+    try:
+        QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+    except Exception:
+        pass  # Older Qt — env var above still helps
 
     app = QApplication(sys.argv)
-    # Apply global style sheet to reduce font size
     app.setStyleSheet("""
-        * {
-            font-size: 8pt;
-        }
+        * { font-size: 8pt; }
     """)
     viewer = HiFrontend()
     viewer.show()
     sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()
