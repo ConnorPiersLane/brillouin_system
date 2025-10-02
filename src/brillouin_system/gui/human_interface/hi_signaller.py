@@ -1,12 +1,10 @@
 from enum import Enum
+import threading
 
-import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
-import time
+from PyQt5 import QtCore
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
-from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
-from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig
 from brillouin_system.gui.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
@@ -38,23 +36,22 @@ class HiSignaller(QObject):
     illumination_mode_state  = pyqtSignal(bool)
     reference_mode_state = pyqtSignal(bool)
     do_live_fitting_state = pyqtSignal(bool)
-    gui_ready_received = pyqtSignal()
 
     # Signals outwards
     camera_settings_ready = pyqtSignal(dict)
     zaber_lens_position_updated = pyqtSignal(float)
     microwave_frequency_updated = pyqtSignal(float)
     background_data_ready = pyqtSignal(object)  # emits a BackgroundData instance
-    frame_and_fit_ready = pyqtSignal(object)
+    # frame_and_fit_ready = pyqtSignal(object)
     measurement_result_ready = pyqtSignal(object)
     camera_shutter_state_changed = pyqtSignal(bool)
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
-    flir_frame_ready = pyqtSignal(np.ndarray)
     send_update_stored_axial_scans = pyqtSignal(list)
     axial_scan_data_ready = pyqtSignal(object)
     send_axial_scans_to_save = pyqtSignal(list)
     send_message_to_frontend = pyqtSignal(str, str)
+    new_andor_display_ready = pyqtSignal()
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -75,9 +72,15 @@ class HiSignaller(QObject):
         self.backend = manager
         self._running = False
         self._thread_active = False
-        self._gui_ready = True
         self._camera_shutter_open = True
         self._is_cancel_operations = False
+
+        self._mb_lock = threading.Lock()
+        self._mb_latest_display = None
+
+        # in HiSignaller.__init__ (after moveToThread happens in the host)
+        self._acq_timer = None
+
 
         self.system_state = SystemState.IDLE
 
@@ -98,11 +101,6 @@ class HiSignaller(QObject):
         if new_state in (SystemState.BUSY, SystemState.FREERUNNING):
             self.reset_cancel()
 
-
-    @pyqtSlot()
-    def on_gui_ready(self):
-        self._gui_ready = True
-
     def update_gui(self):
         self.emit_is_illumination_continuous()
         self.emit_is_background_available()
@@ -110,6 +108,22 @@ class HiSignaller(QObject):
         self.emit_do_background_subtraction()
         self.emit_do_live_fitting_state()
 
+    def _mailbox_push_andor_display(self, display):
+        need_notify = False
+        with self._mb_lock:
+            # if GUI hasn't consumed yet, mailbox is not None: just overwrite, don't notify
+            if self._mb_latest_display is None:
+                need_notify = True
+            self._mb_latest_display = display
+        if need_notify:
+            self.new_andor_display_ready.emit()  # queued across threads
+
+    def fetch_latest_andor_display(self):
+        # consumer (GUI thread): swap out and return
+        with self._mb_lock:
+            item = self._mb_latest_display
+            self._mb_latest_display = None
+        return item
 
     @pyqtSlot()
     def emit_do_background_subtraction(self):
@@ -320,69 +334,50 @@ class HiSignaller(QObject):
 
         self.restart_live_view_when_ready()
 
-
     @pyqtSlot()
     def snap_and_fit(self):
         try:
             frame = self.backend.get_andor_frame()
             fitting: FittedSpectrum = self.backend.get_fitted_spectrum(frame)
             display = self.backend.get_display_results(frame, fitting)
-            self.frame_and_fit_ready.emit(display)
+
+            # push to mailbox and notify GUI
+            self._mailbox_push_andor_display(display)
+            self.new_andor_display_ready.emit()
+
         except Exception as e:
             self.log_message.emit(f"Error snapping frame: {e}")
 
     @pyqtSlot()
     def start_live_view(self):
-        if not self.backend.is_sample_illumination_continuous:
-            self.log_message.emit("Live view not started: illumination mode is pulsed.")
+        if self._running:
             return
         self.backend.init_shutters()
+        self._running = True
+        self.update_system_state(new_state=SystemState.FREERUNNING)
 
-        if not self._thread_active:
+        if self._acq_timer is None:
+            self._acq_timer = QtCore.QTimer(self)  # parent = self (lives in worker)
+            self._acq_timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
+            self._acq_timer.timeout.connect(self._acq_tick)  # local, same-thread
 
-            self._running = True
-            QTimer.singleShot(0, self.run)
-
-    # Start live view again
-    def restart_live_view_when_ready(self):
-        if not self._thread_active:
-            self.start_live_view()
-        else:
-            QTimer.singleShot(100, self.restart_live_view_when_ready)
+        self._acq_timer.start(10)
 
     @pyqtSlot()
     def stop_live_view(self):
         self._running = False
+        if self._acq_timer:
+            self._acq_timer.stop()
         self.update_system_state(new_state=SystemState.IDLE)
 
-    @pyqtSlot()
-    def run(self):
-        if self._thread_active:
+    def restart_live_view_when_ready(self):
+        QTimer.singleShot(0, self.start_live_view)
+
+    def _acq_tick(self):
+        if not self._running:
             return
-        self._thread_active = True
-        self._running = True
-        self.update_system_state(new_state=SystemState.FREERUNNING)
-        self.log_message.emit("Worker started live acquisition loop.")
+        self.snap_and_fit()
 
-
-        while self._running:
-            if self._gui_ready:
-                self._gui_ready = False
-                self.snap_and_fit()
-            QCoreApplication.processEvents()
-
-        self._thread_active = False
-        self.log_message.emit("Worker stopped live acquisition loop.")
-
-
-    def _update_gui(self, display_results: DisplayResults):
-        self._gui_ready = False
-        self.frame_and_fit_ready.emit(display_results)
-
-    def _fitting_and_update_gui(self, frame: np.ndarray):
-        fitting = self.backend.get_fitted_spectrum(frame)
-        display_results = self.backend.get_display_results(frame, fitting)
-        self._update_gui(display_results)
 
     def cancel_operations(self):
         self._is_cancel_operations = True
@@ -403,9 +398,6 @@ class HiSignaller(QObject):
     def reset_cancel(self):
         self._is_cancel_operations = False
 
-    @pyqtSlot(np.ndarray)
-    def _handle_flir_frame(self, frame):
-        self.flir_frame_ready.emit(frame)
 
     @pyqtSlot()
     def get_calibration_results(self):
@@ -413,7 +405,8 @@ class HiSignaller(QObject):
         self.calibration_result_ready.emit((self.backend.calibration_data, self.backend.calibration_calculator))
 
     def emit_display_result(self, display: DisplayResults):
-        self.frame_and_fit_ready.emit(display)
+        self._mailbox_push_andor_display(display)
+        self.new_andor_display_ready.emit()
 
     @pyqtSlot()
     def run_calibration(self):
@@ -456,16 +449,6 @@ class HiSignaller(QObject):
         else:
             print(f"[Signaller] Requested scan index {index} not found.")
 
-    # Flir Camera
-    @pyqtSlot(object)
-    def flir_update_settings(self, flir_config: FLIRConfig):
-        self.backend.update_flir_settings(flir_config)
-
-
-    # Zaber Microscope
-    @pyqtSlot(object)
-    def update_microscope_leds(self, led_config: LEDConfig):
-        self.backend.update_microscope_led_settings(led_config)
 
     @pyqtSlot()
     def close_all_shutters(self):
@@ -506,19 +489,12 @@ class HiSignaller(QObject):
     def send_message_to_user(self, title: str, message: str):
         self.send_message_to_frontend.emit(title, message)
 
-    @pyqtSlot()
+
+
     def close(self):
         print("Stopping BrillouinWorker and closing hardware...")
         self._running = False
-
-        def _wait_for_thread_and_shutdown():
-            if self._thread_active:
-                QTimer.singleShot(100, _wait_for_thread_and_shutdown)
-            else:
-                try:
-                    self.backend.close()
-                except Exception as e:
-                    print(f"Error during backend shutdown: {e}")
-
-        _wait_for_thread_and_shutdown()
-
+        try:
+            self.backend.close()
+        except Exception as e:
+            print(f"Error during backend shutdown: {e}")

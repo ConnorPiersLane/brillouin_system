@@ -350,21 +350,21 @@ class EyeSceneRenderer:
     def close(self):
         self.plotter.close()
 
-
-if __name__ == "__main__":
-    demo_render_with_pose()
-
+#
 # if __name__ == "__main__":
-#     renderer = EyeSceneRenderer()
-#
-#     # Example loop: move eye around
-#     for x in np.linspace(-2, 2, 5):
-#         C = np.array([x, 0.0, 0.0])
-#         gaze = np.array([0.0, 0.0, 1.0])  # straight ahead
-#         renderer.set_eye_pose(C, gaze)
-#         img = renderer.get_img()
-#
-#
-#         plt.imshow(img); plt.show()
-#
-#     renderer.close()
+#     demo_render_with_pose()
+# #
+if __name__ == "__main__":
+    renderer = EyeSceneRenderer()
+
+    # Example loop: move eye around
+    for x in np.linspace(-2, 2, 5):
+        C = np.array([x, 0.0, 0.0])
+        gaze = np.array([0.0, 0.0, 1.0])  # straight ahead
+        renderer.set_eye_pose(C, gaze)
+        img = renderer.get_img()
+
+
+        plt.imshow(img); plt.show()
+
+    renderer.close()

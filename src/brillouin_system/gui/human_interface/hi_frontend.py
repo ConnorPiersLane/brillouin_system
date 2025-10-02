@@ -1,9 +1,11 @@
-
+import os
 import sys
 import pickle
 from collections import deque
 
 import numpy as np
+import pyqtgraph as pg
+from pyqtgraph import GraphicsLayoutWidget
 
 from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
 from PyQt5.QtWidgets import (
@@ -12,14 +14,13 @@ from PyQt5.QtWidgets import (
     QMessageBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5 import QtCore
 
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
+
 
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
-
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
@@ -32,58 +33,54 @@ from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
 from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
 from brillouin_system.gui.data_analyzer.show_axial_scan import AxialScanViewer
-
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan
-
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
-from brillouin_system.my_dataclasses.display_results import DisplayResults
+
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy, ZaberEyeLens
 
 ###
 # Add other guis
-
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-# # Testing
-# brillouin_manager = HiBackend(
-#     camera=DummyCamera(),
-#     shutter_manager=ShutterManagerDummy('human_interface'),
-#     microwave=MicrowaveDummy(),
-#     zaber_eye_lens=ZaberEyeLensDummy(),
-#     zaber_hi=ZaberHumanInterfaceDummy(),
-#     is_sample_illumination_continuous=True
-# )
-
-
-
-## Running
+# Testing
 brillouin_manager = HiBackend(
-    camera=IxonUltra(
-        index = 0,
-        temperature = -40, #"off"
-        fan_mode = "full",
-        x_start = 40, x_end  = 120,
-        y_start= 300, y_end  = 315,
-        vbin= 1, hbin  = 1,
-        verbose = True,
-        advanced_gain_option=False
-    ),
-    shutter_manager=ShutterManager('human_interface'),
-    microwave=Microwave(),
-    zaber_eye_lens=ZaberEyeLens(),
-    zaber_hi=ZaberHumanInterface(),
+    camera=DummyCamera(),
+    shutter_manager=ShutterManagerDummy('human_interface'),
+    microwave=MicrowaveDummy(),
+    zaber_eye_lens=ZaberEyeLensDummy(),
+    zaber_hi=ZaberHumanInterfaceDummy(),
     is_sample_illumination_continuous=True
 )
+
+
+
+# ## Running
+# brillouin_manager = HiBackend(
+#     camera=IxonUltra(
+#         index = 0,
+#         temperature = -40, #"off"
+#         fan_mode = "full",
+#         x_start = 40, x_end  = 120,
+#         y_start= 300, y_end  = 315,
+#         vbin= 1, hbin  = 1,
+#         verbose = True,
+#         advanced_gain_option=False
+#     ),
+#     shutter_manager=ShutterManager('human_interface'),
+#     microwave=Microwave(),
+#     zaber_eye_lens=ZaberEyeLens(),
+#     zaber_hi=ZaberHumanInterface(),
+#     is_sample_illumination_continuous=True
+# )
 
 
 class HiFrontend(QWidget):
 
     # Signals Outgoing
-    gui_ready = pyqtSignal()
     apply_camera_settings_requested = pyqtSignal(dict)
     toggle_camera_shutter_requested = pyqtSignal()
     emit_camera_settings_requested = pyqtSignal()
@@ -124,7 +121,8 @@ class HiFrontend(QWidget):
         super().__init__()
 
         # State control
-        self._show_live = True
+
+        self.history_data = deque(maxlen=100)
 
         self.setWindowTitle("Brillouin Viewer (Live)")
 
@@ -152,7 +150,6 @@ class HiFrontend(QWidget):
 
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
         self.take_axial_scan_requested.connect(self.brillouin_signaller.take_axial_scan)
-        self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
@@ -170,8 +167,7 @@ class HiFrontend(QWidget):
         self.brillouin_signaller.reference_mode_state.connect(self.update_reference_ui)
         self.brillouin_signaller.camera_settings_ready.connect(self.populate_camera_ui)
         self.brillouin_signaller.camera_shutter_state_changed.connect(self.update_camera_shutter_button)
-        self.brillouin_signaller.frame_and_fit_ready.connect(self.display_result, Qt.QueuedConnection)
-        self.brillouin_signaller.measurement_result_ready.connect(self.handle_measurement_results)
+        self.brillouin_signaller.new_andor_display_ready.connect(self._on_andor_mailbox, Qt.QueuedConnection)
 
         self.brillouin_signaller.zaber_lens_position_updated.connect(self.update_zaber_lens_position)
         self.brillouin_signaller.zaber_stage_positions_updated.connect(self.update_stage_positions)
@@ -180,7 +176,7 @@ class HiFrontend(QWidget):
 
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
-        self.brillouin_signaller.gui_ready_received.connect(self.brillouin_signaller.on_gui_ready)
+
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
@@ -202,7 +198,6 @@ class HiFrontend(QWidget):
         self.init_ui()
 
         self.update_gui()
-
 
 
 
@@ -244,6 +239,7 @@ class HiFrontend(QWidget):
         right_column_layout.addStretch()
         outer_layout.addLayout(right_column_layout, 0)
 
+    # ---------------- Rendering ---------------- #
 
 
 
@@ -627,47 +623,81 @@ class HiFrontend(QWidget):
         return group
 
     def create_andor_display_group(self):
+        pg.setConfigOptions(
+            useOpenGL=True, antialias=False, imageAxisOrder='row-major',
+            background='w', foreground='k'
+        )
+
         group = QGroupBox("Andor Frame and Fitting")
+        lay = QVBoxLayout(group)
 
-        self.fig, (self.ax_img, self.ax_fit, self.ax_history) = plt.subplots(3, 1, figsize=(8, 8))
-        self.fig.subplots_adjust(hspace=0.9)
-        self.canvas = FigureCanvas(self.fig)
+        self.glw = GraphicsLayoutWidget()
+        lay.addWidget(self.glw)
+        ci = self.glw.ci
+        ci.setSpacing(12)
+        ci.setContentsMargins(8, 8, 8, 8)
 
-        dummy_frame = np.zeros((10, 10))
-        self.img_artist = self.ax_img.imshow(
-            dummy_frame,
-            cmap="gray",
-            aspect="equal",
-            interpolation="none",
-            origin="upper"
+        # --- Row 1: Image ---
+        self.vb_img = self.glw.addViewBox(lockAspect=True, enableMenu=False)
+        self.img_item = pg.ImageItem(autoDownsample=True)
+        self.vb_img.addItem(self.img_item)
+        self.vb_img.setBorder((170, 170, 170))
+
+        # --- Row 2: Spectrum ---
+        self.glw.nextRow()
+        self.spec_plot = self.glw.addPlot(labels={'left': 'Intensity', 'bottom': 'Pixel (X)'})
+        self.spec_plot.setTitle("Spectrum + Fit", color=(40, 40, 40))
+        self.spec_plot.setMenuEnabled(True)  # <- menu back (View All, etc.)
+        self.spec_plot.getViewBox().setMouseEnabled(True, True)
+        self.spec_plot.setClipToView(False)  # <- critical
+        self.spec_plot.getViewBox().setBorder((170, 170, 170))
+        self.spec_plot.showGrid(x=True, y=True, alpha=0.15)
+
+        self.fit_curve = pg.PlotDataItem(pen=pg.mkPen('r', width=1.5, style=QtCore.Qt.PenStyle.DashLine))
+        self.fit_curve.setZValue(0)
+        self.spec_plot.addItem(self.fit_curve)
+
+        self.spec_points = pg.PlotDataItem(
+            pen=None, symbol='o', symbolSize=4, symbolPen=pg.mkPen('k'), symbolBrush='k'
         )
-        self._last_img_shape = dummy_frame.shape
-        self.ax_img.set_xlabel("Pixel (X)")
-        self.ax_img.set_ylabel("Pixel (Y)")
+        self.spec_points.setZValue(1)
+        self.spec_plot.addItem(self.spec_points)
 
-        # spectrum lines
-        (self.spectrum_line,) = self.ax_fit.plot([], [], "k.", label="Spectrum")
-        (self.fit_line,) = self.ax_fit.plot([], [], "r--", label="Fit")
-        self.ax_fit.set_xlabel("Pixel (X)")
-        self.ax_fit.set_ylabel("Intensity")
+        self.mask_points = pg.PlotDataItem(
+            pen=None, symbol='o', symbolSize=4, symbolPen=pg.mkPen('r'), symbolBrush='r'
+        )
+        self.mask_points.setZValue(2)
+        self.spec_plot.addItem(self.mask_points)
 
-        self.mask_points_line, = self.ax_fit.plot(
-            [], [], linestyle="None", marker=".", markersize=3,
-            color="red", label="Spectrum (used)"
+        # one-time autorange flags + “user touched” flags
+        self._spec_init_done = False
+        self._spec_user_zoomed = False
+        self.spec_plot.getViewBox().sigRangeChangedManually.connect(
+            lambda *args: setattr(self, "_spec_user_zoomed", True)
         )
 
+        # --- Row 3: History ---
+        self.glw.nextRow()
+        self.hist_plot = self.glw.addPlot(labels={'left': 'GHz', 'bottom': 'Frame'})
+        self.hist_plot.setTitle("Shift History", color=(40, 40, 40))
+        self.hist_plot.setMenuEnabled(True)
+        self.hist_plot.getViewBox().setMouseEnabled(True, True)
+        self.hist_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.hist_plot.getViewBox().setBorder((170, 170, 170))
 
-        # history line
-        self.history_data = deque(maxlen=100)
-        (self.history_line,) = self.ax_history.plot([], [], "b-")
-        self.ax_history.set_title("Last 100 Fits (Frequency Shift)")
-        self.ax_history.set_ylabel("GHz")
-        self.ax_history.set_xlabel("Frame Index")
+        self.hist_curve = self.hist_plot.plot([], [], pen=pg.mkPen('k', width=1))
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.canvas)
-        group.setLayout(layout)
-        group.setMinimumWidth(700)
+        # trailing window & zoom detection
+        self.HIST_WINDOW = 200
+        self._hist_user_zoomed = False
+        self.hist_plot.enableAutoRange(x=False, y=True)  # we’ll manage X; keep Y auto
+
+        # mark when the user manually changes range
+        self.hist_plot.getViewBox().sigRangeChangedManually.connect(
+            lambda *_: setattr(self, "_hist_user_zoomed", True)
+        )
+
+        self._img_levels = None
         return group
 
     def create_zaber_manual_movement_group(self):
@@ -750,6 +780,12 @@ class HiFrontend(QWidget):
         return group
 
     # ---------------- GUI Update Loop ---------------- #
+    def _on_andor_mailbox(self):
+        display = self.brillouin_signaller.fetch_latest_andor_display()
+        if display is None:
+            return
+        self._display_result_fast(display)  # your fast pyqtgraph updater
+
     def on_stop_clicked(self):
         print("[Brillouin Viewer] STOP clicked.")
         self.brillouin_signaller.cancel_operations()
@@ -930,9 +966,6 @@ class HiFrontend(QWidget):
 
     # ---------------- GUI Update Loop ---------------- #
 
-    def update_background_ui(self):
-        self.brillouin_signaller.emit_do_background_subtraction()
-        self.brillouin_signaller.emit_is_background_available()
 
     def run_gui(self):
         self.start_live_requested.emit()
@@ -940,84 +973,76 @@ class HiFrontend(QWidget):
     def run_one_gui_update(self):
         self.snap_requested.emit()
 
-    def display_result(self, display_results: DisplayResults):
-        frame = display_results.frame
-        x_px = display_results.x_pixels
-        spectrum = display_results.sline
+    def _display_result_fast(self, dr):
+        # --- image ---
+        frame = np.ascontiguousarray(dr.frame.astype(np.float32, copy=False))
+        if self._img_levels is None:
+            lo, hi = np.percentile(frame, (1, 99))
+            if hi <= lo: hi = lo + 1.0
+            self._img_levels = (float(lo), float(hi))
+        self.img_item.setImage(frame, autoLevels=False, levels=self._img_levels)
+        fmin, fmax = float(frame.min()), float(frame.max())
+        if fmin < self._img_levels[0] or fmax > self._img_levels[1]:
+            lo = min(self._img_levels[0], float(np.percentile(frame, 1)))
+            hi = max(self._img_levels[1], float(np.percentile(frame, 99)))
+            if hi > lo:
+                self._img_levels = (lo, hi)
+                self.img_item.setLevels(self._img_levels)
 
-        # --- Image Plot (efficient update if size unchanged) ---
-        h, w = frame.shape
-        if (h, w) != self._last_img_shape:
-            self.ax_img.clear()
-            self.img_artist = self.ax_img.imshow(
-                frame, cmap="gray", aspect="equal", interpolation="none", origin="upper"
-            )
-            self.ax_img.set_xticks(np.arange(0, w, 10))
-            self.ax_img.set_yticks(np.arange(0, h, 5))
-            self.ax_img.set_xlabel("Pixel (X)")
-            self.ax_img.set_ylabel("Pixel (Y)")
-            self._last_img_shape = (h, w)
+        # --- spectrum ---
+        x = np.asarray(dr.x_pixels)
+        y = np.asarray(dr.sline)
+        self.spec_points.setData(x, y)
+
+        if getattr(dr, "is_fitting_available", False):
+            xf = np.asarray(getattr(dr, "x_fit_refined", []))
+            yf = np.asarray(getattr(dr, "y_fit_refined", []))
+            self.fit_curve.setData(xf, yf)
         else:
-            self.img_artist.set_data(frame)
-        self.img_artist.set_clim(vmin=frame.min(), vmax=frame.max())
+            self.fit_curve.setData([], [])
 
-        # --- Spectrum Plot ---
-        self.spectrum_line.set_data(x_px, spectrum)
-
-        # highlight the points used for fitting (in red)
-        mask = display_results.mask_for_fitting # make sure DisplayResults carries this
+        mask = getattr(dr, "mask_for_fitting", None)
         if mask is not None:
-            mask = np.asarray(mask, dtype=bool)
-            x_all = np.asarray(x_px)
-            y_all = np.asarray(spectrum)
-            if mask.shape[0] != x_all.shape[0]:
-                # be defensive about mismatches
-                n = min(mask.shape[0], x_all.shape[0])
-                x_used = x_all[:n][mask[:n]]
-                y_used = y_all[:n][mask[:n]]
-            else:
-                x_used = x_all[mask]
-                y_used = y_all[mask]
-            self.mask_points_line.set_data(x_used, y_used)
-            self.mask_points_line.set_visible(True)
+            m = np.asarray(mask, dtype=bool)
+            n = min(m.shape[0], x.shape[0])
+            self.mask_points.setData(x[:n][m[:n]], y[:n][m[:n]])
+            self.mask_points.setVisible(True)
         else:
-            # hide if no mask provided
-            self.mask_points_line.set_data([], [])
-            self.mask_points_line.set_visible(False)
+            self.mask_points.setData([], [])
+            self.mask_points.setVisible(False)
 
-        interpeak, freq_shift_ghz = None, None
-        if display_results.is_fitting_available:
-            self.fit_line.set_data(display_results.x_fit_refined, display_results.y_fit_refined)
-            interpeak = display_results.inter_peak_distance
-            freq_shift_ghz = display_results.freq_shift_ghz
-            self.ax_fit.legend()
-        else:
-            self.fit_line.set_data([], [])
+        # one-time autorange (don’t fight user after they zoom)
+        if not self._spec_init_done:
+            vb = self.spec_plot.getViewBox()
+            vb.setRange(xRange=(float(x.min()), float(x.max())),
+                        yRange=(float(y.min()), float(y.max())),
+                        padding=0.05)
+            self._spec_init_done = True
+        elif not self._spec_user_zoomed:
+            # light auto-follow if data grows
+            self.spec_plot.enableAutoRange(y=True)
 
-        self.ax_fit.relim()
-        self.ax_fit.autoscale_view()
+        # -------- 3) History --------
+        val = getattr(dr, "freq_shift_ghz", None)
+        if val is not None:
+            self.history_data.append(float(val))
+            N = len(self.history_data)
 
-        # --- History Plot ---
-        if display_results.freq_shift_ghz is not None:
-            self.history_data.append(display_results.freq_shift_ghz)
-            self.history_line.set_data(range(len(self.history_data)), list(self.history_data))
-            self.ax_history.relim()
-            self.ax_history.autoscale_view()
+            x_hist = np.arange(N, dtype=float)
+            y_hist = np.fromiter(self.history_data, dtype=float)
+            self.hist_curve.setData(x_hist, y_hist)
 
-        # --- Spectrum Title ---
-        if interpeak is not None and freq_shift_ghz is not None:
-            title = f"Spectrum Fit | Interpeak: {interpeak:.2f} px / {freq_shift_ghz:.3f} GHz"
-        elif interpeak is not None:
-            title = f"Spectrum Fit | Interpeak: {interpeak:.2f} px / - GHz"
-        elif freq_shift_ghz is not None:
-            title = f"Spectrum Fit | Interpeak: - px / {freq_shift_ghz:.3f} GHz"
-        else:
-            title = "Spectrum Fit | Interpeak: - px / - GHz"
-        self.ax_fit.set_title(title)
-
-        # --- Redraw once ---
-        self.canvas.draw_idle()
-        self.brillouin_signaller.gui_ready_received.emit()
+            vb = self.hist_plot.getViewBox()
+            if not self._hist_user_zoomed:
+                # grow until window is full, then scroll a trailing window
+                if N <= self.HIST_WINDOW:
+                    vb.setXRange(0, max(10, N), padding=0)  # expand from 0..10 to 0..N
+                else:
+                    left = N - self.HIST_WINDOW
+                    right = N
+                    vb.setXRange(left, right, padding=0)
+                # keep Y auto unless user zoomed it
+                self.hist_plot.enableAutoRange(y=True)
 
     # ---------------- Handlers ---------------- #
 
@@ -1070,8 +1095,6 @@ class HiFrontend(QWidget):
 
     # -------------- Functions --------------
 
-    def update_main_display(self, pixmap: QPixmap):
-        self.allied_camera_display.setPixmap(pixmap)
 
     def save_background_image(self):
         def receive_data(data: BackgroundImage):
@@ -1230,41 +1253,6 @@ class HiFrontend(QWidget):
             print(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
 
-        except Exception as e:
-            print(f"[Brillouin Viewer] Measurement setup failed: {e}")
-
-    def handle_measurement_results(self, measurement_result):
-        pass
-
-    def save_measurements_to_file(self):
-        if not self._stored_measurements:
-            print("[Brillouin Viewer] No measurements to save.")
-            return
-
-        # Ask user for base file path
-        base_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Measurements (base name, without extension)",
-            filter="All Files (*)"
-        )
-        if not base_path:
-            return
-
-        try:
-            # Save as Pickle
-            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-            with open(pkl_path, "wb") as f:
-                pickle.dump(self._stored_measurements, f)
-            print(f"[✓] Pickle saved to: {pkl_path}")
-
-            # Save as HDF5
-            h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
-            native_dict = dataclass_to_hdf5_native_dict(self._stored_measurements)
-            save_dict_to_hdf5(h5_path, native_dict)
-            print(f"[✓] HDF5 saved to: {h5_path}")
-
-        except Exception as e:
-            print(f"[Brillouin Viewer] [Error] Failed to save: {e}")
-
     def clear_measurements(self):
         self._stored_measurements.clear()
         self.measurement_series_label.setText("Stored Series: 0")
@@ -1327,7 +1315,8 @@ class HiFrontend(QWidget):
         event.accept()
 
 
-if __name__ == "__main__":
+def main():
+
     app = QApplication(sys.argv)
     # Apply global style sheet to reduce font size
     app.setStyleSheet("""
@@ -1338,3 +1327,6 @@ if __name__ == "__main__":
     viewer = HiFrontend()
     viewer.show()
     sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()
