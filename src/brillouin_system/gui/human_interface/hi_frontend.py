@@ -91,6 +91,18 @@ brillouin_manager = HiBackend(
 #     is_sample_illumination_continuous=True
 # )
 
+# put this near your imports (top of file)
+class NotifyingViewBox(pg.ViewBox):
+    userScaled = QtCore.pyqtSignal()
+    def wheelEvent(self, ev, axis=None):
+        super().wheelEvent(ev, axis)
+        self.userScaled.emit()
+    def mouseDragEvent(self, ev, axis=None):
+        super().mouseDragEvent(ev, axis)
+        if ev.isFinish():
+            self.userScaled.emit()
+
+
 
 class HiFrontend(QWidget):
 
@@ -636,10 +648,15 @@ class HiFrontend(QWidget):
         group.setLayout(layout)
         return group
 
+    # --- inside HiFrontend ---
     def create_andor_display_group(self):
+        # White theme + fast options
         pg.setConfigOptions(
-            useOpenGL=False, antialias=False, imageAxisOrder='row-major',
-            background='w', foreground='k'
+            useOpenGL=True,
+            antialias=False,
+            imageAxisOrder='row-major',
+            background='w',
+            foreground='k'
         )
 
         group = QGroupBox("Andor Frame and Fitting")
@@ -647,72 +664,90 @@ class HiFrontend(QWidget):
 
         self.glw = GraphicsLayoutWidget()
         lay.addWidget(self.glw)
+
         ci = self.glw.ci
         ci.setSpacing(12)
         ci.setContentsMargins(8, 8, 8, 8)
 
-        # --- Row 1: Image ---
+        # -------- Row 1: Live image --------
         self.vb_img = self.glw.addViewBox(lockAspect=True, enableMenu=False)
         self.img_item = pg.ImageItem(autoDownsample=True)
         self.vb_img.addItem(self.img_item)
         self.vb_img.setBorder((170, 170, 170))
 
-        # --- Row 2: Spectrum ---
+        # -------- Row 2: Spectrum + fit --------
         self.glw.nextRow()
-        self.spec_plot = self.glw.addPlot(labels={'left': 'Intensity', 'bottom': 'Pixel (X)'})
+        self.spec_vb = NotifyingViewBox()
+        self.spec_plot = self.glw.addPlot(
+            viewBox=self.spec_vb,
+            labels={'left': 'Intensity', 'bottom': 'Pixel (X)'}
+        )
+        self.spec_plot.setMenuEnabled(False)
+        self.spec_plot.setClipToView(True)
+        self.spec_plot.enableAutoRange(x=True, y=True)
         self.spec_plot.setTitle("Spectrum + Fit", color=(40, 40, 40))
-        self.spec_plot.setMenuEnabled(True)  # <- menu back (View All, etc.)
-        self.spec_plot.getViewBox().setMouseEnabled(True, True)
-        self.spec_plot.setClipToView(False)  # <- critical
         self.spec_plot.getViewBox().setBorder((170, 170, 170))
-        self.spec_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.spec_vb.userScaled.connect(self._on_spec_user_scaled)
 
-        self.fit_curve = pg.PlotDataItem(pen=pg.mkPen('r', width=1.5, style=QtCore.Qt.PenStyle.DashLine))
+        # Fit: red dashed line (no symbols)
+        self.fit_curve = pg.PlotDataItem(
+            pen=pg.mkPen('r', width=1.5, style=QtCore.Qt.DashLine)
+        )
         self.fit_curve.setZValue(0)
         self.spec_plot.addItem(self.fit_curve)
 
+        # All measurement samples: black dots (no connecting line)
         self.spec_points = pg.PlotDataItem(
-            pen=None, symbol='o', symbolSize=4, symbolPen=pg.mkPen('k'), symbolBrush='k'
+            pen=None,
+            symbol='o',
+            symbolSize=4,
+            symbolPen=pg.mkPen('k'),
+            symbolBrush='k'
         )
         self.spec_points.setZValue(1)
         self.spec_plot.addItem(self.spec_points)
 
+        # Points used for fitting: red dots overlay
         self.mask_points = pg.PlotDataItem(
-            pen=None, symbol='o', symbolSize=4, symbolPen=pg.mkPen('r'), symbolBrush='r'
+            pen=None,
+            symbol='o',
+            symbolSize=4,
+            symbolPen=pg.mkPen('r'),
+            symbolBrush='r'
         )
         self.mask_points.setZValue(2)
         self.spec_plot.addItem(self.mask_points)
 
-        # one-time autorange flags + “user touched” flags
-        self._spec_init_done = False
-        self._spec_user_zoomed = False
-        self.spec_plot.getViewBox().sigRangeChangedManually.connect(
-            lambda *args: setattr(self, "_spec_user_zoomed", True)
-        )
-
-        # --- Row 3: History ---
+        # -------- Row 3: History --------
         self.glw.nextRow()
-        self.hist_plot = self.glw.addPlot(labels={'left': 'GHz', 'bottom': 'Frame'})
+        self.hist_vb = NotifyingViewBox()
+        self.hist_plot = self.glw.addPlot(
+            viewBox=self.hist_vb,
+            labels={'left': 'GHz', 'bottom': 'Frame'}
+        )
+        self.hist_plot.setMenuEnabled(False)
+        self.hist_plot.setClipToView(True)
+        self.hist_plot.enableAutoRange(x=True, y=True)
         self.hist_plot.setTitle("Shift History", color=(40, 40, 40))
-        self.hist_plot.setMenuEnabled(True)
-        self.hist_plot.getViewBox().setMouseEnabled(True, True)
-        self.hist_plot.showGrid(x=True, y=True, alpha=0.15)
         self.hist_plot.getViewBox().setBorder((170, 170, 170))
+        self.hist_vb.userScaled.connect(self._on_hist_user_scaled)
 
         self.hist_curve = self.hist_plot.plot([], [], pen=pg.mkPen('k', width=1))
 
-        # trailing window & zoom detection
-        self.HIST_WINDOW = 200
+        # flags/caches
+        self._spec_init_done = False
+        self._spec_user_zoomed = False
         self._hist_user_zoomed = False
-        self.hist_plot.enableAutoRange(x=False, y=True)  # we’ll manage X; keep Y auto
+        self.HIST_WINDOW = 200  # trailing window size for scrolling
 
-        # mark when the user manually changes range
-        self.hist_plot.getViewBox().sigRangeChangedManually.connect(
-            lambda *_: setattr(self, "_hist_user_zoomed", True)
-        )
-
-        self._img_levels = None
         return group
+
+    # --- inside HiFrontend ---
+    def _on_spec_user_scaled(self):
+        self._spec_user_zoomed = True
+
+    def _on_hist_user_scaled(self):
+        self._hist_user_zoomed = True
 
     def create_zaber_manual_movement_group(self):
         group = QGroupBox("Manually Move Zabers")
@@ -987,25 +1022,24 @@ class HiFrontend(QWidget):
     def run_one_gui_update(self):
         self.snap_requested.emit()
 
+    # --- inside HiFrontend ---
     def _display_result_fast(self, dr):
-        # --- image ---
-        frame = np.ascontiguousarray(dr.frame.astype(np.float32, copy=False))
-        if self._img_levels is None:
-            lo, hi = np.percentile(frame, (1, 99))
-            if hi <= lo: hi = lo + 1.0
-            self._img_levels = (float(lo), float(hi))
-        self.img_item.setImage(frame, autoLevels=False, levels=self._img_levels)
-        fmin, fmax = float(frame.min()), float(frame.max())
-        if fmin < self._img_levels[0] or fmax > self._img_levels[1]:
-            lo = min(self._img_levels[0], float(np.percentile(frame, 1)))
-            hi = max(self._img_levels[1], float(np.percentile(frame, 99)))
-            if hi > lo:
-                self._img_levels = (lo, hi)
-                self.img_item.setLevels(self._img_levels)
+        # -------- 1) Image: ALWAYS min-max per frame --------
+        frame = np.ascontiguousarray(dr.frame)
+        if frame.dtype == np.float64:
+            frame = frame.astype(np.float32, copy=False)
 
-        # --- spectrum ---
-        x = np.asarray(dr.x_pixels)
-        y = np.asarray(dr.sline)
+        fmin = float(np.nanmin(frame)) if frame.size else 0.0
+        fmax = float(np.nanmax(frame)) if frame.size else 1.0
+        if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
+            fmin, fmax = 0.0, 1.0
+
+        self.img_item.setImage(frame, autoLevels=False, levels=(fmin, fmax))
+
+        # -------- 2) Spectrum + Fit --------
+        x = np.asarray(getattr(dr, "x_pixels", []))
+        y = np.asarray(getattr(dr, "sline", []))
+
         self.spec_points.setData(x, y)
 
         if getattr(dr, "is_fitting_available", False):
@@ -1016,9 +1050,9 @@ class HiFrontend(QWidget):
             self.fit_curve.setData([], [])
 
         mask = getattr(dr, "mask_for_fitting", None)
-        if mask is not None:
+        if mask is not None and x.size and y.size:
             m = np.asarray(mask, dtype=bool)
-            n = min(m.shape[0], x.shape[0])
+            n = min(m.shape[0], x.shape[0], y.shape[0])
             self.mask_points.setData(x[:n][m[:n]], y[:n][m[:n]])
             self.mask_points.setVisible(True)
         else:
@@ -1026,14 +1060,16 @@ class HiFrontend(QWidget):
             self.mask_points.setVisible(False)
 
         # one-time autorange (don’t fight user after they zoom)
-        if not self._spec_init_done:
+        if not self._spec_init_done and x.size and y.size:
             vb = self.spec_plot.getViewBox()
-            vb.setRange(xRange=(float(x.min()), float(x.max())),
-                        yRange=(float(y.min()), float(y.max())),
-                        padding=0.05)
+            vb.setRange(
+                xRange=(float(x.min()), float(x.max())),
+                yRange=(float(y.min()), float(y.max())),
+                padding=0.05
+            )
             self._spec_init_done = True
         elif not self._spec_user_zoomed:
-            # light auto-follow if data grows
+            # allow gentle auto-follow on Y until the user interacts
             self.spec_plot.enableAutoRange(y=True)
 
         # -------- 3) History --------
@@ -1048,14 +1084,12 @@ class HiFrontend(QWidget):
 
             vb = self.hist_plot.getViewBox()
             if not self._hist_user_zoomed:
-                # grow until window is full, then scroll a trailing window
                 if N <= self.HIST_WINDOW:
-                    vb.setXRange(0, max(10, N), padding=0)  # expand from 0..10 to 0..N
+                    vb.setXRange(0, max(10, N), padding=0)
                 else:
                     left = N - self.HIST_WINDOW
                     right = N
                     vb.setXRange(left, right, padding=0)
-                # keep Y auto unless user zoomed it
                 self.hist_plot.enableAutoRange(y=True)
 
     # ---------------- Handlers ---------------- #

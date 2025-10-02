@@ -80,6 +80,7 @@ class HiSignaller(QObject):
 
         # in HiSignaller.__init__ (after moveToThread happens in the host)
         self._acq_timer = None
+        self._acq_interval_ms = 20
 
 
         self.system_state = SystemState.IDLE
@@ -258,39 +259,32 @@ class HiSignaller(QObject):
     def update_zaber_lens_position(self, pos: float):
         self.zaber_lens_position_updated.emit(pos)
 
-
-    @pyqtSlot(float)
-    def move_zaber_eye_lens_relative(self, step: float):
-        try:
-            self.backend.zaber_eye_lens.move_rel(step)
-            pos = self.backend.zaber_eye_lens.get_position()
-            self.zaber_lens_position_updated.emit(pos)
-        except Exception as e:
-            self.log_message.emit(f"Zaber movement failed: {e}")
-
     @pyqtSlot(float)
     def move_zaber_stage_x_relative(self, step: float):
-        try:
+        def do():
             self.backend.zaber_hi.move_rel(dx=step)
             self.update_stage_positions()
-        except Exception as e:
-            self.log_message.emit(f"Zaber X move failed: {e}")
+
+        self._pause_acq_for(do)
 
     @pyqtSlot(float)
     def move_zaber_stage_y_relative(self, step: float):
-        try:
-            self.backend.zaber_hi.move_rel(dy=step)
-            self.update_stage_positions()
-        except Exception as e:
-            self.log_message.emit(f"Zaber Y move failed: {e}")
+        self._pause_acq_for(lambda: (self.backend.zaber_hi.move_rel(dy=step),
+                                     self.update_stage_positions()))
 
     @pyqtSlot(float)
     def move_zaber_stage_z_relative(self, step: float):
-        try:
-            self.backend.zaber_hi.move_rel(dz=step)
-            self.update_stage_positions()
-        except Exception as e:
-            self.log_message.emit(f"Zaber Z move failed: {e}")
+        self._pause_acq_for(lambda: (self.backend.zaber_hi.move_rel(dz=step),
+                                     self.update_stage_positions()))
+
+    @pyqtSlot(float)
+    def move_zaber_eye_lens_relative(self, step: float):
+        def do():
+            self.backend.zaber_eye_lens.move_rel(step)
+            pos = self.backend.zaber_eye_lens.get_position()
+            self.zaber_lens_position_updated.emit(pos)
+
+        self._pause_acq_for(do)
 
     def update_stage_positions(self):
         try:
@@ -343,7 +337,6 @@ class HiSignaller(QObject):
 
             # push to mailbox and notify GUI
             self._mailbox_push_andor_display(display)
-            self.new_andor_display_ready.emit()
 
         except Exception as e:
             self.log_message.emit(f"Error snapping frame: {e}")
@@ -361,7 +354,7 @@ class HiSignaller(QObject):
             self._acq_timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
             self._acq_timer.timeout.connect(self._acq_tick)  # local, same-thread
 
-        self._acq_timer.start(10)
+        self._acq_timer.start(self._acq_interval_ms)
 
     @pyqtSlot()
     def stop_live_view(self):
@@ -373,11 +366,36 @@ class HiSignaller(QObject):
     def restart_live_view_when_ready(self):
         QTimer.singleShot(0, self.start_live_view)
 
-    def _acq_tick(self):
-        if not self._running:
-            return
-        self.snap_and_fit()
 
+    def _pause_acq_for(self, fn):
+        was_running = self._running
+        if self._acq_timer:
+            self._acq_timer.stop()
+        self._running = False
+        try:
+            return fn()
+        finally:
+            if was_running:
+                self._running = True
+                if self._acq_timer:
+                    self._acq_timer.start(self._acq_interval_ms)
+
+    def _acq_tick(self):
+        # run at most one acq at a time; coalesce timeouts
+        if not self._running or self._acq_timer is None:
+            return
+
+        self._acq_timer.stop()
+
+        try:
+            with self._mb_lock:
+                if self._mb_latest_display is not None:
+                    return  # GUI hasn't consumed yet; skip doing work
+            self.snap_and_fit()
+        finally:
+            # schedule the next tick after we’re done (coalesced)
+            if self._running and self._acq_timer:
+                self._acq_timer.start(self._acq_interval_ms)
 
     def cancel_operations(self):
         self._is_cancel_operations = True
@@ -406,7 +424,7 @@ class HiSignaller(QObject):
 
     def emit_display_result(self, display: DisplayResults):
         self._mailbox_push_andor_display(display)
-        self.new_andor_display_ready.emit()
+
 
     @pyqtSlot()
     def run_calibration(self):
