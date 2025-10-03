@@ -2,35 +2,52 @@ from contextlib import ExitStack
 
 from vimba import Vimba, VimbaFeatureError, VimbaCameraError
 
-# If you have these types in your project, keep them; otherwise stub or remove
-try:
-    from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
-except Exception:
-    AlliedConfig = None  # Optional: for set_config
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
+from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
 
-
-class AlliedVisionCamera:
+class AlliedVisionCamera(BaseAlliedVisionCamera):
     """
-    Single Allied Vision Camera wrapper — tuned for dual-use:
-    - Robust initialization across models
-    - Transport tuning for max sustainable throughput on 1 GbE
-    - Optional inter-packet delay to reduce microbursts
-    - Safe streaming callbacks (always re-queue frames)
+    Allied Vision Camera Test Configuration and Parameter Ranges
+    ============================================================
+
+    This test script verifies functionality of the Allied Vision camera
+    using the Vimba SDK. The following ranges were observed from the device:
+
+    - ROI (Region of Interest)
+      - Current ROI:  OffsetX=0, OffsetY=0, Width=2048, Height=2048
+      - Max ROI:      OffsetX=0, OffsetY=0, Width=2048, Height=2048
+
+    - Exposure
+      - Range:        1.0 µs  → 153,391,689.0 µs (~153 s)
+      - Example set:  500,000.0 µs
+
+    - Gain
+      - Range:        0.0 dB  → 26.0 dB
+      - Example set:  13.0 dB
+
+    - Gamma
+      - Range:        0.25    → 4.0
+      - Example set:  2.125
+
+    - Auto Exposure Modes
+      - Off
+      - Once
+      - Continuous
+
+    - Acquisition Modes
+      - SingleFrame
+      - Continuous
+
+    Notes
+    -----
+    - Snap (single-frame capture) successfully returns a `vimba.frame.Frame`.
+    - Streaming delivers frames via callback. The stream should be stopped
+      outside of the callback to avoid `VmbError.InvalidCall`.
+    - ROI may be hardware-limited to full sensor size (2048x2048 in this test).
     """
 
-    def __init__(
-        self,
-        id: str = "DEV_000F315BC084",
-        *,
-        pixel_format: str = "Mono8",
-        mode: str = "software",
-        exposure_us: float = 8000.0,
-        throughput_MBps: float = 110.0,    # practical total payload for 1 GbE
-        packet_delay: int | None = None,   # e.g., 800 if sharing a link
-        enable_ptp: bool = False,
-        buffer_count_manual: int = 40,
-    ):
-        print("[AVCamera] Connecting to Allied Vision Camera…")
+    def __init__(self, id="DEV_000F315BC084", pixel_format='Mono8', mode="software"):
+        print("[AVCamera] Connecting to Allied Vision Camera...")
         self.stack = ExitStack()
         self.vimba = self.stack.enter_context(Vimba.get_instance())
         self.camera = None
@@ -44,86 +61,39 @@ class AlliedVisionCamera:
         try:
             self.camera = self.stack.enter_context(self.vimba.get_camera_by_id(id))
         except VimbaCameraError:
-            print(f"[AVCamera] Camera with ID '{id}' not found. Available:")
+            print(f"[AVCamera] Camera with ID '{id}' not found.")
+            print("[AVCamera] Available cameras:")
             for cam in cameras:
-                try:
-                    print("  -", cam.get_id())
-                except Exception:
-                    pass
+                print(f"  - {cam.get_id()}")
             raise RuntimeError("[AVCamera] Cannot continue without valid camera.")
 
-        print(f"[AVCamera] …Found camera: {self.camera.get_id()}")
-
-        # Pixel format first (smallest payload by default)
-        self.set_pixel_format(pixel_format)
-
-        # Make exposure deterministic before init
+        print(f"[AVCamera] ...Found camera: {self.camera.get_id()}")
+        self.set_pixel_format(format_str=pixel_format)
+        # Make exposure deterministic; init() will also try-set safely
         self.set_auto_exposure('Off')
 
-        # One-shot configuration
-        self.init(
-            mode=mode,
-            exposure_us=exposure_us,
-            throughput_MBps=throughput_MBps,
-            packet_delay=packet_delay,
-            enable_ptp=enable_ptp,
-            buffer_count_manual=buffer_count_manual,
-        )
+        # Configure once, in one place
+        self.init(mode=mode, exposure_us=8000)
 
-    # ----------------------------
-    # Core init (trigger + transport)
-    # ----------------------------
-    def init(
-        self,
-        *,
-        mode: str = "software",                 # 'software' | 'freerun' | 'line1'/'hardware'
-        exposure_us: float = 8000.0,
-        line: str = "Line1",
-        activation: str = "RisingEdge",
-        debounce_us: int | None = None,
-        throughput_MBps: float = 110.0,         # MB/s budget (1 GbE practical max ≈ 105–115 MB/s)
-        packet_delay: int | None = None,        # inter-packet delay 'ticks' (try 800 if sharing link)
-        enable_ptp: bool = False,
-        buffer_count_manual: int = 40,
-    ) -> None:
+    def init(self, *, mode="software", exposure_us=8000, line="Line1",
+             activation="RisingEdge", debounce_us=None, limit_mbps=120):
         cam = self.camera
 
-        # 0) Try to stop acquisition if someone left it running
+        # 0) Make sure we can change features even if someone left it streaming
         for feat in ("AcquisitionStop",):
             try:
                 cam.get_feature_by_name(feat).run()
             except Exception:
                 pass
 
-        def try_set(name: str, value):
+        # Small helpers so we don't crash on models that lack a feature
+        def try_set(name, value):
             try:
-                f = cam.get_feature_by_name(name)
-                try:
-                    f.set(value)
-                    return True
-                except Exception:
-                    # Fallbacks: bool and common enum mismatches
-                    if isinstance(value, str) and value.lower() in ("on", "off"):
-                        try:
-                            f.set(value.lower() == "on")
-                            return True
-                        except Exception:
-                            pass
-                    # Enum conservative fallback if present
-                    try:
-                        entries = getattr(f, "get_available_entries", lambda: [])()
-                        names = [e.get_name() for e in entries]
-                        for candidate in ("Basic", "Off", "Disabled", "False"):
-                            if candidate in names:
-                                f.set(candidate)
-                                return True
-                    except Exception:
-                        pass
+                cam.get_feature_by_name(name).set(value)
             except Exception:
                 pass
-            return False
 
-        def try_run(name: str):
+        def try_run(name):
             try:
                 f = cam.get_feature_by_name(name)
                 if hasattr(f, "run"):
@@ -131,78 +101,74 @@ class AlliedVisionCamera:
             except Exception:
                 pass
 
-        # 1) Trigger config: unlatch → set → relatch
+        # 1) Trigger config (set, unlatch, set deps, relatch) — Viewer-style
         try_set("TriggerSelector", "FrameStart")
         try_set("TriggerMode", "Off")  # unlatch
 
         if mode == "software":
             try_set("TriggerSource", "Software")
-            # Activation not used for software trigger, harmless if set
+            # TriggerActivation not used for software; harmless if set
         elif mode.lower() in ("line1", "hardware", "line"):
-            try_set("LineSelector", line)
+            # Lines / IO
+            try_set("LineSelector", line)  # e.g., "Line1"
             try_set("LineMode", "Input")
             if debounce_us is not None:
                 try_set("LineDebouncerTime", int(debounce_us))
-            try_set("TriggerSource", line)
-            try_set("TriggerActivation", activation)
+            # Core trigger
+            try_set("TriggerSource", line)  # "Line1"
+            try_set("TriggerActivation", activation)  # "RisingEdge" or "FallingEdge"
         elif mode == "freerun":
-            try_set("TriggerSource", "Software")  # irrelevant; keep TriggerMode Off later
+            try_set("TriggerSource", "Software")  # irrelevant; we'll keep TriggerMode Off later
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
         try_set("AcquisitionMode", "Continuous")
 
-        # 2) Deterministic exposure/gain
+        # 2) Exposure/gain consistency (Viewer will quietly do this)
+        # Disable autos for deterministic triggering
         try_set("ExposureAuto", "Off")
         try_set("GainAuto", "Off")
-        try:
-            self._exposure_feat().set(float(exposure_us))
-        except Exception:
-            pass
+        # Exposure feature name differs across models: ExposureTimeAbs vs ExposureTime
+        for exp_name in ("ExposureTimeAbs", "ExposureTime"):
+            try:
+                cam.get_feature_by_name(exp_name).set(float(exposure_us))
+                break
+            except Exception:
+                continue
 
-        # Remove FPS clamp if present (names vary by model)
+        # If hardware-triggered, remove any frame-rate clamp
         for feat in ("AcquisitionFrameRateEnable", "AcquisitionFrameRateMode"):
-            try_set(feat, "Off")  # bool/enums handled by try_set fallbacks
+            # Turn off the limiter when present, or set to "Basic" if it's a mode enum
+            try_set(feat, "Off")  # harmless if it's a bool or enum; try_set guards failures
 
-        # (Re)latch trigger
+        # Finally (re)latch
         if mode == "freerun":
+            # In freerun keep TriggerMode Off so frames free-run
             try_set("TriggerMode", "Off")
         else:
             try_set("TriggerMode", "On")
 
-        # 3) Transport tuning
-        try_run("GVSPAdjustPacketSize")  # maximize MTU usage (ensure NIC/switch MTU 9000 for best results)
-
-        # Enable and set throughput cap (bytes/s)
+        # 3) Transport niceties (Viewer often does this)
+        # Adjust packet size if supported
+        try_run("GVSPAdjustPacketSize")
+        # Some models require enabling the limit mode first
         try_set("DeviceLinkThroughputLimitMode", "On")
-        bytes_per_sec = int(throughput_MBps * 1_000_000)  # MB/s → B/s
+        # limit_mbps is in MB/s-ish; SDKs vary on units — this is best-effort.
+        bytes_per_sec = int(limit_mbps * 1_000_000)
         for name in ("DeviceLinkThroughputLimit", "StreamBytesPerSecond"):
             try_set(name, bytes_per_sec)
 
-        # Optional pacing to reduce microbursts when sharing a link
-        if packet_delay is not None:
-            for delay_name in ("GevSCPD", "GevSCPPacketDelay", "GVSPPacketDelay"):
-                if try_set(delay_name, int(packet_delay)):
-                    break
+        # A couple of stream stability QoL tweaks (safe no-ops if unsupported)
+        try_set("StreamBufferHandlingMode", "NewestOnly")  # avoid backlog on bursty triggers
+        try_set("StreamBufferCountMode", "Manual");
+        try_set("StreamBufferCountManual", 8)
 
-        # Stream stability niceties
-        try_set("StreamBufferHandlingMode", "NewestOnly")
-        try_set("StreamBufferCountMode", "Manual")
-        try_set("StreamBufferCountManual", int(buffer_count_manual))
-
-        # Optional: PTP for stable timestamps (not required for single cam)
-        if enable_ptp:
-            try_set("GevIEEE1588", "On")
-
-    # ----------------------------
-    # Trigger profiles / helpers
-    # ----------------------------
     def set_freerun_mode(self):
         try:
-            self.camera.get_feature_by_name('TriggerSelector').set('FrameStart')
-            self.camera.get_feature_by_name('TriggerMode').set('Off')
-            self.camera.get_feature_by_name('AcquisitionMode').set('Continuous')
-            print("[AVCamera] Freerun mode active.")
+            self.camera.TriggerSelector.set("FrameStart")
+            self.camera.TriggerMode.set("Off")
+            self.camera.AcquisitionMode.set("Continuous")
+            print("[AVCamera] Camera set to Freerun mode.")
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set Freerun mode: {e}")
 
@@ -215,46 +181,48 @@ class AlliedVisionCamera:
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set Software Trigger: {e}")
 
-    def fire_software_trigger(self):
+    def set_exposure(self, exposure_us):
+        feat = self.camera.get_feature_by_name("ExposureTimeAbs")
+        feat.set(exposure_us)
+        print(f"[AVCamera] Exposure time set to {exposure_us} us")
+
+    def get_exposure(self):
+        return self.camera.get_feature_by_name("ExposureTimeAbs").get()
+
+    def set_auto_exposure(self, mode='Off'):
+        """
+        Set the auto exposure mode.
+        mode: 'Off', 'Once', or 'Continuous'
+        """
         try:
-            self.camera.get_feature_by_name('TriggerSoftware').run()
-        except Exception as e:
-            print(f"[AVCamera] Failed to fire software trigger: {e}")
+            feat = self.camera.get_feature_by_name("ExposureAuto")
+            feat.set(mode)
+            print(f"[AVCamera] Auto exposure mode set to {mode}")
+        except VimbaFeatureError as e:
+            print(f"[AVCamera] Failed to set Auto Exposure mode: {e}")
 
-    # ----------------------------
-    # Exposure / Gain / Gamma
-    # ----------------------------
-    def _exposure_feat(self):
-        for name in ("ExposureTime", "ExposureTimeAbs"):
-            try:
-                return self.camera.get_feature_by_name(name)
-            except Exception:
-                continue
-        raise RuntimeError("[AVCamera] Exposure feature not found.")
-
-    def set_exposure(self, exposure_us: float):
-        feat = self._exposure_feat()
+    def get_auto_exposure(self):
         try:
-            mn, mx = feat.get_range()
-        except Exception:
-            mn, mx = None, None
-        val = float(exposure_us)
-        if mn is not None and mx is not None:
-            val = float(max(mn, min(mx, val)))
-        feat.set(val)
-        print(f"[AVCamera] Exposure set to {val} us")
-
-    def get_exposure(self) -> float:
-        return float(self._exposure_feat().get())
+            return str(self.camera.get_feature_by_name("ExposureAuto").get())
+        except VimbaFeatureError:
+            print("[AVCamera] Auto Exposure feature not available.")
+            return None
 
     def get_exposure_range(self):
+        """
+        Return (min, max) range of exposure time in microseconds.
+        """
         try:
-            return self._exposure_feat().get_range()
+            feat = self.camera.get_feature_by_name("ExposureTimeAbs")
+            return feat.get_range()
         except Exception as e:
             print(f"[AVCamera] Failed to get exposure range: {e}")
             return None
 
     def get_gain_range(self):
+        """
+        Return (min, max) range of gain in dB.
+        """
         try:
             feat = self.camera.get_feature_by_name("Gain")
             return feat.get_range()
@@ -262,80 +230,23 @@ class AlliedVisionCamera:
             print(f"[AVCamera] Failed to get gain range: {e}")
             return None
 
-    def set_gain(self, gain_db: float):
+    def set_gain(self, gain_db):
         try:
-            feat = self.camera.get_feature_by_name("Gain")
-            try:
-                mn, mx = feat.get_range()
-                gain_db = max(mn, min(mx, float(gain_db)))
-            except Exception:
-                pass
-            feat.set(gain_db)
+            self.camera.get_feature_by_name("Gain").set(gain_db)
             print(f"[AVCamera] Gain set to {gain_db} dB")
         except VimbaFeatureError:
             print("[AVCamera] Gain setting not supported or failed.")
 
-    def get_gain(self) -> float:
-        return float(self.camera.get_feature_by_name("Gain").get())
-
-    def set_gamma(self, value: float):
-        try:
-            feat = self.camera.get_feature_by_name("Gamma")
-            mn, mx = feat.get_range()
-            if not (mn <= value <= mx):
-                raise ValueError(f"Gamma must be between {mn} and {mx}")
-            feat.set(float(value))
-            print(f"[AVCamera] Gamma set to {value}")
-        except Exception as e:
-            print(f"[AVCamera] Failed to set Gamma: {e}")
-
-    def get_gamma(self) -> float | None:
-        try:
-            return float(self.camera.get_feature_by_name("Gamma").get())
-        except Exception as e:
-            print(f"[AVCamera] Failed to get Gamma: {e}")
-            return None
-
-    def get_gamma_range(self):
-        try:
-            feat = self.camera.get_feature_by_name("Gamma")
-            return feat.get_range()
-        except Exception as e:
-            print(f"[AVCamera] Failed to get Gamma range: {e}")
-            return None
-
-    # ----------------------------
-    # ROI helpers (step-aligned)
-    # ----------------------------
-    def _align_to_step(self, value, feat):
-        try:
-            mn, mx = feat.get_range()
-            inc = getattr(feat, "get_increment", lambda: 1)()
-            v = max(mn, min(mx, int(value)))
-            if inc and inc > 1:
-                v = mn + ((v - mn) // inc) * inc
-            return int(v)
-        except Exception:
-            return int(value)
+    def get_gain(self):
+        return self.camera.get_feature_by_name("Gain").get()
 
     def set_roi(self, OffsetX, OffsetY, Width, Height):
         try:
-            w_feat = self.camera.get_feature_by_name("Width")
-            h_feat = self.camera.get_feature_by_name("Height")
-            ox_feat = self.camera.get_feature_by_name("OffsetX")
-            oy_feat = self.camera.get_feature_by_name("OffsetY")
-
-            Width  = self._align_to_step(Width,  w_feat)
-            Height = self._align_to_step(Height, h_feat)
             self.camera.get_feature_by_name("Width").set(Width)
             self.camera.get_feature_by_name("Height").set(Height)
-
-            OffsetX = self._align_to_step(OffsetX, ox_feat)
-            OffsetY = self._align_to_step(OffsetY, oy_feat)
             self.camera.get_feature_by_name("OffsetX").set(OffsetX)
             self.camera.get_feature_by_name("OffsetY").set(OffsetY)
-
-            print(f"[AVCamera] ROI set to x:{OffsetX} y:{OffsetY} w:{Width} h:{Height}")
+            print(f"[AVCamera] ROI set to x:{OffsetX} y:{OffsetY} width:{Width} height:{Height}")
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set ROI: {e}")
 
@@ -349,35 +260,138 @@ class AlliedVisionCamera:
 
     def get_max_roi(self):
         try:
-            w = self.camera.get_feature_by_name("Width").get_range()[1]
-            h = self.camera.get_feature_by_name("Height").get_range()[1]
-            ox = self.camera.get_feature_by_name("OffsetX").get_range()[0]
-            oy = self.camera.get_feature_by_name("OffsetY").get_range()[0]
-            return {"OffsetX": ox, "OffsetY": oy, "Width": w, "Height": h}
+            width_feat = self.camera.get_feature_by_name("Width")
+            height_feat = self.camera.get_feature_by_name("Height")
+            offsetx_feat = self.camera.get_feature_by_name("OffsetX")
+            offsety_feat = self.camera.get_feature_by_name("OffsetY")
+
+            max_width = width_feat.get_range()[1]  # (min, max)
+            max_height = height_feat.get_range()[1]
+            min_offset_x = offsetx_feat.get_range()[0]
+            min_offset_y = offsety_feat.get_range()[0]
+
+            return {
+                "OffsetX": min_offset_x,
+                "OffsetY": min_offset_y,
+                "Width": max_width,
+                "Height": max_height
+            }
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to get max ROI: {e}")
             return None
 
     def set_max_roi(self):
+        """Set the camera to use the maximum allowable ROI."""
         max_roi = self.get_max_roi()
         if max_roi:
-            self.set_roi(max_roi["OffsetX"], max_roi["OffsetY"], max_roi["Width"], max_roi["Height"])
+            self.set_roi(
+                OffsetX=max_roi["OffsetX"],
+                OffsetY=max_roi["OffsetY"],
+                Width=max_roi["Width"],
+                Height=max_roi["Height"]
+            )
             print("[AVCamera] Set to max ROI.")
         else:
             print("[AVCamera] Could not retrieve max ROI to set.")
 
-    # ----------------------------
-    # Pixel format helpers (public enum API)
-    # ----------------------------
+    def set_gamma(self, value: float):
+        """
+        Set gamma correction.
+        Typical range: ~0.1 to 4.0 (depends on camera).
+        """
+        try:
+            feat = self.camera.get_feature_by_name("Gamma")
+            min_val, max_val = feat.get_range()
+            if not (min_val <= value <= max_val):
+                raise ValueError(f"Gamma must be between {min_val} and {max_val}")
+            feat.set(value)
+            print(f"[AVCamera] Gamma set to {value}")
+        except Exception as e:
+            print(f"[AVCamera] Failed to set Gamma: {e}")
+
+    def get_gamma(self) -> float:
+        """
+        Get current gamma value.
+        """
+        try:
+            return float(self.camera.get_feature_by_name("Gamma").get())
+        except Exception as e:
+            print(f"[AVCamera] Failed to get Gamma: {e}")
+            return None
+
+    def get_gamma_range(self):
+        """
+        Return (min, max) range of gamma values.
+        """
+        try:
+            feat = self.camera.get_feature_by_name("Gamma")
+            return feat.get_range()
+        except Exception as e:
+            print(f"[AVCamera] Failed to get Gamma range: {e}")
+            return None
+
+    def set_config(self, cfg: AlliedConfig):
+        """Apply a full AlliedConfig object to the camera safely."""
+        was_streaming = self.streaming
+        if was_streaming:
+            self.stop_stream()
+
+        try:
+            self.set_roi(cfg.offset_x, cfg.offset_y, cfg.width, cfg.height)
+            self.set_exposure(cfg.exposure)
+            self.set_gain(cfg.gain)
+            self.set_gamma(cfg.gamma)
+            print(f"[AVCamera] Applied full config for {cfg.id}")
+        except Exception as e:
+            print(f"[AVCamera] Failed to apply full config: {e}")
+
+        if was_streaming:
+            self.start_stream(self._last_callback)
+
+    def snap(self, timeout_ms=2000):
+        """Capture a single frame in freerun (continuous) mode."""
+        was_streaming = self.streaming
+        if was_streaming:
+            self.stop_stream()
+
+        # Ensure camera is in freerun
+        self.set_freerun_mode()
+
+        # Grab one frame
+        frame = self.camera.get_frame(timeout_ms=timeout_ms)
+
+        if was_streaming:
+            self.start_stream(self._last_callback)
+
+        return frame
+
+    def set_acquisition_mode(self, mode="Continuous"):
+        """
+        "SingleFrame" or "Continuous"
+        """
+        try:
+            self.camera.get_feature_by_name("AcquisitionMode").set(mode)
+            print(f"[AVCamera] Acquisition mode set to {mode}")
+        except VimbaFeatureError as e:
+            print(f"[AVCamera] Failed to set AcquisitionMode to {mode}: {e}")
+
+
     def get_available_pixel_formats(self):
+        """
+        Return a list of available pixel formats as strings.
+        """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
-            return [e.get_name() for e in feat.get_available_entries()]
+            entries = feat._EnumFeature__entries
+            return entries
         except Exception as e:
             print(f"[AVCamera] Failed to get available pixel formats: {e}")
             return []
 
     def get_pixel_format(self):
+        """
+        Return the current pixel format as a string.
+        """
         try:
             return str(self.camera.get_feature_by_name("PixelFormat").get())
         except Exception as e:
@@ -385,6 +399,13 @@ class AlliedVisionCamera:
             return None
 
     def set_pixel_format(self, format_str: str):
+        """
+        Set the pixel format (e.g. 'Mono8', 'Mono12', 'BayerRG8', etc.).
+        PixelFormat.Mono8
+
+        Args:
+            format_str (str): must be in get_available_pixel_formats()
+        """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
             feat.set(format_str)
@@ -392,25 +413,24 @@ class AlliedVisionCamera:
         except Exception as e:
             print(f"[AVCamera] Failed to set pixel format: {e}")
 
-    # ----------------------------
-    # Streaming
-    # ----------------------------
-    def start_stream(self, frame_callback, buffer_count: int = 40):
+
+
+    def start_stream(self, frame_callback, buffer_count=5):
         if self.streaming:
             print("[AVCamera] Already streaming.")
             return
+
         self._last_callback = frame_callback
 
-        def stream_handler(cam, frame):
-            try:
-                frame_callback(frame)
-            except Exception as e:
-                print(f"[AVCamera] Frame callback error: {e}")
-            finally:
-                cam.queue_frame(frame)
+        # Set to continuous mode
+        self.set_acquisition_mode(mode="Continuous")
 
-        # Ensure continuous acquisition
-        self.set_acquisition_mode("Continuous")
+        def stream_handler(cam, frame):
+            frame_callback(frame)
+            cam.queue_frame(frame)
+
+        # Allocate and queue initial frames
+
         self.camera.start_streaming(stream_handler, buffer_count=buffer_count)
         self.streaming = True
         print("[AVCamera] Started streaming.")
@@ -423,60 +443,10 @@ class AlliedVisionCamera:
         self.streaming = False
         print("[AVCamera] Stopped streaming.")
 
-    def snap(self, timeout_ms: int = 2000):
-        """Capture a single frame; temporarily switch to freerun to guarantee acquisition."""
-        was_streaming = self.streaming
-        if was_streaming:
-            self.stop_stream()
-        self.set_freerun_mode()
-        frame = self.camera.get_frame(timeout_ms=timeout_ms)
-        if was_streaming:
-            self.start_stream(self._last_callback)
-        return frame
 
-    def set_acquisition_mode(self, mode: str = "Continuous"):
-        try:
-            self.camera.get_feature_by_name("AcquisitionMode").set(mode)
-            print(f"[AVCamera] Acquisition mode set to {mode}")
-        except VimbaFeatureError as e:
-            print(f"[AVCamera] Failed to set AcquisitionMode to {mode}: {e}")
-
-    # ----------------------------
-    # Bulk config apply (optional)
-    # ----------------------------
-    def set_config(self, cfg: AlliedConfig):
-        was_streaming = self.streaming
-        if was_streaming:
-            self.stop_stream()
-        try:
-            if hasattr(cfg, 'offset_x'):
-                self.set_roi(cfg.offset_x, cfg.offset_y, cfg.width, cfg.height)
-            if hasattr(cfg, 'exposure'):
-                self.set_exposure(cfg.exposure)
-            if hasattr(cfg, 'gain'):
-                self.set_gain(cfg.gain)
-            if hasattr(cfg, 'gamma'):
-                self.set_gamma(cfg.gamma)
-            print(f"[AVCamera] Applied full config for {getattr(cfg, 'id', 'unknown')}")
-        except Exception as e:
-            print(f"[AVCamera] Failed to apply full config: {e}")
-        finally:
-            if was_streaming:
-                self.start_stream(self._last_callback)
-
-    # ----------------------------
-    # Lifetime
-    # ----------------------------
     def close(self):
         if self.streaming:
             self.stop_stream()
         self.stack.close()
         print("[AVCamera] Camera and Vimba shut down.")
 
-    # Context-manager ergonomics
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        self.close()
-        return False  # do not suppress exceptions
