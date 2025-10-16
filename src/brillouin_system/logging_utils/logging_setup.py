@@ -92,6 +92,44 @@ def _writer_main(queue: Queue, log_path: str):
 
 
 # ------------------------- Public API -------------------------
+import logging
+from logging import Formatter
+from logging.handlers import RotatingFileHandler
+
+# assume these already exist in your file:
+# LOGGER_NAME = "brillouin"
+# _queue: Optional[multiprocessing.Queue] (set by start_logging)
+
+def enable_console_fallback(level: int = logging.INFO, force: bool = False) -> None:
+    """
+    Ensure logs are visible when running a module standalone.
+    - If the writer process (queue) is running, do nothing by default (unless force=True).
+    - If not, attach a StreamHandler to the app logger ('brillouin') so logs print to console.
+    Safe to call multiple times; it won't duplicate handlers.
+
+    Args:
+        level: logging level for the console (default INFO)
+        force: if True, attach console handler even if the queue/writer is running
+    """
+    lg = logging.getLogger(LOGGER_NAME)
+    lg.setLevel(min(lg.level or level, level))  # keep at least the requested level
+
+    # If writer is active and not forcing console, we’re done
+    if (globals().get("_queue", None) is not None) and not force:
+        return
+
+    # Already has a StreamHandler with our marker? Skip
+    for h in lg.handlers:
+        if isinstance(h, logging.StreamHandler) and getattr(h, "_is_console_fallback", False):
+            return
+
+    ch = logging.StreamHandler()
+    ch._is_console_fallback = True  # mark to avoid duplicates
+    ch.setFormatter(Formatter("%(message)s"))
+    ch.setLevel(level)
+    lg.addHandler(ch)
+
+
 
 def start_logging() -> None:
     """

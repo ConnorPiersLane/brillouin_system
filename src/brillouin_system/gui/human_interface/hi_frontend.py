@@ -35,13 +35,12 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5 import QtCore
 
 
-from brillouin_system.logging_utils.logging_setup import get_logger
-log = get_logger(__name__)
 
 from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
-
 from brillouin_system.logging_utils.logging_setup import start_logging, install_crash_hooks, get_logger, \
-    shutdown_logging, logging_fmt_gui
+    shutdown_logging, logging_fmt_gui, enable_console_fallback
+
+log = get_logger(__name__)
 
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
@@ -246,7 +245,6 @@ class HiFrontend(QWidget):
         self.remove_selected_axial_scans_requested.connect(self.brillouin_signaller.remove_selected_axial_scans)
 
         # Connect signals BEFORE starting the thread
-        self.brillouin_signaller.log_message.connect(lambda msg: log.info(f"[Signaller] {msg}"))
         self.brillouin_signaller_thread.started.connect(self.run_gui)
 
         # Start the thread after all connections
@@ -1430,6 +1428,8 @@ if __name__ == "__main__":
     start_logging()
     install_crash_hooks()
 
+    # For debugging:
+    # enable_console_fallback(force=True)
 
     main()
 

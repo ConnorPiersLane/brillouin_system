@@ -103,15 +103,14 @@ class ZaberHumanInterfaceDummy:
     def move_rel(self, dx: float = None, dy: float = None, dz: float = None):
         if dx is not None:
             self._positions['x'] += dx
-            log.info(f"[ZaberDummy] Moving X relative → {dx:+.2f} µm (now {self._positions['x']:.2f})")
+            log.info(f"[ZaberDummy] Moving X relative → {dx:+.2f} µm")
         if dy is not None:
             self._positions['y'] += dy
-            log.info(f"[ZaberDummy] Moving Y relative → {dy:+.2f} µm (now {self._positions['y']:.2f})")
+            log.info(f"[ZaberDummy] Moving Y relative → {dy:+.2f} µm")
         if dz is not None:
             self._positions['z'] += dz
-            log.info(f"[ZaberDummy] Moving Z relative → {dz:+.2f} µm (now {self._positions['z']:.2f})")
+            log.info(f"[ZaberDummy] Moving Z relative → {dz:+.2f} µm")
 
-        log.info("[ZaberDummy] Relative move(s) completed.")
 
     def move_abs(self, x: float = None, y: float = None, z: float = None):
         if x is not None:
