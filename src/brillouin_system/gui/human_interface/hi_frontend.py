@@ -1,4 +1,8 @@
+import logging
 import os
+
+from brillouin_system.logging_utils import logging_setup
+
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"  # Qt ≥ 5.14
@@ -31,6 +35,13 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5 import QtCore
 
 
+from brillouin_system.logging_utils.logging_setup import get_logger
+log = get_logger(__name__)
+
+from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
+
+from brillouin_system.logging_utils.logging_setup import start_logging, install_crash_hooks, get_logger, \
+    shutdown_logging, logging_fmt_gui
 
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
@@ -59,6 +70,9 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
+
+
+
 
 # Testing
 brillouin_manager = HiBackend(
@@ -90,6 +104,10 @@ brillouin_manager = HiBackend(
 #     zaber_hi=ZaberHumanInterface(),
 #     is_sample_illumination_continuous=True
 # )
+
+
+
+
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -146,7 +164,20 @@ class HiFrontend(QWidget):
     def __init__(self):
         super().__init__()
 
-        # State control
+        # --- Logging to GUI (Qt handler) ---
+        self.log_bridge = QtLogBridge()
+        self.log_bridge.message.connect(self._append_log_line)
+
+        self.qt_handler = QtTextEditHandler(self.log_bridge)
+        # Use the same format as your file logs for consistency
+        self.qt_handler.setFormatter(logging_fmt_gui)
+
+        lg = get_logger()
+        if self.qt_handler not in lg.handlers:
+            lg.addHandler(self.qt_handler)
+        lg.setLevel(logging.INFO)
+
+
 
         self.history_data = deque(maxlen=100)
 
@@ -215,7 +246,7 @@ class HiFrontend(QWidget):
         self.remove_selected_axial_scans_requested.connect(self.brillouin_signaller.remove_selected_axial_scans)
 
         # Connect signals BEFORE starting the thread
-        self.brillouin_signaller.log_message.connect(lambda msg: print("[Signaller]", msg))
+        self.brillouin_signaller.log_message.connect(lambda msg: log.info(f"[Signaller] {msg}"))
         self.brillouin_signaller_thread.started.connect(self.run_gui)
 
         # Start the thread after all connections
@@ -225,7 +256,8 @@ class HiFrontend(QWidget):
 
         self.update_gui()
 
-
+    def _append_log_line(self, line: str):
+        self.log_view.append(line)
 
     def init_ui(self):
         outer_layout = QHBoxLayout()
@@ -242,6 +274,14 @@ class HiFrontend(QWidget):
         left_column_layout.addWidget(self.create_allied_vision_group())
         left_column_layout.addWidget(self.create_axial_scans_group())
         left_column_layout.addWidget(self.create_show_scan_results())
+
+        # in init_ui(): add at the bottom of the left column, for example
+        self.log_view = QtWidgets.QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(120)
+        left_column_layout.addWidget(self.log_view)
+
+
 
         left_column_layout.addStretch()
         outer_layout.addLayout(left_column_layout, 0)
@@ -836,18 +876,18 @@ class HiFrontend(QWidget):
         self._display_result_fast(display)  # your fast pyqtgraph updater
 
     def on_stop_clicked(self):
-        print("[Brillouin Viewer] STOP clicked.")
+        log.info("[Brillouin Viewer] STOP clicked.")
         self.brillouin_signaller.cancel_operations()
         self.close_all_shutters_requested.emit()
         self.stop_live_requested.emit()
 
     def on_cancel_event_clicked(self):
-        print("[BrillouinViewer] Cancel button clicked.")
+        log.info("[BrillouinViewer] Cancel button clicked.")
         # self.cancel_requested.emit()
         self.brillouin_signaller.cancel_operations()
 
     def on_restart_clicked(self):
-        print("[Brillouin Viewer] Restart clicked.")
+        log.info("[Brillouin Viewer] Restart clicked.")
         self.stop_live_requested.emit()
         QApplication.processEvents()
         self.start_live_requested.emit()
@@ -862,7 +902,7 @@ class HiFrontend(QWidget):
     def save_selected_axial_scan(self):
         selected_items = self.axial_scans_list.selectedItems()
         if not selected_items:
-            print("[Warning] No scans selected.")
+            log.warning("No scans selected.")
             return
 
         indices = [int(item.text().split(" - ")[0]) for item in selected_items]
@@ -875,7 +915,7 @@ class HiFrontend(QWidget):
         )
 
         if not scans:
-            self.log_message.emit("[Save] No axial scans to save.")
+            log.info("[Save] No axial scans to save.")
             return
 
         base_path, _ = QFileDialog.getSaveFileName(
@@ -891,23 +931,23 @@ class HiFrontend(QWidget):
             pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
             with open(pkl_path, "wb") as f:
                 pickle.dump(scans, f)
-            print(f"[✓] Pickle saved to: {pkl_path}")
+            log.info(f"[✓] Pickle saved to: {pkl_path}")
 
             # Save as HDF5
             h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
             native_dict = dataclass_to_hdf5_native_dict(scans)
             save_dict_to_hdf5(h5_path, native_dict)
-            print(f"[✓] HDF5 saved to: {h5_path}")
+            log.info(f"[✓] HDF5 saved to: {h5_path}")
 
         except Exception as e:
-            print(f"[Error] Failed to save axial scans: {e}")
+            log.exception(f"[Error] Failed to save axial scans: {e}")
 
     def move_zaber_lens_by(self, direction: int):
         try:
             step = float(self.lens_step_input.text())
             self.move_zaber_eye_lens_requested.emit(direction * step)
         except ValueError:
-            print("[Error] Invalid lens step size input.")
+            log.exception("[Error] Invalid lens step size input.")
 
     def update_stage_positions(self, x: float, y: float, z: float):
         self.x_pos_display.setText(f"X {x:.2f} µm")
@@ -917,7 +957,7 @@ class HiFrontend(QWidget):
     def remove_selected_axial_scan(self):
         selected_items = self.axial_scans_list.selectedItems()
         if not selected_items:
-            print("[Warning] No scan selected.")
+            log.warning("[Warning] No scan selected.")
             return
         indices = [int(item.text().split(" - ")[0]) for item in selected_items]
         self.remove_selected_axial_scans_requested.emit(indices)
@@ -957,7 +997,7 @@ class HiFrontend(QWidget):
         dialog.exec_()
 
     def on_allied_settings_clicked(self):
-        print("[Brillouin Viewer] Allied Vision Settings button clicked.")
+        log.info("[Brillouin Viewer] Allied Vision Settings button clicked.")
         # TODO: Launch settings dialog when available
 
     def update_bg_subtraction(self, enabled: bool):
@@ -1114,12 +1154,12 @@ class HiFrontend(QWidget):
             }
 
             self.apply_camera_settings_requested.emit(settings)  # ✅ thread-safe
-            print("[Brillouin Viewer] Sent new camera settings to worker.")
+            log.info("[Brillouin Viewer] Sent new camera settings to worker.")
 
             self.emit_camera_settings_requested.emit()  # ✅ thread-safe
 
         except Exception as e:
-            print(f"[Brillouin Viewer] Failed to apply camera settings: {e}")
+            log.exception(f"[Brillouin Viewer] Failed to apply camera settings: {e}")
 
 
     def toggle_reference_mode(self):
@@ -1157,16 +1197,16 @@ class HiFrontend(QWidget):
                 pkl_path = path if path.endswith(".pkl") else path + ".pkl"
                 with open(pkl_path, "wb") as f:
                     pickle.dump(data, f)
-                print(f"[✓] Background image saved to: {pkl_path}")
+                log.info(f"[✓] Background image saved to: {pkl_path}")
 
                 # Save as HDF5
                 h5_path = path if path.endswith(".h5") else path + ".h5"
                 native_dict = dataclass_to_hdf5_native_dict(data)
                 save_dict_to_hdf5(h5_path, native_dict)
-                print(f"[✓] Background image saved as HDF5 to: {h5_path}")
+                log.info(f"[✓] Background image saved as HDF5 to: {h5_path}")
 
             except Exception as e:
-                print(f"[Brillouin Viewer] [Error] Failed to save background data: {e}")
+                log.exception(f"[Brillouin Viewer] [Error] Failed to save background data: {e}")
 
             finally:
                 self.brillouin_signaller.background_data_ready.disconnect(receive_data)
@@ -1181,7 +1221,7 @@ class HiFrontend(QWidget):
             freq = float(self.ref_freq_input.text())
             self.update_microwave_freq_requested.emit(freq)
         except ValueError:
-            print("[Brillouin Viewer] [Reference] Invalid frequency input.")
+            log.exception("[Brillouin Viewer] [Reference] Invalid frequency input.")
 
     def take_background_image(self):
         self.acquire_background_requested.emit()
@@ -1197,7 +1237,7 @@ class HiFrontend(QWidget):
     def on_show_axial_scan_clicked(self):
         selected_scan = self.shift_scan_combo.currentText()
         if not selected_scan:
-            print("[Brillouin Viewer] No axial available.")
+            log.info("[Brillouin Viewer] No axial available.")
             return
 
         i = int(selected_scan.split(" - ")[0])
@@ -1209,7 +1249,7 @@ class HiFrontend(QWidget):
             self.axial_viewer = AxialScanViewer(scan_data)
             self.axial_viewer.show()
         except Exception as e:
-            print(f"[AxialScanViewer] Failed to show data: {e}")
+            log.exception(f"[AxialScanViewer] Failed to show data: {e}")
 
 
 
@@ -1230,7 +1270,7 @@ class HiFrontend(QWidget):
     def calibration_finished(self):
         self.show_calib_btn.setEnabled(True)
         self.save_calib_btn.setEnabled(True)
-        print(f"[Brillouin Viewer] Calibration available")
+        log.info(f"[Brillouin Viewer] Calibration available")
 
     def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationCalculator]):
         cali_data = received_cali[0]
@@ -1243,13 +1283,13 @@ class HiFrontend(QWidget):
                 )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
-                print("[Brillouin Viewer] Calibration plot displayed.")
+                log.info("[Brillouin Viewer] Calibration plot displayed.")
             except Exception as e:
-                print(f"[Brillouin Viewer] Failed to plot calibration: {e}")
+                log.exception(f"[Brillouin Viewer] Failed to plot calibration: {e}")
 
         elif self._save_cali:
             if cali_data is None:
-                print("[Brillouin Viewer] Failed to save data, no data available")
+                log.info("[Brillouin Viewer] Failed to save data, no data available")
                 return
 
             base_path, _ = QFileDialog.getSaveFileName(
@@ -1263,16 +1303,16 @@ class HiFrontend(QWidget):
                 pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
                 with open(pkl_path, "wb") as f:
                     pickle.dump(cali_data, f)
-                print(f"[✓] Calibration data saved to {pkl_path}")
+                log.info(f"[✓] Calibration data saved to {pkl_path}")
 
                 # Save HDF5
                 h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
                 hdf5_dict = dataclass_to_hdf5_native_dict(cali_data)
                 save_dict_to_hdf5(h5_path, hdf5_dict)
-                print(f"[✓] Calibration data saved as HDF5 to {h5_path}")
+                log.info(f"[✓] Calibration data saved as HDF5 to {h5_path}")
 
             except Exception as e:
-                print(f"[Error] Failed to save calibration data: {e}")
+                log.exception(f"[Error] Failed to save calibration data: {e}")
 
 
         self._show_cali = False
@@ -1285,7 +1325,7 @@ class HiFrontend(QWidget):
             step = float(self.axial_step_input.text())
 
             # Log info
-            print(
+            log.info(
                 f"[Brillouin Viewer] Axial Scan Request | ID: {id_str}, N: {n_meas}, Step: {step} µm")
 
 
@@ -1298,13 +1338,13 @@ class HiFrontend(QWidget):
             self.take_axial_scan_requested.emit(request)
 
         except Exception as e:
-            print(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
+            log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
 
     def clear_measurements(self):
         self._stored_measurements.clear()
         self.measurement_series_label.setText("Stored Series: 0")
-        print("[Brillouin Viewer] Cleared all stored measurement series.")
+        log.info("[Brillouin Viewer] Cleared all stored measurement series.")
 
     # -- Open Dialog --
     def message_handler(self, title: str, message: str):
@@ -1346,21 +1386,24 @@ class HiFrontend(QWidget):
         QMessageBox.information(self, "Fitting", "Fitting configuration dialog not implemented yet.")
 
     def closeEvent(self, event):
-        print("[Brillouin Viewer] Shutdown initiated...")
+        log.info("GUI shutdown initiated...")
 
-        # Stop live view
-        self.brillouin_signaller._running = False
-        self.brillouin_signaller._thread_active = False
+        # ---- your existing orderly shutdown (threads/devices) here ----
+        try:
+            self.brillouin_signaller._running = False
+            self.brillouin_signaller._thread_active = False
+            self.brillouin_signaller.close()  # safe to block on exit
+            self.brillouin_signaller_thread.quit()
+            self.brillouin_signaller_thread.wait(1000)
+        except Exception as e:
+            log.exception(f"Error during GUI shutdown: {e}")
 
-        # Close worker directly
-        self.brillouin_signaller.close()  # it's fine to block now — we're exiting
+        log.info("GUI shutdown complete.")
 
-        # Kill the thread
-        self.brillouin_signaller_thread.quit()
-        self.brillouin_signaller_thread.wait(1000)  # wait max 1 second
-
-        print("[Brillouin Viewer] GUI shutdown complete.")
+        # Ask writer process to flush & exit (also registered via atexit)
+        shutdown_logging()
         event.accept()
+
 
 def main():
     # Set rounding policy before constructing QApplication (Qt ≥ 5.14)
@@ -1377,8 +1420,18 @@ def main():
     """)
     viewer = HiFrontend()
     viewer.show()
-    sys.exit(app.exec_())
+    exit_code = app.exec_()
+    sys.exit(exit_code)
+
 
 
 if __name__ == "__main__":
+    # IMPORTANT: On Windows, spawn the writer process ONLY here.
+    start_logging()
+    install_crash_hooks()
+
+
     main()
+
+    # (Optional) Explicit shutdown — also happens via atexit in logging_setup
+    shutdown_logging()
