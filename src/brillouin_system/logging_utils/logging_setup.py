@@ -64,7 +64,7 @@ def _writer_main(queue: Queue, log_path: str):
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    fh = FsyncRotatingFileHandler(log_path, maxBytes=5_000_000, backupCount=5)
+    fh = FsyncRotatingFileHandler(log_path, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
     fh.setFormatter(logging_fmt_file)
     log.addHandler(fh)
 

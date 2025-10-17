@@ -273,12 +273,6 @@ class HiFrontend(QWidget):
         left_column_layout.addWidget(self.create_axial_scans_group())
         left_column_layout.addWidget(self.create_show_scan_results())
 
-        # in init_ui(): add at the bottom of the left column, for example
-        self.log_view = QtWidgets.QTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setMinimumHeight(120)
-        left_column_layout.addWidget(self.log_view)
-
 
 
         left_column_layout.addStretch()
@@ -291,9 +285,13 @@ class HiFrontend(QWidget):
         shift_controls_row = QHBoxLayout()
         shift_controls_row.addWidget(self.create_zaber_manual_movement_group())
         shift_controls_row.addWidget(self.create_take_axial_scan_group())
-
         middle_column_layout.addLayout(shift_controls_row)
 
+        # in init_ui(): add at the bottom of the left column, for example
+        self.log_view = QtWidgets.QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(120)
+        middle_column_layout.addWidget(self.log_view)
 
         outer_layout.addLayout(middle_column_layout, 1)
 
