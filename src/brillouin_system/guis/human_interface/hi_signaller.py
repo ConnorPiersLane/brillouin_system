@@ -5,7 +5,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 from PyQt5 import QtCore
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
-from brillouin_system.gui.human_interface.hi_backend import HiBackend
+from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 

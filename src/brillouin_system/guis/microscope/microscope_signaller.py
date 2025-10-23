@@ -8,7 +8,7 @@ import time
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig
-from brillouin_system.gui.human_interface.brillouin_backend import BrillouinBackend, SystemType
+from brillouin_system.guis.human_interface.brillouin_backend import BrillouinBackend, SystemType
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 

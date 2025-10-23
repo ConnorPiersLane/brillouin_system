@@ -50,13 +50,13 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog impo
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
-from brillouin_system.gui.human_interface.hi_backend import HiBackend
-from brillouin_system.gui.human_interface.hi_signaller import HiSignaller
+from brillouin_system.guis.human_interface.hi_backend import HiBackend
+from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
 from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
-from brillouin_system.gui.data_analyzer.show_axial_scan import AxialScanViewer
+from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
@@ -889,7 +889,7 @@ class HiFrontend(QWidget):
         self.start_live_requested.emit()
 
     def update_gui(self):
-        # Update the gui
+        # Update the guis
         self.brillouin_signaller.update_gui()
 
     def save_all_axial_scans(self):

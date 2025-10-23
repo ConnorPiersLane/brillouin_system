@@ -24,8 +24,8 @@ from brillouin_system.devices.cameras.flir.flir_worker import FlirWorker
 from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config import LEDConfig
 from brillouin_system.devices.zaber_engines.zaber_microscope.led_config.led_config_dialog import LEDConfigDialog
 from brillouin_system.devices.zaber_engines.zaber_microscope.zaber_microscope import DummyZaberMicroscope
-from brillouin_system.gui.human_interface.brillouin_backend import BrillouinBackend
-from brillouin_system.gui.human_interface.brillouin_signaller import BrillouinSignaller, SystemState
+from brillouin_system.guis.human_interface.brillouin_backend import BrillouinBackend
+from brillouin_system.guis.human_interface.brillouin_signaller import BrillouinSignaller, SystemState
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 # from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
 from brillouin_system.devices.microwave_device import MicrowaveDummy
@@ -221,7 +221,7 @@ class BrillouinViewerMicroscope(QWidget):
 
 
     def update_gui(self):
-        # Update the gui
+        # Update the guis
         self.brillouin_signaller.update_gui()
 
 

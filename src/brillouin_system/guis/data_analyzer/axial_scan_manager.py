@@ -9,7 +9,7 @@ from PyQt5.QtCore import Qt
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
 # Reuse your existing modules
 
-from brillouin_system.gui.data_analyzer.show_axial_scan import AxialScanViewer
+from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 
 from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes

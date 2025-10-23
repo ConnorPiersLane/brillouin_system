@@ -131,7 +131,7 @@ class DualCamImageCapture(QWidget):
 
         # GUI timer to paint latest frame (non-blocking)
         self.timer = QTimer(self)
-        self.timer.setInterval(30)
+        self.timer.setInterval(40)
         self.timer.timeout.connect(self.on_tick)
 
         # Wire buttons
@@ -162,7 +162,12 @@ class DualCamImageCapture(QWidget):
         QShortcut(QKeySequence("Space"), self, activated=self.on_save_pair)
 
     def _set_pixmap_fit(self, label: QLabel, pm: QPixmap):
-        label.setPixmap(pm.scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # If the pixmap already matches the label geometry, avoid scaling work.
+        if pm.width() == label.width() and pm.height() == label.height():
+            label.setPixmap(pm)
+            return
+        # Only scale when dimensions differ, and prefer FastTransformation for speed.
+        label.setPixmap(pm.scaled(label.size(), Qt.KeepAspectRatio, Qt.FastTransformation))
 
     def _setup_frame_views(self):
         """
@@ -480,7 +485,7 @@ if __name__ == "__main__":
     mp.freeze_support()  # Windows
 
     app = QApplication(sys.argv)
-    w = DualCamImageCapture(use_dummy=True)  # set False to use real hardware
+    w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
     w.resize(1000, 560)
     w.show()
     sys.exit(app.exec_())
