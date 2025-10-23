@@ -19,7 +19,7 @@ class DualCameraProxy:
         self.right_spec = ShmFrameSpec(f"{base}_R", (1, 1), dtype, slots)
 
     def _make_process(self):
-        from brillouin_system.eye_tracker.et1_image_acquisition.dual_camera_worker import dual_camera_worker
+        from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_worker import dual_camera_worker
         return mp.Process(target=dual_camera_worker, args=(self.req_q, self.evt_q), daemon=True)
 
     def start(self):

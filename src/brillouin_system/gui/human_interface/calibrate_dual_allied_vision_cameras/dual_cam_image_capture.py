@@ -16,10 +16,10 @@ from PyQt5.QtCore import QTimer, pyqtSignal, Qt
 import cv2
 from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 
-from dual_camera_proxy import DualCameraProxy
+
 # ⬇️ import your config dialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
-
+from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
 
 
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
@@ -89,6 +89,7 @@ class DualCamImageCapture(QWidget):
         # --- overlay controls ---
         overlay_row = QHBoxLayout()
         self.overlay_checkbox = QCheckBox("Overlay corners")
+        self.overlay_checkbox.toggled.connect(self._clear_overlays)
         overlay_row.addWidget(self.overlay_checkbox)
 
         overlay_row.addWidget(QLabel("Cols:"))
@@ -246,19 +247,23 @@ class DualCamImageCapture(QWidget):
         self._last_right = right
         self._last_ts = ts
 
-        # ...inside on_tick...
         if self.overlay_checkbox.isChecked():
+            # refresh overlays occasionally to avoid UI stutter
+            self._maybe_update_overlays(self._last_left, self._last_right)
+
             # left
             if self._last_overlay_left is not None:
                 self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_rgb(self._last_overlay_left))
             else:
                 self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_gray(self._last_left))
+
             # right
             if self._last_overlay_right is not None:
                 self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_rgb(self._last_overlay_right))
             else:
                 self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_gray(self._last_right))
         else:
+            # plain grayscale
             self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_gray(self._last_left))
             self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_gray(self._last_right))
 
@@ -323,6 +328,35 @@ class DualCamImageCapture(QWidget):
             self.status_changed.emit(f"Queued pair {idx:04d}")
         except queue.Full:
             self.status_changed.emit("Save queue full—wait a moment")
+
+    def _clear_overlays(self, *_):
+        """Reset cached overlays when toggled or when we want a fresh compute."""
+        self._last_overlay_left = None
+        self._last_overlay_right = None
+        self._detect_counter = 0
+
+    def _maybe_update_overlays(self, left_gray: np.ndarray, right_gray: np.ndarray):
+        """Throttled chessboard detection; refreshes overlay caches if found."""
+        # run once every 3 frames; tweak to 2 or 5 depending on CPU
+        self._detect_counter = (self._detect_counter + 1) % 3
+        if self._detect_counter != 0:
+            return
+
+        cols = int(self.cols_spin.value())
+        rows = int(self.rows_spin.value())
+        pattern_size = (cols, rows)  # inner corners across, down
+
+        try:
+            ol = self._draw_corners_overlay(left_gray, pattern_size)  # returns RGB or None
+            or_ = self._draw_corners_overlay(right_gray, pattern_size)  # returns RGB or None
+            self._last_overlay_left = ol
+            self._last_overlay_right = or_
+        except Exception:
+            # if something goes wrong, just drop overlays this cycle
+            self._last_overlay_left = None
+            self._last_overlay_right = None
+
+
 
     # -------- Save pipeline: setup --------
     def _init_save_dir(self, root: Path):
@@ -446,7 +480,7 @@ if __name__ == "__main__":
     mp.freeze_support()  # Windows
 
     app = QApplication(sys.argv)
-    w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
+    w = DualCamImageCapture(use_dummy=True)  # set False to use real hardware
     w.resize(1000, 560)
     w.show()
     sys.exit(app.exec_())
