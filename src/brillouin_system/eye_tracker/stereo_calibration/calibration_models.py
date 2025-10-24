@@ -66,7 +66,7 @@ class Intrinsics:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "Intrinsics":
+    def from_dict(cls, d: Dict[str, Any]) -> Intrinsics:
         return cls(
             K=d["K"],
             dist=d.get("dist", None),
@@ -108,7 +108,7 @@ class StereoExtrinsics:
         return {"R": self.R.tolist(), "T": self.T.tolist(), "reference": self.reference}
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "StereoExtrinsics":
+    def from_dict(cls, d: Dict[str, Any]) -> StereoExtrinsics:
         return cls(R=d["R"], T=d["T"], reference=d.get("reference", "left"))
 
 
@@ -168,7 +168,7 @@ class StereoCalibration:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "StereoCalibration":
+    def from_dict(cls, d: Dict[str, Any]) -> StereoCalibration:
         return cls(
             left=Intrinsics.from_dict(d["left"]),
             right=Intrinsics.from_dict(d["right"]),
@@ -181,7 +181,7 @@ class StereoCalibration:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def load_json(cls, path: str) -> "StereoCalibration":
+    def load_json(cls, path: str) -> StereoCalibration:
         with open(path, "r", encoding="utf-8") as f:
             return cls.from_dict(json.load(f))
 

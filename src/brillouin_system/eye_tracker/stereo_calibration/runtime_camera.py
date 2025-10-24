@@ -5,6 +5,9 @@ from typing import Optional, Tuple
 import numpy as np
 import cv2
 
+from brillouin_system.eye_tracker.stereo_calibration.calibration_models import Intrinsics, StereoCalibration
+
+
 # Expect these to come from your calib_models.py
 # from calib_models import Intrinsics, StereoCalibration
 
@@ -21,7 +24,7 @@ class CalibratedCamera:
     """
     __slots__ = ("intr", "K", "dist", "R", "t", "_invK")
 
-    def __init__(self, intr: "Intrinsics"):
+    def __init__(self, intr: Intrinsics):
         self.intr = intr
         self.K = np.asarray(intr.K, dtype=np.float64).reshape(3, 3)
         self.dist = None if intr.dist is None else np.asarray(intr.dist, dtype=np.float64).reshape(-1)
@@ -89,7 +92,7 @@ class StereoRig:
 
     # ---- constructor ----
     @classmethod
-    def from_stereo_calibration(cls, st: "StereoCalibration") -> "StereoRig":
+    def from_stereo_calibration(cls, st: StereoCalibration) -> StereoRig:
         camL = CalibratedCamera(st.left)
         camR = CalibratedCamera(st.right)
         # Normalize extrinsics to LEFT→RIGHT, regardless of stored reference
