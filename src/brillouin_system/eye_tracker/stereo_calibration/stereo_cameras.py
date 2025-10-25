@@ -74,7 +74,7 @@ class CalibratedCamera:
 # Stereo rig
 # =========================
 @dataclass
-class StereoRig:
+class StereoCameras:
     """
     Runtime stereo rig built from StereoCalibration.
     Works for either reference='left' or 'right'.
@@ -92,7 +92,7 @@ class StereoRig:
 
     # ---- constructor ----
     @classmethod
-    def from_stereo_calibration(cls, st: StereoCalibration) -> StereoRig:
+    def from_stereo_calibration(cls, st: StereoCalibration) -> StereoCameras:
         camL = CalibratedCamera(st.left)
         camR = CalibratedCamera(st.right)
         # Normalize extrinsics to LEFT→RIGHT, regardless of stored reference
