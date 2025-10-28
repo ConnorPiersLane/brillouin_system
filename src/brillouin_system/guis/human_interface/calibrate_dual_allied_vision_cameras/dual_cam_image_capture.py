@@ -95,13 +95,13 @@ class DualCamImageCapture(QWidget):
         overlay_row.addWidget(QLabel("Cols:"))
         self.cols_spin = QSpinBox()
         self.cols_spin.setRange(2, 50)  # inner corners across
-        self.cols_spin.setValue(9)  # common: 9x6
+        self.cols_spin.setValue(10)  # common: 9x6
         overlay_row.addWidget(self.cols_spin)
 
         overlay_row.addWidget(QLabel("Rows:"))
         self.rows_spin = QSpinBox()
         self.rows_spin.setRange(2, 50)  # inner corners down
-        self.rows_spin.setValue(6)
+        self.rows_spin.setValue(8)
         overlay_row.addWidget(self.rows_spin)
 
         overlay_row.addStretch()
