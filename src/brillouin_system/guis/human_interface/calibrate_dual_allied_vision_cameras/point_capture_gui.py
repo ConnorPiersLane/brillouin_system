@@ -164,7 +164,7 @@ class DualCamImageCapture(QWidget):
 
         self._last_uv_left = None
         self._last_uv_right = None
-        self.steroe = stereo_cameras
+        self.stereo = stereo_cameras
 
 
     def _set_pixmap_fit(self, label: QLabel, pm: QPixmap):
