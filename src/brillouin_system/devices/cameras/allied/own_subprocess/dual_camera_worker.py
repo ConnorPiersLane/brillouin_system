@@ -5,7 +5,7 @@ import time, traceback
 
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import allied_config
-from brillouin_system.helpers.frame_ipc_shared import ShmRing, ShmFrameSpec
+from brillouin_system.devices.cameras.allied.own_subprocess.frame_ipc_shared import ShmRing, ShmFrameSpec
 
 def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
     left_ring = right_ring = None

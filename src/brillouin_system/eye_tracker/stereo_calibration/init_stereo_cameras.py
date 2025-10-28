@@ -2,8 +2,8 @@
 from pathlib import Path
 
 from brillouin_system.logging_utils.logging_setup import get_logger
-from stereo_cameras import StereoCameras   # your renamed class
-from calibration_models import Intrinsics, StereoExtrinsics, StereoCalibration
+from brillouin_system.eye_tracker.stereo_calibration.stereo_cameras import StereoCameras   # your renamed class
+from brillouin_system.eye_tracker.stereo_calibration.calibration_models import Intrinsics, StereoExtrinsics, StereoCalibration
 import numpy as np, json
 
 log = get_logger(__name__)

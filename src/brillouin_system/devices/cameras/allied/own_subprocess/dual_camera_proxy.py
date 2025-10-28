@@ -3,7 +3,7 @@ import multiprocessing as mp
 
 import numpy as np
 
-from brillouin_system.helpers.frame_ipc_shared import ShmFrameSpec, ShmRing
+from brillouin_system.devices.cameras.allied.own_subprocess.frame_ipc_shared import ShmFrameSpec, ShmRing
 
 class DualCameraProxy:
     def __init__(self, dtype="uint8", slots=8, use_dummy=False):
@@ -132,7 +132,6 @@ class DualCameraProxy:
           rings. With your coalescing worker + small evt_q, backlog is tiny, so this
           is effectively latest under load.
         """
-        import queue as _q  # local alias to avoid shadowing
 
         while True:
             msg = self.evt_q.get()

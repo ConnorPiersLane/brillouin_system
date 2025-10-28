@@ -132,8 +132,17 @@ class StereoCameras:
                              uvL: Tuple[float, float],
                              uvR: Tuple[float, float]) -> np.ndarray:
         """
-        Midpoint of the shortest segment between the two viewing rays.
-        Returns (3,) world coordinates.
+        Triangulate 3D point as midpoint of the shortest segment between the
+        two viewing rays from left and right cameras.
+
+        - Geometric solution based purely on ray intersection.
+        - More robust to calibration noise but not optimal in reprojection error.
+        - Falls back to projection from left if rays are nearly parallel.
+
+        Returns
+        -------
+        np.ndarray
+            (3,) world coordinates of the estimated point.
         """
         d1 = self.left.pixel_to_ray_world(*uvL)
         d2 = self.right.pixel_to_ray_world(*uvR)
@@ -158,7 +167,16 @@ class StereoCameras:
                            uvL: Tuple[float, float],
                            uvR: Tuple[float, float]) -> np.ndarray:
         """
-        Linear triangulation using cv2.triangulatePoints with projection matrices.
+        Linear (DLT) triangulation using cv2.triangulatePoints.
+
+        - Works in homogeneous coordinates with camera projection matrices.
+        - Minimizes an algebraic error; good as an initial estimate.
+        - Assumes P = K [R|t] for each camera and undistorted pixel inputs.
+
+        Returns
+        -------
+        np.ndarray
+            (3,) world coordinates of the triangulated point.
         """
         P1, P2 = self.left.P, self.right.P
         # Undistort to normalized camera coords, then back to pixel homogs with K
@@ -168,6 +186,96 @@ class StereoCameras:
         uR = (self.right.K @ np.array([nR[0], nR[1], 1.0])).reshape(3, 1)
         X_h = cv2.triangulatePoints(P1, P2, uL[:2], uR[:2])  # (4,1)
         return (X_h[:3] / X_h[3]).reshape(3)
+
+    def triangulate_best(self,
+                         uvL: Tuple[float, float],
+                         uvR: Tuple[float, float],
+                         refine: bool = True,
+                         max_iters: int = 15,
+                         lm_lambda: float = 1e-2) -> Tuple[np.ndarray, float]:
+        """
+        High-accuracy triangulation combining linear and geometric methods,
+        with optional non-linear refinement.
+
+        Steps:
+          1. Compute both linear and midpoint estimates.
+          2. Choose the one with lower reprojection error.
+          3. Optionally refine by minimizing total pixel reprojection error
+             in both images (LM optimization).
+
+        Returns
+        -------
+        Tuple[np.ndarray, float]
+            (3,) world coordinates and RMS reprojection error in pixels.
+        """
+
+        def project(cam, Xw):
+            # cv2.projectPoints expects rvec/tvec mapping WORLD->CAMERA (your cam.R, cam.t already are)
+            rvec, _ = cv2.Rodrigues(cam.R)
+            dist = cam.dist if cam.dist is not None else np.zeros(5)
+            imgpts, _ = cv2.projectPoints(Xw.reshape(1, 1, 3), rvec, cam.t, cam.K, dist)
+            return imgpts.reshape(2)
+
+        def reproj_err(Xw):
+            pL = project(self.left, Xw);
+            eL = pL - np.array(uvL, dtype=np.float64)
+            pR = project(self.right, Xw);
+            eR = pR - np.array(uvR, dtype=np.float64)
+            r = np.hstack([eL, eR])  # [exL, eyL, exR, eyR]
+            return r
+
+        def rms(r):
+            return float(np.sqrt(np.mean(r ** 2)))
+
+        # 1) candidates
+        X_lin = self.triangulate_linear(uvL, uvR)
+        X_mid = self.triangulate_midpoint(uvL, uvR)
+
+        r_lin = reproj_err(X_lin);
+        rms_lin = rms(r_lin)
+        r_mid = reproj_err(X_mid);
+        rms_mid = rms(r_mid)
+
+        X = X_lin if rms_lin <= rms_mid else X_mid
+        r_best = r_lin if rms_lin <= rms_mid else r_mid
+
+        # Optional: quick cheirality check; if behind a camera, switch seed
+        def depths_ok(Xw):
+            zL = (self.left.R @ Xw + self.left.t)[2]
+            zR = (self.right.R @ Xw + self.right.t)[2]
+            return (zL > 0) and (zR > 0)
+
+        if not depths_ok(X):
+            X = X_mid if X is X_lin else X_lin
+            r_best = reproj_err(X)
+
+        # 2) refine with Gauss-Newton/LM on the 3D point
+        if refine:
+            eps = 1e-6
+            for _ in range(max_iters):
+                r = reproj_err(X)
+                J = np.zeros((4, 3), dtype=np.float64)
+                for k in range(3):
+                    d = np.zeros(3);
+                    d[k] = eps
+                    rp = reproj_err(X + d)
+                    J[:, k] = (rp - r) / eps
+                # LM step: (JᵀJ + λI) δ = -Jᵀ r
+                H = J.T @ J + lm_lambda * np.eye(3)
+                g = J.T @ r
+                try:
+                    delta = -np.linalg.solve(H, g)
+                except np.linalg.LinAlgError:
+                    break
+                X_new = X + delta
+                # accept if improves reprojection and keeps cheirality
+                if depths_ok(X_new) and rms(reproj_err(X_new)) <= rms(r):
+                    X = X_new
+                else:
+                    # damp more if not improving
+                    lm_lambda *= 10.0
+
+        return X, rms(reproj_err(X))
 
     # ---- rectification ----
     def stereo_rectify(self, zero_disparity: bool = True):
