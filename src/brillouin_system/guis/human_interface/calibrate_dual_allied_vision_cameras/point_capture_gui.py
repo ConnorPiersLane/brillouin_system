@@ -1,4 +1,4 @@
-# dual_camera_demo.py
+
 import sys
 import csv
 import threading
@@ -21,6 +21,8 @@ from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog 
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
 from brillouin_system.eye_tracker.stereo_calibration.detect_dot import detect_dot_with_blob
 from brillouin_system.eye_tracker.stereo_calibration.init_stereo_cameras import stereo_cameras
+
+#ToDo: select different stereo methods, take frames at locations, load transformation etc.
 
 
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
