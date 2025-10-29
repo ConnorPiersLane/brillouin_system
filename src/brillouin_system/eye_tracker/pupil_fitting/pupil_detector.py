@@ -5,7 +5,7 @@ import numpy as np
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
-from brillouin_system.eye_tracker.pupil_fitting.stereo_fitting_helpers import ellipse_to_conic, build_view_cone, \
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitting_helpers import ellipse_to_conic, build_view_cone, \
     adjugate_4x4, inside_sign, point_in_ellipse
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
 from brillouin_system.eye_tracker.stereo_imaging.stereo_cameras import StereoCameras
