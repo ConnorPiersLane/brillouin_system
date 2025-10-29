@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QGroupBox, QApplication, QMessageBox, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
-from brillouin_system.eye_tracker.et2_pupil_fitting.pupil_fitting_config.pupil_fit_config import (
+from brillouin_system.eye_tracker.pupil_fitting.pupil_fitting_config.pupil_fit_config import (
     left_eye_pupil_fit_config, right_eye_pupil_fit_config,
     save_config_section, PUPIL_FIT_TOML_PATH, PupilFitConfig
 )

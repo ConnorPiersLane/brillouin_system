@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, Any
+from typing import Any
 import json
 import numpy as np
 import cv2
@@ -33,10 +33,10 @@ class Intrinsics:
       - mono_rms: optional reprojection RMS from mono calibration
     """
     K: np.ndarray
-    dist: Optional[np.ndarray] = None
-    image_size: Optional[Tuple[int, int]] = None
+    dist: np.ndarray | None= None
+    image_size: tuple[int, int] | None = None
     model: str = "pinhole"
-    mono_rms: Optional[float] = None
+    mono_rms: float | None = None
 
     def __post_init__(self):
         self.K = _np(self.K, (3, 3))
@@ -46,7 +46,7 @@ class Intrinsics:
         self.model = self.model.lower().strip()
 
     # --- convenience ---
-    def fov_deg(self) -> Tuple[float, float]:
+    def fov_deg(self) -> tuple[float, float]:
         """(hfov, vfov) in degrees based on K and image_size (approx)."""
         if not self.image_size:
             return (float("nan"), float("nan"))
@@ -56,7 +56,7 @@ class Intrinsics:
         vfov = 2.0 * np.degrees(np.arctan2(h, 2.0 * fy))
         return (hfov, vfov)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "K": self.K.tolist(),
             "dist": None if self.dist is None else self.dist.tolist(),
@@ -66,7 +66,7 @@ class Intrinsics:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> Intrinsics:
+    def from_dict(cls, d: dict[str, Any]) -> Intrinsics:
         return cls(
             K=d["K"],
             dist=d.get("dist", None),
@@ -93,22 +93,22 @@ class StereoExtrinsics:
         self.reference = self.reference.lower().strip()
 
     # normalized accessors
-    def as_right_wrt_left(self) -> Tuple[np.ndarray, np.ndarray]:
+    def as_right_wrt_left(self) -> tuple[np.ndarray, np.ndarray]:
         if self.reference == "left":
             return self.R, self.T
         # stored as right-ref; invert
         return self.R.T, -self.R.T @ self.T
 
-    def as_left_wrt_right(self) -> Tuple[np.ndarray, np.ndarray]:
+    def as_left_wrt_right(self) -> tuple[np.ndarray, np.ndarray]:
         if self.reference == "right":
             return self.R, self.T
         return self.R.T, -self.R.T @ self.T
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"R": self.R.tolist(), "T": self.T.tolist(), "reference": self.reference}
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> StereoExtrinsics:
+    def from_dict(cls, d: dict[str, Any]) -> StereoExtrinsics:
         return cls(R=d["R"], T=d["T"], reference=d.get("reference", "left"))
 
 
@@ -124,7 +124,7 @@ class StereoCalibration:
     left: Intrinsics
     right: Intrinsics
     extr: StereoExtrinsics
-    stereo_rms: Optional[float] = None
+    stereo_rms: float | None = None
 
     # --- derived quantities ---
     def essential(self) -> np.ndarray:
@@ -159,7 +159,7 @@ class StereoCalibration:
         return (R1, R2, P1, P2, Q, mapL, mapR)
 
     # --- JSON I/O ---
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "left": self.left.to_dict(),
             "right": self.right.to_dict(),
@@ -168,7 +168,7 @@ class StereoCalibration:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> StereoCalibration:
+    def from_dict(cls, d: dict[str, Any]) -> StereoCalibration:
         return cls(
             left=Intrinsics.from_dict(d["left"]),
             right=Intrinsics.from_dict(d["right"]),
@@ -189,10 +189,10 @@ class StereoCalibration:
 # ----------------- simple builders from OpenCV outputs -----------------
 def intrinsics_from_opencv(
     K: np.ndarray,
-    dist: Optional[np.ndarray],
-    image_size: Tuple[int, int],
+    dist: np.ndarray | None,
+    image_size: tuple[int, int],
     model: str = "pinhole",
-    mono_rms: Optional[float] = None,
+    mono_rms: float | None = None,
 ) -> Intrinsics:
     return Intrinsics(K=K, dist=None if dist is None else dist.reshape(-1),
                       image_size=(int(image_size[0]), int(image_size[1])),
@@ -204,7 +204,7 @@ def stereo_from_opencv(
     R: np.ndarray,
     T: np.ndarray,
     reference: str = "left",
-    stereo_rms: Optional[float] = None,
+    stereo_rms: float | None = None,
 ) -> StereoCalibration:
     extr = StereoExtrinsics(R=R, T=T, reference=reference)
     return StereoCalibration(left=left, right=right, extr=extr, stereo_rms=stereo_rms)

@@ -24,7 +24,7 @@ import cv2
 
 # Reuse your mono dataclasses + helpers
 # (These names/types match your existing files.)
-from brillouin_system.eye_tracker.stereo_calibration.calibrate_single import (
+from brillouin_system.eye_tracker.stereo_imaging.calibrate_single import (
     MonoCalibConfig,             # only for reference in GUI, not used here
     CameraResult,                # K, dist, R, t, rms
     detect_corners,              # chessboard detection

@@ -10,14 +10,14 @@ from tkinter import ttk, filedialog, messagebox
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
-from brillouin_system.eye_tracker.stereo_calibration.calibrate_single import (
+from brillouin_system.eye_tracker.stereo_imaging.calibrate_single import (
     MonoCalibConfig,
     CameraResult,
     calibrate_single,
     save_camera_json,
     detect_corners,
 )
-from brillouin_system.eye_tracker.stereo_calibration.calibrate_stereo import (
+from brillouin_system.eye_tracker.stereo_imaging.calibrate_stereo import (
     StereoCalibConfig,
     LeftFramesValid,
     RightFramesValid,

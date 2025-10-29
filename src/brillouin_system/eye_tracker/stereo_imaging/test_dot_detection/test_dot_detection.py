@@ -1,6 +1,6 @@
 import cv2
 
-from brillouin_system.eye_tracker.stereo_calibration.detect_dot_centroid import detect_dot_with_blob
+from brillouin_system.eye_tracker.stereo_imaging.detect_dot_centroid import detect_dot_with_blob
 
 # Load the test image
 img_path = "pair_0001_left.png"

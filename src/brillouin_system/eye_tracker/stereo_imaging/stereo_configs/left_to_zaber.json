@@ -1,0 +1,18 @@
+{
+  "name": "left_to_zaber",
+  "description": "Transformation from left camera frame to Zaber coordinate system",
+  "R": [
+    [0.99987, -0.01607,  0.00231],
+    [0.01605,  0.99986,  0.00471],
+    [-0.00238, -0.00467,  0.99999]
+  ],
+  "t": [12.347, -3.562, 42.781],
+  "created_at": "2025-10-29T12:45:30Z",
+  "source": {
+    "method": "umeyama_fit",
+    "num_points": 9,
+    "rms_error_mm": 0.214,
+    "reference": "stereo calibration points",
+    "fitted_by": "auto"
+  }
+}

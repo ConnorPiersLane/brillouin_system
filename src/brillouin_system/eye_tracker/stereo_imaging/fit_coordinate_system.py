@@ -1,6 +1,6 @@
 import numpy as np
 
-from brillouin_system.eye_tracker.stereo_calibration.coord_transformer import SE3
+from brillouin_system.eye_tracker.stereo_imaging.coord_transformer import SE3
 
 
 # --- core solver (Umeyama/Kabsch), with optional scale ---
