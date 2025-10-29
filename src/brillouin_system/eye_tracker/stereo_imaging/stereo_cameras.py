@@ -5,6 +5,7 @@ import numpy as np
 import cv2
 
 from brillouin_system.eye_tracker.stereo_imaging.calibration_dataclasses import Intrinsics, StereoCalibration
+from brillouin_system.eye_tracker.stereo_imaging.njit_helpers import _lm_refine_point
 
 
 # =========================
@@ -63,6 +64,7 @@ class CalibratedCamera:
         d_cam /= np.linalg.norm(d_cam)
         # camera → world
         return self.R.T @ d_cam
+
 
 
 # =========================
@@ -214,32 +216,24 @@ class StereoCameras:
         if not refine or rms_curr <= refine_thresh_px:
             return X, rms_curr
 
-        eps = 1e-6
-        lam = lm_lambda
-        J = np.empty((4, 3), dtype=np.float64)
-        d = np.zeros(3, dtype=np.float64)
-        for _ in range(max_iters):
-            r0 = self._reproj_err(X, uvL, uvR)
-            for k in range(3):
-                d[:] = 0.0
-                d[k] = eps
-                J[:, k] = (self._reproj_err(X + d, uvL, uvR) - r0) / eps
-            H = J.T @ J + lam * np.eye(3)
-            g = J.T @ r0
-            try:
-                delta = -np.linalg.solve(H, g)
-            except np.linalg.LinAlgError:
-                break
-            if np.linalg.norm(delta) < 1e-8:
-                break
-            X_new = X + delta
-            if depths_ok(X_new):
-                rms_new = self._rms(self._reproj_err(X_new, uvL, uvR))
-                if rms_new < rms_curr - 1e-6:
-                    X, rms_curr, lam = X_new, rms_new, max(lam * 0.5, 1e-6)
-                    continue
-            lam *= 10.0
-        return X, rms_curr
+        # inputs for numba function (use already-cached members; shapes must be 2D for njit)
+        K_L = self.left.K
+        K_R = self.right.K
+        dist_L = self._dl if self.left.dist is not None else np.zeros(5, dtype=np.float64)
+        dist_R = self._dr if self.right.dist is not None else np.zeros(5, dtype=np.float64)
+        R_L = self.left.R
+        R_R = self.right.R
+        t_L = self.left.t
+        t_R = self.right.t
+        uvL_u = np.array(uvL, dtype=np.float64)
+        uvR_u = np.array(uvR, dtype=np.float64)
+
+        X_refined, rms_refined = _lm_refine_point(
+            X, K_L, dist_L, R_L, t_L, K_R, dist_R, R_R, t_R, uvL_u, uvR_u,
+            max_iters=max_iters, eps=1e-6, lam0=lm_lambda,
+            tol_step=1e-8, tol_improve=1e-6
+        )
+        return X_refined, rms_refined
 
     # ---- rectification ----
     def stereo_rectify(self, zero_disparity: bool = True):

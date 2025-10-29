@@ -4,11 +4,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
-from brillouin_system.eye_tracker.pupil_fitting.helpers import ellipse_to_conic, build_view_cone, \
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
+from brillouin_system.eye_tracker.pupil_fitting.stereo_fitting_helpers import ellipse_to_conic, build_view_cone, \
     adjugate_4x4, inside_sign, point_in_ellipse
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
 from brillouin_system.eye_tracker.stereo_imaging.stereo_cameras import StereoCameras
-from ellipse_fitter import EllipseFitter  # your class & type
 
 
 # If you want to default-load your calibrated stereo rig:
@@ -83,12 +83,7 @@ class PupilDetector:
         if eL is None or eR is None:
             return Pupil3D(center_left=None, center_ref=None, normal_left=None, normal_ref=None)
 
-        uvL = eL.center
-        uvR = eR.center
-
-        # Prefer the rig's refine-capable triangulator; falls back to midpoint if absent.
-
-        X_left, _rms = self.stereo.triangulate_best(uvL, uvR, refine=True)
+        X_left, _ = self.stereo.triangulate_best(eL.center, eR.center)
 
         X_ref = self.T_left_to_ref.apply_points(X_left)
 
@@ -180,3 +175,12 @@ class PupilDetector:
 
         return Pupil3D(center_left=X_left, center_ref=X_ref,
                        normal_left=n_left, normal_ref=n_ref)
+
+
+    def find_pupil_center(self, img_left: np.ndarray, img_right: np.ndarray):
+
+        eL: Ellipse2D = self.ellipse_fitter.find_pupil_left(img_left)  # left ellipse
+        eR: Ellipse2D = self.ellipse_fitter.find_pupil_right(img_right)
+
+        return  self.triangulate_center_using_cones(eL, eR)
+

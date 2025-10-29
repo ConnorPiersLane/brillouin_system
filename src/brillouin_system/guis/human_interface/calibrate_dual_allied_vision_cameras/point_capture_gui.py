@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QLabel, QWidget, QVBoxLayout, QPushButton, QHBoxLayout,
-    QFileDialog, QLineEdit, QShortcut
+    QFileDialog, QLineEdit, QShortcut, QComboBox
 )
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt
@@ -19,29 +19,39 @@ from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 # ⬇️ import your config dialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
-from brillouin_system.eye_tracker.stereo_calibration.detect_dot import detect_dot_with_blob
-from brillouin_system.eye_tracker.stereo_calibration.init_stereo_cameras import stereo_cameras
+from brillouin_system.eye_tracker.stereo_imaging.coord_transformer import SE3
+from brillouin_system.eye_tracker.stereo_imaging.detect_dot import detect_dot_with_blob
+from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
 
 #ToDo: select different stereo methods, take frames at locations, load transformation etc.
 
 
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
-    # arr_rgb: HxWx3, uint8, RGB
-    h, w, _ = arr_rgb.shape
+    # arr_rgb: HxWx3, dtype=uint8, RGB
+    if arr_rgb.dtype != np.uint8:
+        arr_rgb = arr_rgb.astype(np.uint8, copy=False)
     if not arr_rgb.flags.c_contiguous:
         arr_rgb = np.ascontiguousarray(arr_rgb)
-    bytes_per_line = int(arr_rgb.strides[0])
+
+    h, w, c = arr_rgb.shape
+    assert c == 3
+    bytes_per_line = int(arr_rgb.strides[0])  # ✅ NOT 3*w, use stride
     qimg = QImage(arr_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
 
+
 def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
-    # arr: HxW, expects 8-bit for display; shape already 2-D
-    h, w = arr.shape
+    # arr: HxW, dtype=uint8
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8, copy=False)
     if not arr.flags.c_contiguous:
         arr = np.ascontiguousarray(arr)
-    bytes_per_line = int(arr.strides[0])
+
+    h, w = arr.shape
+    bytes_per_line = int(arr.strides[0])  # ✅ true row stride
     qimg = QImage(arr.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
     return QPixmap.fromImage(qimg)
+
 
 
 class DualCamImageCapture(QWidget):
@@ -95,20 +105,42 @@ class DualCamImageCapture(QWidget):
         self.overlay_checkbox.toggled.connect(self._clear_overlays)
         overlay_row.addWidget(self.overlay_checkbox)
 
-        overlay_row.addWidget(QLabel("Cols:"))
-        self.cols_spin = QSpinBox()
-        self.cols_spin.setRange(2, 50)  # inner corners across
-        self.cols_spin.setValue(10)  # common: 9x6
-        overlay_row.addWidget(self.cols_spin)
+        # ⬇️ NEW: coordinate inputs
+        overlay_row.addWidget(QLabel("X:"))
+        self.x_input = QLineEdit();
+        self.x_input.setFixedWidth(100)
+        self.x_input.setPlaceholderText("x")
 
-        overlay_row.addWidget(QLabel("Rows:"))
-        self.rows_spin = QSpinBox()
-        self.rows_spin.setRange(2, 50)  # inner corners down
-        self.rows_spin.setValue(8)
-        overlay_row.addWidget(self.rows_spin)
+        overlay_row.addWidget(self.x_input)
+
+        overlay_row.addWidget(QLabel("Y:"))
+        self.y_input = QLineEdit();
+        self.y_input.setFixedWidth(100)
+        self.y_input.setPlaceholderText("y")
+        overlay_row.addWidget(self.y_input)
+
+        overlay_row.addWidget(QLabel("Z:"))
+        self.z_input = QLineEdit();
+        self.z_input.setFixedWidth(100)
+        self.z_input.setPlaceholderText("z")
+        overlay_row.addWidget(self.z_input)
 
         overlay_row.addStretch()
 
+        # --- reference frames (output coordinate system) ---
+        self.load_tf_btn = QPushButton("Load Ref (JSON)")
+        self.load_tf_btn.clicked.connect(self.on_load_transform)
+        overlay_row.addWidget(self.load_tf_btn)
+
+        overlay_row.addWidget(QLabel("Output frame:"))
+        self.frame_combo = QComboBox()
+        self.frame_combo.addItem("left")  # default: stereo world = left camera frame
+        overlay_row.addWidget(self.frame_combo)
+
+        # Coordinate-system registry: maps frame name -> SE3 (left->frame)
+        self.transforms: dict[str, SE3] = {
+            "left": SE3(np.eye(3), np.zeros(3)),  # identity
+        }
 
         # detection throttle
         self._detect_counter = 0
@@ -168,6 +200,19 @@ class DualCamImageCapture(QWidget):
         self._last_uv_right = None
         self.stereo = stereo_cameras
 
+    def _read_xyz_inputs(self):
+        def to_float(s):
+            s = (s or "").strip()
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        x = to_float(self.x_input.text())
+        y = to_float(self.y_input.text())
+        z = to_float(self.z_input.text())
+        # Return None if any is missing/invalid; we’ll still save images.
+        return (x, y, z) if (x is not None and y is not None and z is not None) else None
 
     def _set_pixmap_fit(self, label: QLabel, pm: QPixmap):
         # If the pixmap already matches the label geometry, avoid scaling work.
@@ -328,7 +373,9 @@ class DualCamImageCapture(QWidget):
 
         prefix = self.prefix_input.text().strip()
         ts = self._last_ts
-        idx = self._pair_idx  # snapshot index for this enqueue
+        idx = self._pair_idx
+        coords = self._read_xyz_inputs()
+        frame_name = self.frame_combo.currentText()  # ✅ get output frame
 
         try:
             self._saver_q.put_nowait((
@@ -336,7 +383,9 @@ class DualCamImageCapture(QWidget):
                 prefix,
                 self._last_left,
                 self._last_right,
-                ts
+                ts,
+                coords,
+                frame_name,  # ✅ pass it
             ))
             self.status_changed.emit(f"Queued pair {idx:04d}")
         except queue.Full:
@@ -349,8 +398,6 @@ class DualCamImageCapture(QWidget):
         self._detect_counter = 0
 
     def _maybe_update_overlays(self, left_gray: np.ndarray, right_gray: np.ndarray):
-        """Throttled dot detection; refreshes overlay caches if found."""
-        # run once every 3 frames; tweak to 2 or 5 depending on CPU
         self._detect_counter = (self._detect_counter + 1) % 3
         if self._detect_counter != 0:
             return
@@ -362,7 +409,6 @@ class DualCamImageCapture(QWidget):
             self._last_overlay_left = visL
             self._last_overlay_right = visR
 
-            # Store last detected pixel coords (for 3D if you want it)
             self._last_uv_left = uvL
             self._last_uv_right = uvR
         except Exception:
@@ -373,24 +419,61 @@ class DualCamImageCapture(QWidget):
             visL, uvL = None, None
             visR, uvR = None, None
 
-        # ------ OPTIONAL 3D: annotate world coordinates when both dots are present ------
         if self.stereo is not None and uvL is not None and uvR is not None and visL is not None and visR is not None:
-            # Choose your preferred triangulation call; e.g., self.stereo.triangulate_best
             try:
-                Xw = self.stereo.triangulate_linear(uvL, uvR)  # or triangulate_best(...) if you implemented it
-                text = f"X=({Xw[0]:.2f}, {Xw[1]:.2f}, {Xw[2]:.2f})"
+                # You can also use triangulate_best(...) here if you want the refined estimate
+                X_left = self.stereo.triangulate_linear(uvL, uvR)  # 3D in LEFT
+                X_out = self._to_current_frame(X_left)  # map to selected frame
+                text = f"X=({X_out[0]:.2f}, {X_out[1]:.2f}, {X_out[2]:.2f}) [{self.frame_combo.currentText()}]"
                 for vis in (self._last_overlay_left, self._last_overlay_right):
                     cv2.putText(vis, text, (10, 50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2, cv2.LINE_AA)
             except Exception:
                 pass
 
+    def _to_current_frame(self, X_left: np.ndarray) -> np.ndarray:
+        """Map 3D point from LEFT frame to the currently selected output frame."""
+        frame = self.frame_combo.currentText()
+        T = self.transforms.get(frame)
+        if T is None:
+            # Fallback to left if something odd happens
+            return X_left
+        return T.apply_points(X_left)
+
+    def on_load_transform(self):
+        # Expect a JSON with {"R": [[...],[...],[...]], "t": [x,y,z]}
+        path, _ = QFileDialog.getOpenFileName(self, "Load Reference Transform (JSON)", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            import json
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            R = np.asarray(d["R"], float).reshape(3, 3)
+            t = np.asarray(d["t"], float).reshape(3)
+            T_left_to_ref = SE3(R, t)
+        except Exception as e:
+            self.status_changed.emit(f"Failed to load transform: {e}")
+            return
+
+        # Use file stem as name; avoid collisions
+        name = Path(path).stem
+        base = name
+        k = 1
+        while name in self.transforms:
+            name = f"{base}_{k}"
+            k += 1
+
+        self.transforms[name] = T_left_to_ref
+        self.frame_combo.addItem(name)
+        self.status_changed.emit(f"Loaded reference '{name}'")
 
     # -------- Save pipeline: setup --------
     def _init_save_dir(self, root: Path):
         root.mkdir(parents=True, exist_ok=True)
         (root / "left").mkdir(exist_ok=True)
         (root / "right").mkdir(exist_ok=True)
+        (root / "coordinates").mkdir(exist_ok=True)
 
         # Continue index if existing files are present
         existing = sorted((root / "left").glob("*.png"))
@@ -418,18 +501,27 @@ class DualCamImageCapture(QWidget):
     def _saver_loop(self):
         """
         Writes PNG pairs and appends a metadata CSV.
-        Uses blocking get() so it sleeps when idle.
+        Queue payload must be:
+            (idx, prefix, left_img, right_img, ts, coords_or_None, frame_name)
+        where:
+            - left_img, right_img: np.uint8 HxW grayscale
+            - coords_or_None: (x, y, z) floats or None
+            - frame_name: str (e.g., "left", "zaber", etc.)
         """
+        import numpy as np
+        import cv2
+        import csv
+
         csv_file = None
         csv_writer = None
-        csv_path = None
 
         while self._saver_running:
             try:
-                idx, prefix, left, right, ts = self._saver_q.get(timeout=0.5)
+                idx, prefix, left, right, ts, coords, frame_name = self._saver_q.get(timeout=0.5)
             except queue.Empty:
                 continue
 
+            # Allow a single unblock tuple to pass through after _saver_running is cleared
             if not self._saver_running:
                 break
 
@@ -437,26 +529,41 @@ class DualCamImageCapture(QWidget):
                 # Nowhere to write; drop silently but keep running
                 continue
 
-            # Build filenames
-            base = f"{prefix+'_' if prefix else ''}pair_{idx:04d}"
+            # Build filenames/paths
+            base = f"{prefix + '_' if prefix else ''}pair_{idx:04d}"
             left_path = self._save_dir / "left" / f"{base}_left.png"
             right_path = self._save_dir / "right" / f"{base}_right.png"
 
-            # Write PNGs via Qt
+            # per-frame coordinates folder (e.g., coordinates/left/, coordinates/zaber/, ...)
+            coord_dir = self._save_dir / "coordinates" / (frame_name or "left")
+            coord_dir.mkdir(parents=True, exist_ok=True)
+            coord_path = coord_dir / f"{base}.txt"
+
+            # --- Write PNGs (robust) ---
             try:
-                h, w = left.shape
-                qimg_l = QImage(left.data, w, h, w, QImage.Format_Grayscale8)
-                qimg_r = QImage(right.data, w, h, w, QImage.Format_Grayscale8)
-                ok_l = qimg_l.save(str(left_path), "PNG")
-                ok_r = qimg_r.save(str(right_path), "PNG")
+                l = np.ascontiguousarray(left).astype(np.uint8, copy=False)
+                r = np.ascontiguousarray(right).astype(np.uint8, copy=False)
+                ok_l = cv2.imwrite(str(left_path), l)
+                ok_r = cv2.imwrite(str(right_path), r)
                 if not (ok_l and ok_r):
-                    raise RuntimeError("QImage.save returned False")
+                    raise RuntimeError("cv2.imwrite returned False")
             except Exception as e:
                 print(f"[Saver] Failed to write images for pair {idx}: {e}")
                 self.status_changed.emit(f"Save failed #{idx:04d}")
                 continue
 
-            # Prepare CSV writer (lazy open; add header if new)
+            # --- Write coordinates TXT if provided ---
+            try:
+                if coords is not None:
+                    with open(coord_path, "w", encoding="utf-8") as f:
+                        f.write(f"{coords[0]} {coords[1]} {coords[2]}\n")
+                else:
+                    coord_path = None
+            except Exception as e:
+                print(f"[Saver] Failed to write coordinates for pair {idx}: {e}")
+                coord_path = None  # keep going; images are saved
+
+            # --- CSV logging (lazy open + header) ---
             try:
                 if csv_writer is None:
                     csv_path = self._save_dir / "metadata.csv"
@@ -464,13 +571,24 @@ class DualCamImageCapture(QWidget):
                     csv_file = open(csv_path, "a", newline="")
                     csv_writer = csv.writer(csv_file)
                     if not file_exists:
-                        csv_writer.writerow(["index", "timestamp", "left_path", "right_path"])
+                        csv_writer.writerow([
+                            "index", "timestamp",
+                            "left_path", "right_path",
+                            "coord_path", "x", "y", "z",
+                            "frame"
+                        ])
                         csv_file.flush()
-                csv_writer.writerow([idx, ts, str(left_path), str(right_path)])
+
+                row = [idx, ts, str(left_path), str(right_path)]
+                if coord_path is not None and coords is not None:
+                    row += [str(coord_path), coords[0], coords[1], coords[2], frame_name]
+                else:
+                    row += ["", "", "", "", frame_name]
+                csv_writer.writerow(row)
                 csv_file.flush()
             except Exception as e:
                 print(f"[Saver] Failed to write CSV for pair {idx}: {e}")
-                # continue; images are already saved
+                # continue; images already saved
 
             # Bump index for the next capture & update UI (via signal)
             self._pair_idx = idx + 1
@@ -492,9 +610,11 @@ class DualCamImageCapture(QWidget):
                 self._saver_running = False
                 # Unblock saver if waiting
                 try:
-                    self._saver_q.put_nowait((0, "", np.zeros((1, 1), np.uint8), np.zeros((1, 1), np.uint8), 0))
+                    self._saver_q.put_nowait(
+                        (0, "", np.zeros((1, 1), np.uint8), np.zeros((1, 1), np.uint8), 0, None, "left"))
                 except queue.Full:
                     pass
+
                 if self._saver_thread:
                     self._saver_thread.join(timeout=1.0)
             except Exception as e:
@@ -508,7 +628,7 @@ if __name__ == "__main__":
     mp.freeze_support()  # Windows
 
     app = QApplication(sys.argv)
-    w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
+    w = DualCamImageCapture(use_dummy=True)  # set False to use real hardware
     w.resize(1000, 560)
     w.show()
     sys.exit(app.exec_())

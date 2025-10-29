@@ -5,7 +5,8 @@ import numpy as np
 import cv2
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
-from brillouin_system.eye_tracker.pupil_fitting.pupil_fitting_config.pupil_fit_config import PupilFitConfig
+from brillouin_system.eye_tracker.pupil_fitting.pupil_fitting_config.pupil_fit_config import PupilFitConfig, \
+    left_eye_pupil_fit_config, right_eye_pupil_fit_config
 
 
 def _to_gray(img: np.ndarray) -> np.ndarray:
@@ -25,11 +26,19 @@ class EllipseFitter:
     latest values if you edit the TOML or change them via your config GUI.
     """
 
-    def __init__(self, cfg_left: PupilFitConfig, cfg_right: PupilFitConfig) -> None:
-        self.cfg_left = cfg_left
-        self.cfg_right = cfg_right
+    def __init__(self, cfg_left: PupilFitConfig = None, cfg_right: PupilFitConfig = None) -> None:
 
-    def set_fitting_congis(self, cfg_left: PupilFitConfig, cfg_right: PupilFitConfig) -> None:
+        if cfg_left is None:
+            self.cfg_left = left_eye_pupil_fit_config.get()
+        else:
+            self.cfg_left = cfg_left
+        if cfg_right is None:
+            self.cfg_right = right_eye_pupil_fit_config.get()
+        else:
+            self.cfg_right = cfg_right
+
+
+    def set_fitting_configs(self, cfg_left: PupilFitConfig, cfg_right: PupilFitConfig) -> None:
         self.cfg_left = cfg_left
         self.cfg_right = cfg_right
 
