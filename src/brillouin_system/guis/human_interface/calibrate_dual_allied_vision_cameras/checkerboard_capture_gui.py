@@ -21,22 +21,29 @@ from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
 
-
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
-    # arr_rgb: HxWx3, uint8, RGB
-    h, w, _ = arr_rgb.shape
+    # arr_rgb: HxWx3, dtype=uint8, RGB
+    if arr_rgb.dtype != np.uint8:
+        arr_rgb = arr_rgb.astype(np.uint8, copy=False)
     if not arr_rgb.flags.c_contiguous:
         arr_rgb = np.ascontiguousarray(arr_rgb)
-    bytes_per_line = int(arr_rgb.strides[0])
+
+    h, w, c = arr_rgb.shape
+    assert c == 3
+    bytes_per_line = int(arr_rgb.strides[0])  # ✅ NOT 3*w, use stride
     qimg = QImage(arr_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
 
+
 def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
-    # arr: HxW, expects 8-bit for display; shape already 2-D
-    h, w = arr.shape
+    # arr: HxW, dtype=uint8
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8, copy=False)
     if not arr.flags.c_contiguous:
         arr = np.ascontiguousarray(arr)
-    bytes_per_line = int(arr.strides[0])
+
+    h, w = arr.shape
+    bytes_per_line = int(arr.strides[0])  # ✅ true row stride
     qimg = QImage(arr.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
     return QPixmap.fromImage(qimg)
 
