@@ -5,7 +5,7 @@ import numpy as np
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
 from brillouin_system.eye_tracker.pupil_fitting.pupil_detector_helpers import ellipse_to_conic, build_view_cone, \
-    adjugate_4x4, inside_sign, point_in_ellipse
+    adjugate_4x4, inside_sign, point_in_ellipse, _image_line_from_plane
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
 from brillouin_system.eye_tracker.stereo_imaging.stereo_cameras import StereoCameras
 
@@ -81,6 +81,8 @@ class PupilDetector:
         # Fallback to projective depth
         return self._in_front(cam.P, X)
 
+
+
     def _normalize_conic(self, Q: np.ndarray) -> np.ndarray:
         """Scale conic for numeric stability (Frobenius-norm = 1)."""
         Q = 0.5 * (Q + Q.T)
@@ -149,6 +151,9 @@ class PupilDetector:
         except np.linalg.LinAlgError:
             return None
 
+        if not np.isfinite(u0).all():
+            return None
+
         # Translate to the center: T = [[1,0,-u0x],[0,1,-u0y],[0,0,1]]
         T = np.array([[1.0, 0.0, -u0[0]],
                       [0.0, 1.0, -u0[1]],
@@ -205,8 +210,7 @@ class PupilDetector:
             return t if t > 0.0 else 0.0
 
         def pole_from_plane(P, Q, pi):
-            # l = P * pi  (vanishing line), pole p s.t. Q p = l
-            l = P @ pi
+            l = _image_line_from_plane(P, pi)
             p_h = self._safe_solve_conic(Q, l)
             if abs(p_h[2]) < 1e-12:
                 return None, None
@@ -303,8 +307,8 @@ class PupilDetector:
         # 5) initial candidate scoring using poles and tangency residuals
         for pi in candidates:
             pi = plane_normalize(pi)
-            lL = camL.P @ pi
-            lR = camR.P @ pi
+            lL = _image_line_from_plane(camL.P, pi)
+            lR = _image_line_from_plane(camR.P, pi)
 
             pL_h = self._safe_solve_conic(QL, lL)
             pR_h = self._safe_solve_conic(QR, lR)
@@ -360,7 +364,7 @@ class PupilDetector:
             # --- helpers (local, no class state changed) ---
             def _recompute_poles_from_plane(P, Q, pi):
                 # l = P @ pi  (vanishing line); pole p solves Q p = l
-                l = P @ pi
+                l = _image_line_from_plane(P, pi)
                 ph = self._safe_solve_conic(Q, l)  # robust solve with light Tikhonov
                 if not np.isfinite(ph).all() or abs(ph[2]) < 1e-12:
                     return None

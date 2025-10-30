@@ -34,6 +34,19 @@ def build_view_cone(P: np.ndarray, Q_img: np.ndarray) -> np.ndarray:
     """
     return P.T @ Q_img @ P
 
+def _image_line_from_plane(P: np.ndarray, pi: np.ndarray) -> np.ndarray:
+    """
+    Vanishing line of the 3D plane pi = [n; d] under camera P = [M|p4].
+    l ∝ M^{-T} n   (depends only on the plane normal).
+    """
+    M = P[:, :3]
+    n = pi[:3]
+    # Faster and numerically better than lstsq here:
+    # solve M.T @ l = n  ->  l = M^{-T} n
+    l = np.linalg.solve(M.T, n)
+    return l  # scale is irrelevant for the pole
+
+
 def adjugate_4x4(A: np.ndarray) -> np.ndarray:
     """
     Adjugate (cofactor transpose) of a 4x4 matrix.
