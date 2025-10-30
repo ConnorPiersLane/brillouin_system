@@ -51,17 +51,24 @@ def adjugate_4x4(A: np.ndarray) -> np.ndarray:
             cof[i, j] = ((-1.0)**(i+j)) * np.linalg.det(M)
     return cof.T  # adj(A) = C^T
 
-def inside_sign(Q: np.ndarray, center_uv: tuple[float,float]) -> float:
+def inside_sign(Q: np.ndarray, center_uv: tuple[float, float], eps: float = 1e-12) -> float:
     """
-    Determine the sign convention for 'inside' of an ellipse conic Q by evaluating at its center.
+    Determine the sign convention for 'inside' of an ellipse conic Q by
+    evaluating at its center. Adds a tiny epsilon to avoid flapping on
+    near-degenerate ellipses.
     """
     u, v = center_uv
     x = np.array([u, v, 1.0], dtype=np.float64)
     val = float(x @ Q @ x)
-    # Inside should be opposite sign of boundary (0). Use sign at center as inside.
-    return -1.0 if val > 0 else 1.0
+    # If val is tiny/ambiguous, treat it as "on/below boundary" => inside.
+    return -1.0 if val > eps else 1.0
 
-def point_in_ellipse(Q: np.ndarray, uv: tuple[float,float], sign_inside: float) -> bool:
+
+def point_in_ellipse(Q: np.ndarray, uv: tuple[float, float], sign_inside: float, eps: float = 1e-12) -> bool:
+    """
+    Classify a point as inside the ellipse with a tolerant boundary check.
+    """
     u, v = uv
     x = np.array([u, v, 1.0], dtype=np.float64)
-    return sign_inside * float(x @ Q @ x) < 0.0
+    return sign_inside * float(x @ Q @ x) <= eps
+

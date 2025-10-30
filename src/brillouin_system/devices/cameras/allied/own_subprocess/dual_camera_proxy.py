@@ -3,7 +3,7 @@ import multiprocessing as mp
 
 import numpy as np
 
-from brillouin_system.devices.cameras.allied.own_subprocess.frame_ipc_shared import ShmFrameSpec, ShmRing
+from brillouin_system.helpers.frame_ipc_shared import ShmFrameSpec, ShmRing
 
 class DualCameraProxy:
     def __init__(self, dtype="uint8", slots=8, use_dummy=False):

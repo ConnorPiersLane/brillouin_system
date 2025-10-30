@@ -17,3 +17,4 @@ class Ellipse2D:
 
     @property
     def axis_ratio(self) -> float: return self.major / max(self.minor, 1e-9)
+

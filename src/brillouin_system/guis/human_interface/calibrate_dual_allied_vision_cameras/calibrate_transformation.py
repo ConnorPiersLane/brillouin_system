@@ -21,7 +21,7 @@ from PyQt5.QtGui import QPixmap, QImage, QKeySequence
 from brillouin_system.eye_tracker.stereo_imaging.detect_dot import detect_dot_with_blob  # :contentReference[oaicite:0]{index=0}
 from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras  # :contentReference[oaicite:1]{index=1}
 from brillouin_system.eye_tracker.stereo_imaging.fit_coordinate_system import fit_coordinate_system  # :contentReference[oaicite:2]{index=2}
-from brillouin_system.eye_tracker.stereo_imaging.coord_transformer import SE3  # :contentReference[oaicite:3]{index=3}
+from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3  # :contentReference[oaicite:3]{index=3}
 
 # ---------------- helpers: pixmap ----------------
 def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:

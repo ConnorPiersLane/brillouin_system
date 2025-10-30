@@ -79,6 +79,7 @@ class StereoCameras:
       - Baseline normalized to LEFT→RIGHT:
             X_right = R_lr * X_left + T_lr
     """
+    st_cal: StereoCalibration
     left: CalibratedCamera
     right: CalibratedCamera
     R_lr: np.ndarray
@@ -93,6 +94,7 @@ class StereoCameras:
         # Normalize extrinsics to LEFT→RIGHT, regardless of stored reference
         R_lr, T_lr = st.extr.as_right_wrt_left()
         rig = cls(
+            st_cal=st,
             left=camL,
             right=camR,
             R_lr=np.asarray(R_lr, dtype=np.float64).reshape(3, 3),

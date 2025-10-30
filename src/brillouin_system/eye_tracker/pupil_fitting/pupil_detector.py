@@ -4,15 +4,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
-from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
-from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitting_helpers import ellipse_to_conic, build_view_cone, \
+from brillouin_system.eye_tracker.pupil_fitting.pupil_detector_helpers import ellipse_to_conic, build_view_cone, \
     adjugate_4x4, inside_sign, point_in_ellipse
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
 from brillouin_system.eye_tracker.stereo_imaging.stereo_cameras import StereoCameras
 
 
-# If you want to default-load your calibrated stereo rig:
-# from brillouin_system.eye_tracker.stereo_calibration.init_stereo_cameras import stereo_cameras
 
 @dataclass
 class Pupil3D:
@@ -21,7 +18,7 @@ class Pupil3D:
     center_ref:  np.ndarray | None  # (3,) in reference frame (via SE3)
     normal_left: np.ndarray | None   # (3,) optional pupil normal in LEFT
     normal_ref:  np.ndarray | None   # (3,) optional pupil normal in REF
-
+    radius: float | None
 
 class PupilDetector:
     """
@@ -38,38 +35,21 @@ class PupilDetector:
 
     def __init__(
         self,
-        ellipse_fitter: EllipseFitter,
         stereo_cameras: StereoCameras,                      # type:
         left_to_ref: SE3 = None,   # LEFT -> REF; if None, identity (left)
-        ref_name: str = "left",
     ) -> None:
-        self.ellipse_fitter = ellipse_fitter
         self.stereo = stereo_cameras
-        self.ref_name = ref_name
 
         if left_to_ref is None:
             self.T_left_to_ref = SE3(np.eye(3), np.zeros(3))
-            self.ref_name = "left"
         else:
             self.T_left_to_ref = left_to_ref
 
     # ---------------- convenience ----------------
-    def set_reference(self, T_left_to_ref: SE3, name: str = "ref") -> None:
+    def set_reference(self, T_left_to_ref: SE3) -> None:
         """Update the output reference frame (LEFT -> REF)."""
         self.T_left_to_ref = T_left_to_ref
-        self.ref_name = name
 
-    def get_reference_name(self) -> str:
-        return self.ref_name
-
-    # ---------------- stubs you can fill next ----------------
-    def find_pupil_left_2d(self, img_left) -> Ellipse2D:
-        """Detect pupil ellipse in the LEFT image (2D)."""
-        return self.ellipse_fitter.find_pupil_left(img_left)
-
-    def find_pupil_right_2d(self, img_right) -> Ellipse2D:
-        """Detect pupil ellipse in the RIGHT image (2D)."""
-        return self.ellipse_fitter.find_pupil_right(img_right)
 
     def triangulate_center(
         self,
@@ -81,13 +61,13 @@ class PupilDetector:
         Uses the rig's robust triangulator and then maps to the selected reference via SE3.
         """
         if eL is None or eR is None:
-            return Pupil3D(center_left=None, center_ref=None, normal_left=None, normal_ref=None)
+            return Pupil3D(center_left=None, center_ref=None, normal_left=None, normal_ref=None, radius=None)
 
         X_left, _ = self.stereo.triangulate_best(eL.center, eR.center)
 
         X_ref = self.T_left_to_ref.apply_points(X_left)
 
-        return Pupil3D(center_left=X_left, center_ref=X_ref, normal_left=None, normal_ref=None)
+        return Pupil3D(center_left=X_left, center_ref=X_ref, normal_left=None, normal_ref=None, radius=None)
 
     def _in_front_cam(self, cam, X: np.ndarray) -> bool:
         """
@@ -110,19 +90,87 @@ class PupilDetector:
     def _safe_solve_conic(self, Q: np.ndarray, l: np.ndarray) -> np.ndarray:
         """
         Solve Q x = l robustly. If Q is near-singular (tiny/degenerate ellipse),
-        use light Tikhonov regularization tied to Q's scale.
+        use light Tikhonov regularization tied to Q's Frobenius norm.
         """
         try:
             return np.linalg.solve(Q, l)
         except np.linalg.LinAlgError:
-            lam = 1e-9 * (np.abs(Q).trace() + 1e-12)
-            return np.linalg.solve(Q + lam * np.eye(3), l)
+            lam = 1e-9 * (np.linalg.norm(Q) + 1e-12)
+            try:
+                return np.linalg.solve(Q + lam * np.eye(3), l)
+            except np.linalg.LinAlgError:
+                # Very rare: escalate slightly but keep scale-aware
+                lam *= 1e3
+                return np.linalg.solve(Q + lam * np.eye(3), l)
 
     def _in_front(self, P: np.ndarray, X: np.ndarray) -> bool:
         """Cheirality check: point must project with positive depth."""
         Xh = np.array([X[0], X[1], X[2], 1.0], dtype=float)
         x = P @ Xh
         return x[2] > 0.0
+
+    def _radius_from_cone_and_plane(self, C: np.ndarray, X0: np.ndarray, n_hat: np.ndarray) -> float | None:
+        """
+        Recover metric circle radius by intersecting a (view) cone C (4x4, primal quadric)
+        with the pupil plane through X0 with unit normal n_hat. Uses a plane-local
+        orthonormal basis and reads radius from the induced 2D conic.
+        """
+
+        # 1) Build orthonormal basis {U, V} for the plane (||U||=||V||=1, U ⟂ V ⟂ n)
+        n = n_hat / (np.linalg.norm(n_hat) + 1e-12)
+        # Pick a vector not parallel to n
+        a = np.array([1.0, 0.0, 0.0])
+        if abs(n @ a) > 0.9:
+            a = np.array([0.0, 1.0, 0.0])
+        U = np.cross(n, a)
+        U /= (np.linalg.norm(U) + 1e-12)
+        V = np.cross(n, U)
+        V /= (np.linalg.norm(V) + 1e-12)
+
+        # 2) Map (u,v,1) -> [X0 + u U + v V; 1]
+        B = np.array([
+            [U[0], V[0], X0[0]],
+            [U[1], V[1], X0[1]],
+            [U[2], V[2], X0[2]],
+            [0.0, 0.0, 1.0],
+        ], dtype=float)  # 4x3
+
+        # 3) Induced plane conic Qp (3x3) in (u,v,1)
+        Qp = B.T @ C @ B
+        Qp = 0.5 * (Qp + Qp.T)
+
+        # 4) (Tiny) recenter so linear term ~ 0: u^T A u + 2 b^T u + c = 0
+        A = Qp[:2, :2]
+        b = Qp[:2, 2]
+        c = Qp[2, 2]
+        # If A is ill-conditioned, bail out gracefully
+        try:
+            u0 = -np.linalg.solve(A, b)  # conic center in (u,v)
+        except np.linalg.LinAlgError:
+            return None
+
+        # Translate to the center: T = [[1,0,-u0x],[0,1,-u0y],[0,0,1]]
+        T = np.array([[1.0, 0.0, -u0[0]],
+                      [0.0, 1.0, -u0[1]],
+                      [0.0, 0.0, 1.0]], dtype=float)
+        Qc = T.T @ Qp @ T
+        Qc = 0.5 * (Qc + Qc.T)
+
+        A2 = Qc[:2, :2]
+        c2 = Qc[2, 2]
+
+        # Ensure we really have an ellipse on the plane
+        wA2, _ = np.linalg.eigh(A2)
+        if wA2.min() <= 1e-12:
+            return None
+
+        # Average eigenvalues for robustness (circle ⇒ A2 ∝ I)
+        alpha = float(0.5 * (wA2[0] + wA2[1]))
+        if alpha <= 0 or -c2 <= 0:
+            return None
+
+        r = float(np.sqrt(max(1e-12, (-c2) / max(alpha, 1e-12))))
+        return r if np.isfinite(r) and r > 0 else None
 
     def _refine_plane_and_center(
             self,
@@ -216,7 +264,7 @@ class PupilDetector:
         Returns center + plane normals in LEFT and REF frames.
         """
         if eL is None or eR is None:
-            return Pupil3D(center_left=None, center_ref=None, normal_left=None, normal_ref=None)
+            return Pupil3D(center_left=None, center_ref=None, normal_left=None, normal_ref=None, radius=None)
 
         def plane_normalize(pi: np.ndarray) -> np.ndarray:
             """Normalize homogeneous plane π = [n; d] so ||n|| = 1."""
@@ -283,7 +331,11 @@ class PupilDetector:
 
         # 6) tiny refinement of plane and poles (early-exit if already great)
         # Use a relative tolerance based on the dual-cone scales
-        tol = 1e-6 * (np.linalg.norm(CLs) + np.linalg.norm(CRs))
+        tol = 1e-6 * (
+                np.linalg.norm(CLs) + np.linalg.norm(CRs) +
+                np.linalg.norm(QL) + np.linalg.norm(QR)
+        )
+
         max_iters_refine = 0 if abs(rL0) + abs(rR0) < tol else 5
         pi_ref, pL_ref, pR_ref = self._refine_plane_and_center(
             camL, camR, QL, QR, CLs, CRs, pi0, sL, sR,
@@ -357,7 +409,36 @@ class PupilDetector:
         n_left = pi_ref[:3]
         n_left /= (np.linalg.norm(n_left) + 1e-12)
 
-        # 9) map to requested reference frame
+        # 9) After you compute X_left (center) and n_left (unit normal) and before mapping to REF:
+        # --- Robust radius from each cone ---
+        radiusL = self._radius_from_cone_and_plane(CL, X_left, n_left)
+        radiusR = self._radius_from_cone_and_plane(CR, X_left, n_left)
+
+        # --- Weight by how front-on each camera is: w ~ cos^2(theta) ---
+        # Use the corrected centers you already computed.
+        dL = camL.pixel_to_ray_world(*pL_ref)
+        dL = dL / (np.linalg.norm(dL) + 1e-12)
+        dR = camR.pixel_to_ray_world(*pR_ref)
+        dR = dR / (np.linalg.norm(dR) + 1e-12)
+
+        cL = abs(float(n_left @ dL))
+        cR = abs(float(n_left @ dR))
+        wL = cL * cL
+        wR = cR * cR
+
+        # --- Combine robustly (handle None cases) ---
+        if (radiusL is not None) and (radiusR is not None):
+            if (wL + wR) > 1e-12:
+                radius = (wL * radiusL + wR * radiusR) / (wL + wR)
+            else:
+                radius = 0.5 * (radiusL + radiusR)  # degenerate view; fall back
+        elif radiusL is not None:
+            radius = radiusL
+        else:
+            radius = radiusR
+
+
+        # 10) map to requested reference frame
         X_ref = self.T_left_to_ref.apply_points(X_left)
         n_ref = self.T_left_to_ref.apply_dirs(n_left, normalize=True)
 
@@ -366,16 +447,9 @@ class PupilDetector:
             center_ref=X_ref,
             normal_left=n_left,
             normal_ref=n_ref,
+            radius=radius,
         )
 
-    def find_pupil_center(self, img_left: np.ndarray, img_right: np.ndarray) -> Pupil3D:
-        """
-        Detect ellipses in L/R, then run the improved cone-based triangulation
-        with plane + corrected-center refinement.
-        """
-        eL: Ellipse2D = self.ellipse_fitter.find_pupil_left(img_left)
-        eR: Ellipse2D = self.ellipse_fitter.find_pupil_right(img_right)
-        return self.triangulate_center_using_cones(eL, eR)
 
 
 
