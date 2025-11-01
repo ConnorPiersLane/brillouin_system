@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 # ⬇️ import your config dialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
-from brillouin_system.eye_tracker.stereo_imaging.coord_transformer import SE3
+from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
 from brillouin_system.eye_tracker.stereo_imaging.detect_dot import detect_dot_with_blob
 from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
 

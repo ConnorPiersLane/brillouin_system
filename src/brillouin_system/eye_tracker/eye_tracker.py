@@ -11,12 +11,13 @@ from brillouin_system.eye_tracker.eye_tracker_helpers import scale_image, make_b
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse
-from brillouin_system.eye_tracker.pupil_fitting.pupil_detector import Pupil3D, PupilDetector
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
+from brillouin_system.eye_tracker.pupil_fitting.pupil_detector import PupilDetector
 from brillouin_system.eye_tracker.stereo_imaging.calibration_dataclasses import StereoCalibration
 from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
 from brillouin_system.eye_tracker.stereo_imaging.init_se3 import left_to_ref
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
-
+from brillouin_system.eye_tracker.eye_renderer.renderer import EyeSceneRenderer
 
 @dataclass
 class EyeTrackerSettings:
@@ -64,6 +65,8 @@ class EyeTracker:
             binary_threshold_left=config.binary_threshold_left,
             binary_threshold_right=config.binary_threshold_right,
         )
+
+        self.renderer = EyeSceneRenderer(window_size=IMG_SIZE)  # (512, 512)
 
         self.dual_cam_proxy = DualCameraProxy(dtype="uint8", slots=8, use_dummy=use_dummy)
         self.dual_cam_proxy.start()
@@ -165,10 +168,16 @@ class EyeTracker:
 
         return left_img, right_img
 
+    def get_rendered_eye_image(self, pupil3D):
+        if pupil3D is None:
+            return make_black_image()
 
-    def get_rendered_eye_image(self, pupil3D: Pupil3D) -> np.ndarray:
-        # Must return uint8 rgb
-        return make_black_image() # note for chatgpt: ok for now, beta version
+        C, gaze = self._pose_from_pupil3D(pupil3D)
+        if C is None:
+            return make_black_image()
+
+        self.renderer.set_eye_pose(C, gaze)
+        return ensure_uint8(self.renderer.get_img())
 
     def get_xymap_img_image(self, pupil3D: Pupil3D) -> np.ndarray:
         # Must return uint8 rgb
@@ -211,7 +220,29 @@ class EyeTracker:
         native = dataclass_to_hdf5_native_dict(results)
         save_dict_to_hdf5(self.config.save_images_path, native)
 
+    def _pose_from_pupil3D(self, pupil3D: Pupil3D):
+        """
+        Convert Pupil3D (with .center_ref and .normal_ref) into a pose
+        for the renderer.
+        """
+        if pupil3D is None or pupil3D.center_ref is None:
+            return None, None
 
+        C = pupil3D.center_ref.astype(float)
+
+        if pupil3D.normal_ref is not None:
+            gaze = pupil3D.normal_ref.astype(float)
+            gaze /= np.linalg.norm(gaze) + 1e-9
+        else:
+            gaze = np.array([0.0, 0.0, 1.0])  # fallback
+
+        # Use renderer’s own geometry to push the cornea center slightly forward
+        cornea_forward_mm = (
+                self.renderer.parts["z_apex"] - self.renderer.parts["z_iris"]
+        )
+        C_cornea = C + gaze * cornea_forward_mm
+
+        return C_cornea, gaze
 
     def get_display_frames(self):
         left_img, right_img, ts = self.get_frames()
