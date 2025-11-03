@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 # ⬇️ import your config dialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
+from brillouin_system.eye_tracker.stereo_imaging.fit_coordinate_system import fit_coordinate_system
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
 from brillouin_system.eye_tracker.stereo_imaging.detect_dot import detect_dot_with_blob, detect_dot_with_blob_dummy
 from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
@@ -263,7 +264,7 @@ class DualCamImageCapture(QWidget):
             if cwd and cwd not in sys.path:
                 sys.path.insert(0, cwd)
 
-            from fit_coordinate_system import fit_coordinate_system  # your uploaded file
+
         except Exception as e:
             tb = traceback.format_exc()
             self.status_changed.emit(f"Cannot import fit_coordinate_system: {e}")
@@ -484,7 +485,7 @@ class DualCamImageCapture(QWidget):
         Detect a single dot in a grayscale frame and draw a small overlay for the UI.
         Returns (RGB_vis_or_None, (u, v)_or_None).
         """
-        uv = detect_dot_with_blob_dummy(gray)
+        uv = detect_dot_with_blob(gray)
         if uv is None:
             return None, None
 
@@ -754,7 +755,7 @@ if __name__ == "__main__":
     mp.freeze_support()  # Windows
 
     app = QApplication(sys.argv)
-    w = DualCamImageCapture(use_dummy=True)  # set False to use real hardware
+    w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
     w.resize(1000, 560)
     w.show()
     sys.exit(app.exec_())
