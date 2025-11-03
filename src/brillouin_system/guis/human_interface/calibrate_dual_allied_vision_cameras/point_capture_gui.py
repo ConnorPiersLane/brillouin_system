@@ -20,10 +20,8 @@ from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
-from brillouin_system.eye_tracker.stereo_imaging.detect_dot import detect_dot_with_blob
+from brillouin_system.eye_tracker.stereo_imaging.detect_dot import detect_dot_with_blob, detect_dot_with_blob_dummy
 from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
-
-#ToDo: select different stereo methods, take frames at locations, load transformation etc.
 
 
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:

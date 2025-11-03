@@ -23,3 +23,8 @@ def detect_dot_with_blob(gray):
     kp = min(keypoints, key=lambda k: k.size)  # prefer the smallest
     return float(kp.pt[0]), float(kp.pt[1])
 
+def detect_dot_with_blob_dummy(gray):
+    h, w = gray.shape[:2]
+
+
+    return float(h/2), float(w/2)
