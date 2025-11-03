@@ -317,6 +317,32 @@ class DualCamImageCapture(QWidget):
 
         # --- Build JSON
         target_name = self.frame_combo.currentText() or "target"
+
+        # --- Build 'data' payload to embed points in the JSON (non-crashy & simple)
+        # 1) All pairs as captured (may contain None)
+        all_pairs = []
+        for l, r in zip(self.stereo_points_left, self.typed_points):
+            left_ok = (isinstance(l, (list, tuple)) and len(l) == 3 and all(v is not None for v in l))
+            input_ok = (isinstance(r, (list, tuple)) and len(r) == 3 and all(v is not None for v in r))
+            all_pairs.append({
+                "left": [float(l[0]), float(l[1]), float(l[2])] if left_ok else None,
+                "input": [float(r[0]), float(r[1]), float(r[2])] if input_ok else None,
+            })
+
+        # 2) Valid pairs actually used for the fit (A,B) — already built above
+        valid_pairs = {
+            "left": A.tolist(),
+            "input": B.tolist(),
+        }
+
+        # We don’t add inlier mask here to keep it minimal & robust.
+        # If you later return it from the fitter, you can add it.
+
+        data_payload = {
+            "all_pairs": all_pairs,
+            "valid_pairs": valid_pairs,
+        }
+
         json_obj = self._build_transform_json(
             name=f"left_to_{target_name}",
             description=f"Transformation from left camera frame to {target_name} coordinate system",
@@ -328,7 +354,8 @@ class DualCamImageCapture(QWidget):
                 "rms_error": rms,
                 "with_scale": bool(abs(scale_val - 1.0) > 1e-12),
                 "scale": scale_val,
-            }
+            },
+            data=data_payload,  # ⬅️ add this
         )
 
         # --- Ask where to save
@@ -372,17 +399,10 @@ class DualCamImageCapture(QWidget):
             print("[Transform] Write error:\n", tb)
             QMessageBox.critical(self, "Write error", f"{e}")
 
-    def _build_transform_json(self, *, name: str, description: str, R, t, source_info: dict) -> dict:
+    def _build_transform_json(self, *, name: str, description: str, R, t, source_info: dict,
+                              data: dict | None = None) -> dict:
         """
-        Build a JSON payload similar to the provided example file:
-        {
-          "name": "...",
-          "description": "...",
-          "R": [[...],[...],[...]],
-          "t": [x,y,z],
-          "created_at": "...",
-          "source": { ... }
-        }
+        Build a JSON payload. If `data` is provided, embed the calibration datapoints.
         """
         import numpy as np
         R = np.asarray(R, float).reshape(3, 3)
@@ -393,9 +413,10 @@ class DualCamImageCapture(QWidget):
             "description": description,
             "R": R.tolist(),
             "t": t.tolist(),
-            # created_at added at save-time in on_calculate_transform()
             "source": source_info or {},
         }
+        if data is not None:
+            obj["data"] = data
         return obj
 
     def _read_xyz_inputs(self):
