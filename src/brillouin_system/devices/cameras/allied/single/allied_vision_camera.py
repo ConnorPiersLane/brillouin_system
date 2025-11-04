@@ -160,7 +160,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
 
         # A couple of stream stability QoL tweaks (safe no-ops if unsupported)
         try_set("StreamBufferHandlingMode", "NewestOnly")  # avoid backlog on bursty triggers
-        try_set("StreamBufferCountMode", "Manual");
+        try_set("StreamBufferCountMode", "Manual")
         try_set("StreamBufferCountManual", 8)
 
     def set_freerun_mode(self):
