@@ -102,22 +102,54 @@ def calibrate_single(images: List[np.ndarray], config: MonoCalibConfig) -> Tuple
             image_size = (w, h)
         objpoints.append(objp.astype(np.float32))
         imgpoints.append(c.astype(np.float32))
+
     if not objpoints:
         raise RuntimeError("No valid checkerboard detections for mono calibration.")
+
     if config.model.lower() == "pinhole":
-        ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, image_size, None, None)
+        # Stage 1: conservative (prevents overfitting)
+        flags_cons = (cv2.CALIB_ZERO_TANGENT_DIST |
+                      cv2.CALIB_FIX_K3 | cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_FIX_K6)
+        ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
+            objpoints, imgpoints, image_size, None, None, flags=flags_cons
+        )
+
+        # Stage 2 (tiny relaxation): free K3 only, accept only if it really helps
+        flags_k3 = (cv2.CALIB_ZERO_TANGENT_DIST |
+                    cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_FIX_K6)
+
+        ret2, K2, dist2, rvecs2, tvecs2 = cv2.calibrateCamera(
+            objpoints, imgpoints, image_size, K.copy(), dist.copy(), flags=flags_k3
+        )
+
+        # Gate: require a real RMS improvement AND principal point moving toward center
+        cx0, cy0 = K[0, 2], K[1, 2]
+        cx1, cy1 = K2[0, 2], K2[1, 2]
+        cx_target, cy_target = image_size[0] / 2.0, image_size[1] / 2.0
+
+        def closer(a0, a1, tgt):  # did we move closer to the target?
+            return abs(a1 - tgt) <= abs(a0 - tgt) * 1.05  # allow tiny noise (5%)
+
+        improved_rms = (ret2 < ret * 0.9)  # ~10% better
+        moved_toward_center = closer(cx0, cx1, cx_target) and closer(cy0, cy1, cy_target)
+        k3_reasonable = abs(float(dist2.ravel()[2])) < 1.5 if dist2.size >= 3 else True  # sanity bound
+
+        if improved_rms and moved_toward_center and k3_reasonable:
+            K, dist, rvecs, tvecs, ret = K2, dist2, rvecs2, tvecs2, ret2
+
         R, _ = cv2.Rodrigues(rvecs[-1]); t = tvecs[-1].reshape(3)
         return CameraResult(K, dist.reshape(-1), R, t, float(ret)), image_size
-    # Fisheye
+
+    # Fisheye unchanged
     objp_fe = [op.reshape(-1,1,3).astype(np.float64) for op in objpoints]
     imgp_fe = [ip.astype(np.float64) for ip in imgpoints]
     K = np.zeros((3,3)); D = np.zeros((4,1))
-    flags = cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC | cv2.fisheye.CALIB_CHECK_COND | cv2.fisheye.CALIB_FIX_SKEW
-    rms, K, D, rvecs, tvecs = cv2.fisheye.calibrate(objp_fe, imgp_fe, image_size, K, D, None, None, flags=flags)
+    fe_flags = (cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC |
+                cv2.fisheye.CALIB_CHECK_COND |
+                cv2.fisheye.CALIB_FIX_SKEW)
+    rms, K, D, rvecs, tvecs = cv2.fisheye.calibrate(objp_fe, imgp_fe, image_size, K, D, None, None, flags=fe_flags)
     R, _ = cv2.Rodrigues(rvecs[-1]); t = tvecs[-1].reshape(3)
     return CameraResult(K, D.reshape(-1), R, t, float(rms)), image_size
-
-
 
 def save_camera_json(
     out_path: str,
