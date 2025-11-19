@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse, find_pupil_ellipse_with_flooding
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse, \
+    find_pupil_ellipse_with_flooding, PupilImgType
 
 
 class EllipseFitter:
@@ -16,20 +17,27 @@ class EllipseFitter:
     latest values if you edit the TOML or change them via your config GUI.
     """
 
-    def __init__(self, binary_threshold_left: int = 20, binary_threshold_right: int = 20) -> None:
+    def __init__(self, binary_threshold_left: int = 20, binary_threshold_right: int = 20, img_return_type: PupilImgType = PupilImgType.ORIGINAL) -> None:
 
         self.binary_threshold_left = binary_threshold_left
         self.binary_threshold_right = binary_threshold_right
-
+        self.img_return_type = img_return_type
 
     def set_binary_thresholds(self, binary_threshold_left: int = 20, binary_threshold_right: int = 20) -> None:
         self.binary_threshold_left = binary_threshold_left
         self.binary_threshold_right = binary_threshold_right
 
+    def set_img_return_type(self, img_return_type: PupilImgType):
+        self.img_return_type = img_return_type
+
     # ---- Public API ----
     def find_pupil_left(self, image: np.ndarray) -> PupilEllipse:
-        return find_pupil_ellipse_with_flooding(img=image, threshold=self.binary_threshold_left)
+        return find_pupil_ellipse_with_flooding(img=image,
+                                                threshold=self.binary_threshold_left,
+                                                frame_to_be_returned=self.img_return_type)
 
     def find_pupil_right(self, image: np.ndarray) -> PupilEllipse:
-        return find_pupil_ellipse_with_flooding(img=image, threshold=self.binary_threshold_right)
+        return find_pupil_ellipse_with_flooding(img=image,
+                                                threshold=self.binary_threshold_right,
+                                                frame_to_be_returned=self.img_return_type)
 

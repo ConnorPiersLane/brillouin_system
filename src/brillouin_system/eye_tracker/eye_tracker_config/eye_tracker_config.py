@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Any, Literal
+from typing import Any, Literal
 import tomli
 import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
@@ -25,17 +25,17 @@ class EyeTrackerConfig:
     do_ellipse_fitting: bool = False
     overlay_ellipse: bool = False
 
-    frame_returned: Literal["original","binary","floodfilled"] = "original"
+    frame_returned: Literal["original","binary","floodfilled", "contour"] = "original"
     img_size: tuple[int, int] = (512, 512)
 
 
 PUPIL_FIT_TOML_PATH = Path(__file__).parent / "eye_tracker_config.toml"
 
-def _toml_to_kwargs(raw: Dict[str, Any]) -> Dict[str, Any]:
+def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
     """Convert TOML section to EyeTrackerConfig kwargs (no special coercions needed)."""
     return dict(raw)
 
-def _dataclass_to_toml_dict(cfg: EyeTrackerConfig) -> Dict[str, Any]:
+def _dataclass_to_toml_dict(cfg: EyeTrackerConfig) -> dict[str, Any]:
     """Convert dataclass to TOML-friendly dict (direct asdict)."""
     return asdict(cfg)
 

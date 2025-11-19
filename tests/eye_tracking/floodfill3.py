@@ -4,9 +4,8 @@ from matplotlib import pyplot as plt
 
 from brillouin_system.eye_tracker.eye_tracker_helpers import draw_ellipse_rgb, gray_to_rgb
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import (
-    find_pupil_ellipse_with_flooding,
+    find_pupil_ellipse_with_flooding, PupilImgType
 )
-
 
 
 def floodfill_and_show(path: str, threshold: int = 20):
@@ -15,8 +14,9 @@ def floodfill_and_show(path: str, threshold: int = 20):
 
     Steps:
         1. Load an image in grayscale mode.
-        2. Detect the pupil using `find_pupil_ellipse_with_flooding()`.
-        3. Display the intermediate binary, largest-component, and color results side by side.
+        2. Detect the pupil using `find_pupil_ellipse_with_flooding()` for each stage to visualize:
+           ORIGINAL, BINARY, FLOODFILLED, CONTOUR.
+        3. Display the four images side by side.
         4. Return the fitted ellipse parameters (if found).
 
     Args:
@@ -36,39 +36,49 @@ def floodfill_and_show(path: str, threshold: int = 20):
     if img is None:
         raise FileNotFoundError(f"Could not read image: {path}")
 
-    # 2) Run detector (returns PupilEllipse)
-    pupil = find_pupil_ellipse_with_flooding(img, threshold=threshold)
+    # 2) Run detector once to get the ellipse (use fastest stage to avoid extra copies)
+    result_for_ellipse = find_pupil_ellipse_with_flooding(
+        img, threshold=threshold, frame_to_be_returned=PupilImgType.FLOODFILLED
+    )
 
-    # 3) Build OpenCV-style ellipse tuple for compatibility with old code
     ellipse_params = None
-    if pupil.ellipse is not None:
-        e = pupil.ellipse
+    if result_for_ellipse.ellipse is not None:
+        e = result_for_ellipse.ellipse
         ellipse_params = ((e.cx, e.cy), (e.major, e.minor), e.angle_deg)
 
-    # 4) Visualize intermediate results
+    # 3) Collect each visualization stage
+    stages = [
+        (PupilImgType.ORIGINAL,   "Original gray"),
+        (PupilImgType.BINARY,     "Binary (INV)"),
+        (PupilImgType.FLOODFILLED,"Flood-filled"),
+        (PupilImgType.CONTOUR,    "Largest component"),
+    ]
+
+    images = []
+    for stype, _title in stages:
+        r = find_pupil_ellipse_with_flooding(
+            img, threshold=threshold, frame_to_be_returned=stype
+        )
+        images.append((r.pupil_img, _title))
+
+    # 4) Build final visualization with ellipse drawn on ORIGINAL (for clarity)
+    # We already have ORIGINAL from images[0]
+    original_vis = images[0][0]
+    # Ensure 3-channel for drawing helper
+    vis_rgb = draw_ellipse_rgb(gray_to_rgb(original_vis), ellipse=result_for_ellipse.ellipse)
+
+    # 5) Plot
     plt.figure(figsize=(20, 5))
+    for i, (im, title) in enumerate(images, start=1):
+        plt.subplot(1, 5, i)
+        plt.title(title)
+        plt.imshow(im, cmap='gray')
+        plt.axis('off')
 
-    plt.subplot(1, 4, 1)
-    plt.title("Original gray")
-    plt.imshow(pupil.original_img, cmap='gray')
-    plt.axis('off')
-
-    plt.subplot(1, 4, 2)
-    plt.title("Binary (INV)")
-    plt.imshow(pupil.binary_img, cmap='gray')
-    plt.axis('off')
-
-    plt.subplot(1, 4, 3)
-    plt.title("Largest component")
-    plt.imshow(pupil.floodfilled_img, cmap='gray')
-    plt.axis('off')
-
-    plt.subplot(1, 4, 4)
+    plt.subplot(1, 5, 5)
     plt.title("Fitted ellipse (green)")
-    # Use the helper to draw on whichever image you want; here we use the original:
-
-    vis = draw_ellipse_rgb(gray_to_rgb(pupil.floodfilled_img), ellipse=pupil.ellipse)
-    plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
+    # draw_ellipse_rgb returns BGR; convert to RGB for matplotlib
+    plt.imshow(cv2.cvtColor(vis_rgb, cv2.COLOR_BGR2RGB))
     plt.axis('off')
 
     plt.tight_layout()
@@ -81,5 +91,5 @@ def floodfill_and_show(path: str, threshold: int = 20):
 
 
 if __name__ == "__main__":
-    params = floodfill_and_show("left/pair_0001_left.png", threshold=20)
+    params = floodfill_and_show("right/pair_0005_right.png", threshold=50)
     print("Ellipse:", params)

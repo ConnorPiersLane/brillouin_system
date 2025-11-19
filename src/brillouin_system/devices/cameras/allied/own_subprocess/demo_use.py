@@ -57,7 +57,7 @@ class DualCamDemo(QWidget):
     def _reader_loop(self):
         while self._running:
             try:
-                left, right, ts = self.proxy.get_frames()  # blocking
+                left, right, ts = self.proxy.get_latest(timeout=1)  # blocking
                 # keep queue small to reduce latency
                 if not self._frame_q.empty():
                     try:

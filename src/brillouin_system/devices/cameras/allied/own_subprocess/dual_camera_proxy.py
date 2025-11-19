@@ -1,8 +1,10 @@
 # dual_camera_proxy.py
 import multiprocessing as mp
+import queue
 
 import numpy as np
 
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
 from brillouin_system.helpers.frame_ipc_shared import ShmFrameSpec, ShmRing
 
 class DualCameraProxy:
@@ -66,7 +68,7 @@ class DualCameraProxy:
                 raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb','')}")
             # ignore frames and other noise during control ops
 
-    def set_configs(self, cfg_left, cfg_right):
+    def set_configs(self, cfg_left: AlliedConfig, cfg_right: AlliedConfig):
         """
         Send new configs. If shapes change, the worker will emit 'reshaped',
         we reattach to new SM and ack so the worker can resume streaming.
@@ -140,8 +142,8 @@ class DualCameraProxy:
             if typ == "frame":
                 li = msg["left_idx"]
                 ri = msg["right_idx"]
-                left = self.left_ring.read_slot(li).copy()  # detach from shared memory
-                right = self.right_ring.read_slot(ri).copy()  # detach from shared memory
+                left = self.left_ring.read_slot(li)  # detach from shared memory
+                right = self.right_ring.read_slot(ri)  # detach from shared memory
                 meta = {}
                 for k in ("ts", "seq", "tleft", "tright"):
                     if k in msg:
@@ -162,6 +164,55 @@ class DualCameraProxy:
 
             elif typ == "error":
                 raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb', '')}")
+
+    def get_latest(self, timeout=None) -> tuple[np.ndarray, np.ndarray, dict] | None:
+        last = None
+        while True:
+            try:
+                msg = self.evt_q.get_nowait()
+            except Exception:
+                break
+            t = msg.get("type")
+            if t == "frame":
+                last = msg
+            elif t == "reshaped":
+                self._attach_rings(msg)
+                self.req_q.put({"type": "reshape_ack"})
+            elif t == "error":
+                raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb', '')}")
+
+        if last is None and timeout is not None:
+            try:
+                msg = self.evt_q.get(timeout=timeout)
+            except queue.Empty:
+                return None
+            if msg.get("type") == "frame":
+                last = msg
+            elif msg.get("type") == "reshaped":
+                self._attach_rings(msg)
+                self.req_q.put({"type": "reshape_ack"})
+                # after reshape, block briefly for the next frame if time remains (optional)
+                try:
+                    msg = self.evt_q.get(timeout=timeout)
+                    if msg.get("type") == "frame":
+                        last = msg
+                except queue.Empty:
+                    return None
+            elif msg.get("type") == "error":
+                raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb', '')}")
+            else:
+                # ignore control events and return None if nothing usable arrived
+                return None
+
+        if last is None:
+            return None
+
+        li = last["left_idx"];
+        ri = last["right_idx"]
+        left = self.left_ring.read_slot(li)  # see (2): no extra .copy()
+        right = self.right_ring.read_slot(ri)
+        meta = {k: last[k] for k in ("ts", "seq", "tleft", "tright") if k in last}
+        return left, right, meta
 
     def shutdown(self):
         if self.req_q:

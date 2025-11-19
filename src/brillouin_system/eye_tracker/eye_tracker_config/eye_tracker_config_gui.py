@@ -78,7 +78,7 @@ class EyeTrackerConfigDialog(QDialog):
 
         # Frame returned
         cb = QComboBox()
-        cb.addItems(["original", "binary", "floodfilled"])
+        cb.addItems(["original", "binary", "floodfilled", "contour"])
         inputs["frame_returned"] = cb
         add_row("Frame returned", cb)
 

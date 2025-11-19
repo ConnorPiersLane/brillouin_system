@@ -42,7 +42,7 @@ def running_eye_tracker_worker(req_q, evt_q, proxy_kwargs):
         # Reader thread
         def reader():
             while not stop_event.is_set():
-                left, right, ts = proxy.get_frames()
+                left, right, ts = proxy._get_frames()
                 left = left.copy(); right = right.copy()
                 if frame_q.full():
                     frame_q.get_nowait()
