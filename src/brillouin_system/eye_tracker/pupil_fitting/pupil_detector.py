@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 from brillouin_system.eye_tracker.pupil_fitting.pupil_detector_helpers import ellipse_to_conic, build_view_cone, \
     adjugate_4x4, inside_sign, point_in_ellipse, _image_line_from_plane
 from brillouin_system.eye_tracker.stereo_imaging.se3 import SE3
@@ -81,21 +82,46 @@ class PupilDetector:
         s = float(np.linalg.norm(Q))
         return Q / (s + 1e-12)
 
-    def _safe_solve_conic(self, Q: np.ndarray, l: np.ndarray) -> np.ndarray:
+    def _safe_solve_conic(self, Q: np.ndarray, l: np.ndarray) -> np.ndarray | None:
         """
         Solve Q x = l robustly. If Q is near-singular (tiny/degenerate ellipse),
         use light Tikhonov regularization tied to Q's Frobenius norm.
+
+        Returns:
+            ph : (3,) homogeneous solution, or None if Q is too ill-conditioned.
         """
+        Q = 0.5 * (Q + Q.T)
+        normQ = float(np.linalg.norm(Q))
+        if normQ < 1e-12:
+            return None
+
+        # Try direct solve
         try:
-            return np.linalg.solve(Q, l)
+            ph = np.linalg.solve(Q, l)
         except np.linalg.LinAlgError:
-            lam = 1e-9 * (np.linalg.norm(Q) + 1e-12)
-            try:
-                return np.linalg.solve(Q + lam * np.eye(3), l)
-            except np.linalg.LinAlgError:
-                # Very rare: escalate slightly but keep scale-aware
-                lam *= 1e3
-                return np.linalg.solve(Q + lam * np.eye(3), l)
+            ph = None
+
+        # If direct solve fails, use Tikhonov-regularized solves
+        if ph is None:
+            lam_base = 1e-9 * (normQ + 1e-12)
+            for scale in (1.0, 1e3):
+                lam = lam_base * scale
+                try:
+                    ph = np.linalg.solve(Q + lam * np.eye(3), l)
+                    break
+                except np.linalg.LinAlgError:
+                    ph = None
+
+            if ph is None:
+                return None
+
+        # Reject extremely ill-conditioned Q (degenerate ellipse)
+        svals = np.linalg.svd(Q, compute_uv=False)
+        if svals[-1] < 1e-15 or (svals[0] / max(svals[-1], 1e-15)) > 1e12:
+            return None
+
+        return ph
+
 
     def _in_front(self, P: np.ndarray, X: np.ndarray) -> bool:
         """Cheirality check: point must project with positive depth."""
@@ -158,13 +184,21 @@ class PupilDetector:
 
         # Ensure we really have an ellipse on the plane
         wA2, _ = np.linalg.eigh(A2)
-        if wA2.min() <= 1e-12:
+        lam_min = float(wA2.min())
+        lam_max = float(wA2.max())
+        if lam_min <= 1e-12:
+            return None
+
+        # Reject very elongated intersections (very non-circular)
+        condA2 = lam_max / max(lam_min, 1e-12)
+        if condA2 > 1e3:
             return None
 
         # Average eigenvalues for robustness (circle ⇒ A2 ∝ I)
-        alpha = float(0.5 * (wA2[0] + wA2[1]))
+        alpha = 0.5 * (lam_min + lam_max)
         if alpha <= 0 or -c2 <= 0:
             return None
+
 
         r = float(np.sqrt(max(1e-12, (-c2) / max(alpha, 1e-12))))
         return r if np.isfinite(r) and r > 0 else None
@@ -204,13 +238,14 @@ class PupilDetector:
         def pole_from_plane(P, Q, pi):
             l = _image_line_from_plane(P, pi)
             p_h = self._safe_solve_conic(Q, l)
-            if abs(p_h[2]) < 1e-12:
+            if p_h is None or not np.isfinite(p_h).all() or abs(p_h[2]) < 1e-12:
                 return None, None
             x = float(p_h[0] / p_h[2])
             y = float(p_h[1] / p_h[2])
             xh = np.array([x, y, 1.0], dtype=float)
             v = float(xh @ (Q @ xh))  # signed conic value
             return (x, y), v
+
 
         def cost_and_poles(pi):
             rL = float(pi @ (CLs @ pi))
@@ -281,9 +316,12 @@ class PupilDetector:
         # 3) duals and candidate plane search via eigenvectors of scaled M
         CLs = adjugate_4x4(CL)
         CRs = adjugate_4x4(CR)
-        M = CLs @ CLs + CRs @ CRs
+
+        # Use a linear combination; avoids over-emphasizing large entries
+        M = CLs + CRs
         M = 0.5 * (M + M.T)
         M /= (np.linalg.norm(M) + 1e-12)
+
         evals, evecs = np.linalg.eigh(M)
         order = np.argsort(evals)
         # Try three smallest eigenvectors for more robustness (cheap)
@@ -304,10 +342,18 @@ class PupilDetector:
 
             pL_h = self._safe_solve_conic(QL, lL)
             pR_h = self._safe_solve_conic(QR, lR)
-            if abs(pL_h[2]) < 1e-12 or abs(pR_h[2]) < 1e-12:
+            if (
+                pL_h is None or pR_h is None
+                or not np.isfinite(pL_h).all()
+                or not np.isfinite(pR_h).all()
+                or abs(pL_h[2]) < 1e-12
+                or abs(pR_h[2]) < 1e-12
+            ):
                 continue
+
             pL = (float(pL_h[0] / pL_h[2]), float(pL_h[1] / pL_h[2]))
             pR = (float(pR_h[0] / pR_h[2]), float(pR_h[1] / pR_h[2]))
+
 
             okL = point_in_ellipse(QL, pL, sL)
             okR = point_in_ellipse(QR, pR, sR)
@@ -351,16 +397,20 @@ class PupilDetector:
                 refine_thresh_px=0.15  # ensures threshold matches your check
             )
 
-        # Cheirality guard
+        # 7b) Cheirality guard
         if not (self._in_front_cam(camL, X_left) and self._in_front_cam(camR, X_left)):
             # --- helpers (local, no class state changed) ---
             def _recompute_poles_from_plane(P, Q, pi):
                 # l = P @ pi  (vanishing line); pole p solves Q p = l
                 l = _image_line_from_plane(P, pi)
                 ph = self._safe_solve_conic(Q, l)  # robust solve with light Tikhonov
-                if not np.isfinite(ph).all() or abs(ph[2]) < 1e-12:
+                if ph is None or not np.isfinite(ph).all() or abs(ph[2]) < 1e-12:
                     return None
                 return (float(ph[0] / ph[2]), float(ph[1] / ph[2]))
+
+            # Sign for "inside" classification
+            sL_sign = inside_sign(QL, eL.center)
+            sR_sign = inside_sign(QR, eR.center)
 
             # 1) Make plane normal face mean viewing direction (doesn't move plane)
             dL = camL.pixel_to_ray_world(*pL_ref)
@@ -369,12 +419,19 @@ class PupilDetector:
             if float(pi_ref[:3] @ vmean) < 0.0:
                 pi_ref = -pi_ref  # flip orientation only
 
+                # After flipping, recompute poles so they are consistent with the new plane
+                pL_new = _recompute_poles_from_plane(camL.P, QL, pi_ref)
+                pR_new = _recompute_poles_from_plane(camR.P, QR, pi_ref)
+                if (
+                    pL_new is not None and pR_new is not None
+                    and point_in_ellipse(QL, pL_new, sL_sign)
+                    and point_in_ellipse(QR, pR_new, sR_sign)
+                ):
+                    pL_ref, pR_ref = pL_new, pR_new
+
             # 2) Nudge plane *toward* cameras by shrinking |d|
             # (WORLD = LEFT, so cameras are near the origin; shrinking |d|
             # moves the plane closer to the cameras without changing its normal.)
-            sL_sign = inside_sign(QL, eL.center)
-            sR_sign = inside_sign(QR, eR.center)
-
             fixed = False
             for shrink in (0.9, 0.7, 0.5, 0.3):
                 pi_try = pi_ref.copy()
@@ -387,7 +444,10 @@ class PupilDetector:
                     continue
 
                 # keep poles sensible: inside their ellipses
-                if not (point_in_ellipse(QL, pL_try, sL_sign) and point_in_ellipse(QR, pR_try, sR_sign)):
+                if not (
+                    point_in_ellipse(QL, pL_try, sL_sign)
+                    and point_in_ellipse(QR, pR_try, sR_sign)
+                ):
                     continue
 
                 X_try, rms_try = self.stereo.triangulate_best(pL_try, pR_try, refine=False)
@@ -400,6 +460,7 @@ class PupilDetector:
             # 3) Last resort: weak-perspective center triangulation
             if not fixed:
                 return self.triangulate_center(eL, eR)
+
 
         # 8) plane normal (LEFT/world coords), unit length
         n_left = pi_ref[:3]
