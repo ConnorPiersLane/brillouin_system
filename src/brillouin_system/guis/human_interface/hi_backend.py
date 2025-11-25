@@ -242,7 +242,7 @@ class HiBackend:
 
 
     def take_n_images(self, n_images) -> np.ndarray:
-        return np.stack([self._get_andor_camera_snap() for _ in range(n_images)])
+        return np.stack([self._get_andor_camera_snap()[0] for _ in range(n_images)])
 
 
     def take_bg_and_darknoise_images(self):
@@ -322,19 +322,22 @@ class HiBackend:
 
 
     # ---------------- Get Frames  ----------------
-    def _get_andor_camera_snap(self) -> np.ndarray:
-        """Pull a raw frame from the camera."""
-        return self.andor_camera.snap().astype(np.float64)
+    def _get_andor_camera_snap(self) -> tuple[np.ndarray, float]:
+        """Pull a raw frame from the camera.
+        Returns: frame, time.time()
+        """
+        frame, ts = self.andor_camera.snap()
+        return frame.astype(np.float64), ts
 
 
-    def get_andor_frame(self) -> np.ndarray:
+    def get_andor_frame(self) -> tuple[np.ndarray, float]:
         # Get the frame:
         if self.is_reference_mode or self.is_sample_illumination_continuous:
-            frame = self._get_andor_camera_snap()
+            frame, ts = self._get_andor_camera_snap()
         else:
-            frame = self._open_sample_shutter_get_frame_close_shutter(timeout=1)
+            frame, ts = self._open_sample_shutter_get_frame_close_shutter(timeout=1)
 
-        return frame
+        return frame, ts
 
     def get_fitted_spectrum(self, frame) -> FittedSpectrum:
         """
@@ -343,6 +346,7 @@ class HiBackend:
 
         Args:
             frame (np.ndarray): The input camera frame.
+            ts: timestamep time.time()
 
         Returns:
             FittedSpectrum: Dataclass containing fit results and metadata.
@@ -374,17 +378,6 @@ class HiBackend:
             self.calibration_poly_fit_params = calibrate(data=self.calibration_data)
             self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(parameters=self.calibration_poly_fit_params)
 
-
-    def take_one_measurement(self) -> MeasurementPoint:
-
-
-        return MeasurementPoint(
-            frame_andor=self.get_andor_frame(),
-            lens_zaber_position=self.zaber_eye_lens.get_position(),
-            frame_left_allied=None,
-            frame_right_allied=None,
-        )
-
     def take_axial_scan(self, request_axial_scan: RequestAxialScan):
 
         if self.is_reference_mode:
@@ -399,17 +392,16 @@ class HiBackend:
                     print(f"[Axial Scan] Cancelled during step {i}.")
                     return False
 
-                frame = self._get_andor_camera_snap()
+                frame, ts = self._get_andor_camera_snap()
 
-                fs = self.get_fitted_spectrum(frame)
+                fs = self.get_fitted_spectrum(frame, ts)
                 self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
 
                 all_results.append(
                     MeasurementPoint(
                     frame_andor=frame,
                     lens_zaber_position=lens_x0,
-                    frame_left_allied=None,
-                    frame_right_allied=None,)
+                    time_stamp=ts)
                 )
 
         else:
@@ -437,17 +429,16 @@ class HiBackend:
                     zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
-                    frame = self._get_andor_camera_snap()
+                    frame, ts = self._get_andor_camera_snap()
 
                     fs = self.get_fitted_spectrum(frame)
                     self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
 
                     all_results.append(
                         MeasurementPoint(
-                        frame_andor=frame,
-                        lens_zaber_position=zaber_pos,
-                        frame_left_allied=None,
-                        frame_right_allied=None,)
+                            frame_andor=frame,
+                            lens_zaber_position=lens_x0,
+                            time_stamp=ts)
                     )
 
             finally:
@@ -509,16 +500,15 @@ class HiBackend:
 
 
 
-    def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> np.ndarray:
+    def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> tuple[np.ndarray, float]:
         """Acquire a frame with temporary shutter open for pulsed mode."""
-        frame = None
         timer = threading.Timer(timeout, self.shutter_manager.sample.close)
 
         try:
             self.shutter_manager.sample.open()
             timer.start()
             try:
-                frame = self._get_andor_camera_snap()
+                frame, ts = self._get_andor_camera_snap()
             finally:
                 # Always cancel the timer (even if _get_camera_snap() fails)
                 timer.cancel()
@@ -526,7 +516,7 @@ class HiBackend:
             # Always close the shutter at the end (even if an exception occurs)
             self.shutter_manager.sample.close()
 
-        return frame
+        return frame, ts
 
     def set_andor_exposure(self,
                             exposure_time: float,
@@ -583,7 +573,7 @@ class HiBackend:
                             print("[Calibration] Cancelled by user.")
                             return False
 
-                        frame = self.get_andor_frame()
+                        frame, _ = self.get_andor_frame()
                         fs = self.get_fitted_spectrum(frame)
 
                         cali_point = CalibrationMeasurementPoint(

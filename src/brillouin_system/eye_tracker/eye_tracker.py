@@ -51,6 +51,7 @@ IMG_SIZE = (512, 512)
 ELLIPSE_OVERLAY_COLOR = (0, 255, 0)  # RGB: green
 ELLIPSE_OVERLAY_THICKNESS = 3
 
+
 RETURN_FRAME_MAPPING = {
     "original": PupilImgType.ORIGINAL,
     "binary": PupilImgType.BINARY,
@@ -72,14 +73,14 @@ class EyeTracker:
         self.config = None
         self._min_delta_time = 1
         config_init = eye_tracker_config.get()
-        self.set_configs(config=config_init)
+        self.set_config(config=config_init)
 
         self.renderer = EyeSceneRenderer(window_size=IMG_SIZE)  # (512, 512)
 
         self.dual_cam_proxy = DualCameraProxy(dtype="uint8", slots=8, use_dummy=use_dummy)
         self.dual_cam_proxy.start()
 
-    def set_configs(self, config: EyeTrackerConfig):
+    def set_config(self, config: EyeTrackerConfig):
         self.config = config
         self._min_delta_time = 1 / config.max_saving_freq_hz
         self.ellipse_fitter.set_binary_thresholds(
@@ -101,7 +102,7 @@ class EyeTracker:
             stereo_calibration=self.pupil_detector.stereo.st_cal,
         )
 
-    def clear_stored_data(self):
+    def _clear_stored_data(self):
         self._stored_data.clear()
         self._save_data_timestamps.clear()
         self._save_data_N = 0
@@ -112,7 +113,7 @@ class EyeTracker:
     def end_saving(self):
         self._save_data = False
         self._save_data_to_disk()
-        self.clear_stored_data()
+        self._clear_stored_data()
 
     def _get_frames(self) -> tuple[np.ndarray, np.ndarray, float]:
         left_img, right_img, meta = self.dual_cam_proxy.get_frames()
@@ -249,7 +250,7 @@ class EyeTracker:
 
         return C_cornea, gaze
 
-    def get_display_frames(self):
+    def get_results_for_gui(self) -> EyeTrackerResultsForGui:
         left_img, right_img, ts = self._get_frames()
 
         _should_save = self._should_save(timestamp=ts)
@@ -261,6 +262,7 @@ class EyeTracker:
             left_img_original = None
             right_img_original = None
 
+        # Ensure they are all rgb
         if self.config.do_ellipse_fitting:
             pupil_eL, pupil_eR = self._get_ellipses(left_img, right_img)
             pupil_3D = self._get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
@@ -281,7 +283,7 @@ class EyeTracker:
                                       pupil3D=pupil_3D)
 
 
-        # Ensure all images are corrctly scaled and rgb
+        # Ensure all images are corrctly scaled
         # ensure correct scaling and rgb (for shared memory space) for GUI display
         cam_left_img = scale_image(cam_left_img, IMG_SIZE)
         cam_right_img = scale_image(cam_right_img, IMG_SIZE)

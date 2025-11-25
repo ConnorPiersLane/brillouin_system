@@ -326,7 +326,7 @@ class BrillouinSignaller(QObject):
     @pyqtSlot()
     def snap_and_fit(self):
         try:
-            frame = self.backend.get_andor_frame()
+            frame, _ = self.backend.get_andor_frame()
             fitting: FittedSpectrum = self.backend.get_fitted_spectrum(frame)
             display = self.backend.get_display_results(frame, fitting)
             self.frame_and_fit_ready.emit(display)

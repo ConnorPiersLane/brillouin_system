@@ -27,8 +27,9 @@ class RequestAxialScan:
 class MeasurementPoint:
     frame_andor: np.ndarray  # Original frame, not subtracted
     lens_zaber_position: float
-    frame_left_allied: np.ndarray | None = None
-    frame_right_allied: np.ndarray | None = None
+    # frame_left_allied: np.ndarray | None = None
+    # frame_right_allied: np.ndarray | None = None
+    time_stamp: float | None = None
 
 @dataclass
 class EyeLocation:

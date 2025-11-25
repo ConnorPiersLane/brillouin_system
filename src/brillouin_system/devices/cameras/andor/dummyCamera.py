@@ -51,12 +51,12 @@ class DummyCamera(BaseCamera):
     def close_shutter(self):
         print("[DummyCamera] Shutter closed")
 
-    def snap(self) -> np.ndarray:
+    def snap(self) -> tuple[np.ndarray, float]:
         time.sleep(self.exposure_time)
         frame = self._generate_plastic_image()
         if self._flip:
             frame = np.fliplr(frame)
-        return frame
+        return frame, time.time()
 
     def _generate_plastic_image(self) -> np.ndarray:
         h, w = self.get_frame_shape()

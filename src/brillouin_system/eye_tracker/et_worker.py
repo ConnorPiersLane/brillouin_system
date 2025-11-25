@@ -1,91 +1,109 @@
+# et_worker.py
+
 import multiprocessing as mp
-import threading, queue, traceback
-
-from brillouin_system.eye_tracker.et1_image_acquisition.dual_camera_proxy import DualCameraProxy
-
-
-def fitting_worker(in_q, out_q, stop_event):
-    while not stop_event.is_set():
-        try:
-            left, right, ts = in_q.get(timeout=0.05)
-        except queue.Empty:
-            continue
-
-        # Replace with real fitting logic
-        result = {"ts": ts, "pupil": (100, 120, 30), "glints": [(10, 20)]}
-        out_q.put(result)
+import queue
+import traceback
 
 
-class ETWorker:
-    def __init__(self, use_dummy=False):
-        self.img_acqui_proxy = DualCameraProxy(dtype="uint8", slots=8, use_dummy=use_dummy)
-        self.img_acqui_proxy.start()
+def running_eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue, proxy_kwargs: dict):
+    """
+    Worker entrypoint run in a separate process.
 
+    - Instantiates EyeTracker (with optional `use_dummy` and initial config from proxy_kwargs)
+    - Sends {"type": "started"} once it's ready
+    - In a loop:
+        * handles control messages from req_q ("shutdown", "config")
+        * calls tracker.get_display_frames()
+        * pushes {"type": "result", "data": results} into evt_q
+          (dropping stale results if the queue is full)
+    - On error, sends {"type": "error", "msg": ..., "tb": ...}
+    """
 
+    # Import inside the worker process so it plays nicely with mp spawn/fork
+    from eye_tracker import EyeTracker  # and EyeTrackerResultsForGui implicitly
 
+    tracker = None
 
-    def close(self):
-        self.img_acqui_proxy.shutdown()
-
-
-def running_eye_tracker_worker(req_q, evt_q, proxy_kwargs):
     try:
-        proxy = DualCameraProxy(**proxy_kwargs)
-        proxy.start()
+        # --- 1. Create EyeTracker instance -----------------------------------
+        use_dummy = bool(proxy_kwargs.get("use_dummy", False))
+        tracker = EyeTracker(use_dummy=use_dummy)
 
-        # Notify proxy we are live
+        # Optional: initial EyeTrackerConfig can be passed in proxy_kwargs["config"]
+        initial_cfg = proxy_kwargs.get("config")
+        if initial_cfg is not None:
+            tracker.set_config(initial_cfg)
+
+        # Signal to the parent that we are up and running
         evt_q.put({"type": "started"})
 
-        frame_q = queue.Queue(maxsize=2)
-        stop_event = mp.Event()
+        running = True
 
-        # Reader thread
-        def reader():
-            while not stop_event.is_set():
-                left, right, ts = proxy._get_frames()
-                left = left.copy(); right = right.copy()
-                if frame_q.full():
-                    frame_q.get_nowait()
-                frame_q.put_nowait((left, right, ts))
+        # --- 2. Main worker loop --------------------------------------------
+        while running:
+            # 2a) Handle control messages (non-blocking)
+            try:
+                while True:
+                    msg = req_q.get_nowait()
+                    mtype = msg.get("type")
 
-        threading.Thread(target=reader, daemon=True).start()
+                    if mtype == "shutdown":
+                        running = False
+                        break
 
-        # Fitting process
-        fit_in = mp.Queue(maxsize=2)
-        fit_out = mp.Queue(maxsize=2)
-        fitter = mp.Process(target=fitting_worker, args=(fit_in, fit_out, stop_event))
-        fitter.start()
+                    elif mtype == "config":
+                        # Expecting an EyeTrackerConfig instance in msg["data"]
+                        cfg = msg.get("data")
+                        if cfg is not None:
+                            tracker.set_config(cfg)
 
-        last_result = None
+                    # You can add more command types here if needed
 
-        while not stop_event.is_set():
-            # Check for control messages
-            while not req_q.empty():
-                cmd = req_q.get()
-                if cmd["type"] == "shutdown":
-                    stop_event.set()
-                elif cmd["type"] == "config":
-                    # Could pass config down to proxy or fitter
+            except queue.Empty:
+                pass
+
+            if not running:
+                break
+
+            # 2b) Run one eye-tracking step
+            # This internally blocks on the cameras as needed.
+            results = tracker.get_results_for_gui()  # EyeTrackerResultsForGui
+
+            # 2c) Send latest results to the parent
+            # We want "latest" semantics: if evt_q is full, drop the oldest.
+            try:
+                evt_q.put({"type": "result", "data": results}, timeout=0.01)
+            except queue.Full:
+                # Drop one old result and try once more
+                try:
+                    evt_q.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    evt_q.put({"type": "result", "data": results}, timeout=0.01)
+                except queue.Full:
+                    # If it's still full, just drop this frame; main process is too slow.
                     pass
 
+        # --- 3. Clean shutdown -----------------------------------------------
+        if tracker is not None:
             try:
-                frame = frame_q.get(timeout=0.05)
-            except queue.Empty:
-                frame = None
-
-            if frame:
-                if fit_in.full():
-                    fit_in.get_nowait()  # drop oldest
-                fit_in.put_nowait(frame)
-
-            while not fit_out.empty():
-                last_result = fit_out.get_nowait()
-
-            if last_result:
-                evt_q.put({"type": "result", "data": last_result})
-
-        proxy.shutdown()
-        fitter.join()
+                tracker.shutdown()
+            except Exception:
+                # We don't want shutdown failures to overwrite any earlier error message
+                pass
 
     except Exception as e:
-        evt_q.put({"type": "error", "msg": str(e), "tb": traceback.format_exc()})
+        # Report error back to parent
+        evt_q.put({
+            "type": "error",
+            "msg": str(e),
+            "tb": traceback.format_exc(),
+        })
+
+        # Try to shut down tracker even on error
+        if tracker is not None:
+            try:
+                tracker.shutdown()
+            except Exception:
+                pass

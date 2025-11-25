@@ -20,7 +20,7 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
-    def snap(self) -> np.ndarray:
+    def snap(self) -> tuple[np.ndarray, float]:
         pass
 
     @abstractmethod

@@ -169,7 +169,7 @@ class EyeTrackerGUI(QWidget):
         if self.tracker is None:
             return
         try:
-            res: EyeTrackerResultsForGui = self.tracker.get_display_frames()
+            res: EyeTrackerResultsForGui = self.tracker.get_results_for_gui()
             # Update 4 panes
             self.left_cam_view.show_np_image(res.cam_left_img, "Left Cam")
             self.right_cam_view.show_np_image(res.cam_right_img, "Right Cam")
