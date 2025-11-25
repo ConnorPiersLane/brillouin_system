@@ -44,7 +44,6 @@ class EyeTrackerResultsForGui:
     cam_left_img: np.ndarray
     cam_right_img: np.ndarray
     rendered_img: np.ndarray
-    xymap_img: np.ndarray
 
 
 IMG_SIZE = (512, 512)
@@ -185,9 +184,6 @@ class EyeTracker:
         self.renderer.set_eye_pose(C, gaze)
         return ensure_uint8(self.renderer.get_img())
 
-    def _get_xymap_img_image(self, pupil3D: Pupil3D) -> np.ndarray:
-        # Must return uint8 rgb
-        return make_black_image() # note for chatgpt: ok for now, beta version
 
 
     # ---------------------------
@@ -268,13 +264,11 @@ class EyeTracker:
             pupil_3D = self._get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
             cam_left_img, cam_right_img = self._get_cam_imgs_for_display(pupil_eL, pupil_eR)
             rendered_img = self._get_rendered_eye_image(pupil_3D)
-            xymap_img = self._get_xymap_img_image(pupil_3D)
         else:
             pupil_3D=None
             cam_left_img = gray_to_rgb(ensure_uint8(left_img))
             cam_right_img = gray_to_rgb(ensure_uint8(right_img))
             rendered_img = make_black_image()
-            xymap_img = make_black_image()
 
         if _should_save:
             self._add_data_for_saving(timestamp=ts,
@@ -288,13 +282,11 @@ class EyeTracker:
         cam_left_img = scale_image(cam_left_img, IMG_SIZE)
         cam_right_img = scale_image(cam_right_img, IMG_SIZE)
         rendered_img = scale_image(rendered_img, IMG_SIZE)
-        xymap_img = scale_image(xymap_img, IMG_SIZE)
 
         #
         cam_left_img = ensure_uint8(cam_left_img)
         cam_right_img = ensure_uint8(cam_right_img)
         rendered_img = ensure_uint8(rendered_img)
-        xymap_img = ensure_uint8(xymap_img)
 
 
         return EyeTrackerResultsForGui(
@@ -302,7 +294,6 @@ class EyeTracker:
             cam_left_img=cam_left_img,
             cam_right_img=cam_right_img,
             rendered_img=rendered_img,
-            xymap_img=xymap_img,
         )
 
     def set_allied_vision_configs(self, cfg_left: AlliedConfig, cfg_right: AlliedConfig):
