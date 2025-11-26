@@ -43,6 +43,7 @@ class AppState:
     left_valid: Optional[LeftFramesValid] = None
     right_valid: Optional[RightFramesValid] = None
     pair_valid: Optional[PairsValid] = None
+    all_pairs: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None
 
     # Mono calibration results
     left_res: Optional[CameraResult] = None
@@ -166,6 +167,7 @@ class StereoCalibGUI(tk.Tk):
         if not pairs:
             self._log("No pairs found")
             return
+        self.state.all_pairs = pairs
         cols, rows = int(self.var_cols.get()), int(self.var_rows.get())
         L_valid, R_valid, P_valid, report = filter_valid_frames(pairs, cols, rows)
         self.state.left_valid, self.state.right_valid, self.state.pair_valid = L_valid, R_valid, P_valid
@@ -221,33 +223,38 @@ class StereoCalibGUI(tk.Tk):
 
     # ---------------- Viewer ----------------
     def _ensure_det_cache(self):
-        if not self.state.pair_valid:
+        # Use all pairs (including failures) for display
+        pairs = self.state.all_pairs
+        if not pairs:
             self.state.det_cache = None
             return
-        if self.state.det_cache is not None and len(self.state.det_cache) == len(self.state.pair_valid.pairs):
+        if self.state.det_cache is not None and len(self.state.det_cache) == len(pairs):
             return
+
         cols, rows = int(self.var_cols.get()), int(self.var_rows.get())
         pattern = (cols, rows)
         cache = []
-        for L, R in self.state.pair_valid.pairs:
+        for L, R in pairs:
             cL = detect_corners(L, pattern)
             cR = detect_corners(R, pattern)
             cache.append((cL is not None, cL, cR is not None, cR))
         self.state.det_cache = cache
 
     def _on_prev_pair(self):
-        if not self.state.pair_valid: return
+        if not self.state.all_pairs:
+            return
         self.state.pair_index = max(0, self.state.pair_index - 1)
         self._render_pair()
 
     def _on_next_pair(self):
-        if not self.state.pair_valid: return
-        n = len(self.state.pair_valid.pairs)
+        if not self.state.all_pairs:
+            return
+        n = len(self.state.all_pairs)
         self.state.pair_index = min(n - 1, self.state.pair_index + 1)
         self._render_pair()
 
     def _render_pair(self):
-        pairs = self.state.pair_valid.pairs if self.state.pair_valid else []
+        pairs = self.state.all_pairs or []
         if not pairs:
             self.lbl_status.configure(text="No pairs loaded")
             self.btn_prev.config(state="disabled")
@@ -263,7 +270,10 @@ class StereoCalibGUI(tk.Tk):
         L, R = pairs[i]
         okL, cL, okR, cR = self.state.det_cache[i]
         both = okL and okR
-        self.lbl_status.configure(text=f"Pair {i+1}/{n} — left: {'OK' if okL else 'FAIL'} | right: {'OK' if okR else 'FAIL'} | both: {'OK' if both else 'FAIL'}")
+        self.lbl_status.configure(
+            text=f"Pair {i + 1}/{n} — left: {'OK' if okL else 'FAIL'} | "
+                 f"right: {'OK' if okR else 'FAIL'} | both: {'OK' if both else 'FAIL'}"
+        )
         self._draw_img(self.cnv_left, L, cL, okL)
         self._draw_img(self.cnv_right, R, cR, okR)
 

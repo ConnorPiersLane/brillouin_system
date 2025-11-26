@@ -91,5 +91,5 @@ def floodfill_and_show(path: str, threshold: int = 10):
 
 
 if __name__ == "__main__":
-    params = floodfill_and_show("left/pair_0000_left.png", threshold=8)
+    params = floodfill_and_show("right/pair_0015_right.png", threshold=30)
     print("Ellipse:", params)

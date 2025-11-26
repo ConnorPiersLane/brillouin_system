@@ -136,7 +136,7 @@ def get_opencv_ellipse(ellipse: Ellipse2D):
     )
 
 
-def draw_ellipse_rgb(img_rgb, ellipse, color_rgb=(0, 255, 0), thickness=3):
+def draw_ellipse_rgb(img_rgb, ellipse, color_rgb=(0, 255, 0), thickness=1):
     """Draw ellipse on an RGB image using RGB color input."""
     opencv_ellipse = get_opencv_ellipse(ellipse)
 

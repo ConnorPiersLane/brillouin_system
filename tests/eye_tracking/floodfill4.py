@@ -10,7 +10,7 @@ from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import (
 )
 
 
-def floodfill_and_show(path: str, threshold: int = 10):
+def floodfill_and_show(path: str, threshold: int = 20):
     """
     Run pupil detection using the ellipse-fitting pipeline and visualize each processing step.
 
@@ -41,8 +41,8 @@ def floodfill_and_show(path: str, threshold: int = 10):
     # 2) Run detector once to get the ellipse (use fastest stage to avoid extra copies)
 
     img, x_clip, y_clip = extract_roi(img=img,
-                        roi_center_xy=(500,500),
-                        roi_width_height=(800,500))
+                        roi_center_xy=(600,500),
+                        roi_width_height=(400,400))
 
     result_for_ellipse = find_pupil_ellipse_with_flooding(
         img, threshold=threshold, frame_to_be_returned=PupilImgType.FLOODFILLED
@@ -98,5 +98,5 @@ def floodfill_and_show(path: str, threshold: int = 10):
 
 
 if __name__ == "__main__":
-    params = floodfill_and_show("left/pair_0000_left.png", threshold=8)
+    params = floodfill_and_show("left/pair_0002_left.png", threshold=12)
     print("Ellipse:", params)
