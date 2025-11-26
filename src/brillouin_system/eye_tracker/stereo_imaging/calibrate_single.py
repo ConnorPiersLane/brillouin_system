@@ -88,11 +88,20 @@ def detect_corners(img: np.ndarray, pattern_size: Tuple[int, int]) -> Optional[n
     )
     return corners
 
-def calibrate_single(images: List[np.ndarray], config: MonoCalibConfig) -> Tuple[CameraResult, Tuple[int,int]]:
+import cv2
+import numpy as np
+from typing import List, Tuple
+
+def calibrate_single(images: List[np.ndarray], config) -> Tuple["CameraResult", Tuple[int, int]]:
+    """
+    Mono or fisheye camera calibration with conservative gating and sanity checks.
+    """
     pattern_size = (int(config.cols), int(config.rows))
     objp = prepare_object_points(config.cols, config.rows, config.square_size_mm)
     objpoints, imgpoints = [], []
     image_size = None
+
+    # --- Collect valid detections ---
     for im in images:
         c = detect_corners(im, pattern_size)
         if c is None:
@@ -106,50 +115,74 @@ def calibrate_single(images: List[np.ndarray], config: MonoCalibConfig) -> Tuple
     if not objpoints:
         raise RuntimeError("No valid checkerboard detections for mono calibration.")
 
+    term = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 100, 1e-6)
+
+    # ================================================================
+    # PINHOLE MODEL
+    # ================================================================
     if config.model.lower() == "pinhole":
-        # Stage 1: conservative (prevents overfitting)
-        flags_cons = (cv2.CALIB_ZERO_TANGENT_DIST |
-                      cv2.CALIB_FIX_K3 | cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_FIX_K6)
-        ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
-            objpoints, imgpoints, image_size, None, None, flags=flags_cons
+        # Stage 1: base solve (k1,k2,p1,p2,k3); no rational model
+        flags1 = 0
+        ret1, K1, d1, rvecs1, tvecs1 = cv2.calibrateCamera(
+            objpoints, imgpoints, image_size, None, None, flags=flags1, criteria=term
         )
 
-        # Stage 2 (tiny relaxation): free K3 only, accept only if it really helps
-        flags_k3 = (cv2.CALIB_ZERO_TANGENT_DIST |
-                    cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_FIX_K6)
-
-        ret2, K2, dist2, rvecs2, tvecs2 = cv2.calibrateCamera(
-            objpoints, imgpoints, image_size, K.copy(), dist.copy(), flags=flags_k3
+        # Stage 2: optional small relaxation (same model)
+        ret2, K2, d2, rvecs2, tvecs2 = cv2.calibrateCamera(
+            objpoints, imgpoints, image_size, K1.copy(), d1.copy(), flags=flags1, criteria=term
         )
 
-        # Gate: require a real RMS improvement AND principal point moving toward center
-        cx0, cy0 = K[0, 2], K[1, 2]
-        cx1, cy1 = K2[0, 2], K2[1, 2]
-        cx_target, cy_target = image_size[0] / 2.0, image_size[1] / 2.0
+        # Sanity gate
+        def coeffs_ok(d):
+            d = d.ravel()
+            if len(d) < 5:
+                return False
+            k1, k2, p1, p2, k3 = d[:5]
+            return (abs(p1) < 0.02 and abs(p2) < 0.02 and
+                    abs(k1) < 2 and abs(k2) < 5 and abs(k3) < 5)
 
-        def closer(a0, a1, tgt):  # did we move closer to the target?
-            return abs(a1 - tgt) <= abs(a0 - tgt) * 1.05  # allow tiny noise (5%)
+        improved_rms = ret2 < ret1 * 0.9
+        use2 = improved_rms and coeffs_ok(d2)
 
-        improved_rms = (ret2 < ret * 0.9)  # ~10% better
-        moved_toward_center = closer(cx0, cx1, cx_target) and closer(cy0, cy1, cy_target)
-        k3_reasonable = abs(float(dist2.ravel()[2])) < 1.5 if dist2.size >= 3 else True  # sanity bound
+        if use2:
+            K, dist, rvecs, tvecs, ret = K2, d2, rvecs2, tvecs2, ret2
+        else:
+            K, dist, rvecs, tvecs, ret = K1, d1, rvecs1, tvecs1, ret1
 
-        if improved_rms and moved_toward_center and k3_reasonable:
-            K, dist, rvecs, tvecs, ret = K2, dist2, rvecs2, tvecs2, ret2
+        # Pick median-error view as representative extrinsics
+        per_view_err = []
+        for op, ip, r, t in zip(objpoints, imgpoints, rvecs, tvecs):
+            proj, _ = cv2.projectPoints(op, r, t, K, dist)
+            per_view_err.append(float(np.sqrt(np.mean(np.sum((proj.reshape(-1,2) - ip)**2, axis=1)))))
+        idx = int(np.argsort(per_view_err)[len(per_view_err)//2])
+        R, _ = cv2.Rodrigues(rvecs[idx]); t = tvecs[idx].reshape(3)
 
-        R, _ = cv2.Rodrigues(rvecs[-1]); t = tvecs[-1].reshape(3)
         return CameraResult(K, dist.reshape(-1), R, t, float(ret)), image_size
 
-    # Fisheye unchanged
+    # ================================================================
+    # FISHEYE MODEL
+    # ================================================================
     objp_fe = [op.reshape(-1,1,3).astype(np.float64) for op in objpoints]
-    imgp_fe = [ip.astype(np.float64) for ip in imgpoints]
+    imgp_fe = [ip.reshape(-1,1,2).astype(np.float64) for ip in imgpoints]
     K = np.zeros((3,3)); D = np.zeros((4,1))
     fe_flags = (cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC |
                 cv2.fisheye.CALIB_CHECK_COND |
                 cv2.fisheye.CALIB_FIX_SKEW)
-    rms, K, D, rvecs, tvecs = cv2.fisheye.calibrate(objp_fe, imgp_fe, image_size, K, D, None, None, flags=fe_flags)
-    R, _ = cv2.Rodrigues(rvecs[-1]); t = tvecs[-1].reshape(3)
+
+    rms, K, D, rvecs, tvecs = cv2.fisheye.calibrate(
+        objp_fe, imgp_fe, image_size, K, D, None, None, flags=fe_flags, criteria=term
+    )
+
+    per_view_err = []
+    for op, ip, r, t in zip(objp_fe, imgp_fe, rvecs, tvecs):
+        proj, _ = cv2.fisheye.projectPoints(op, r, t, K, D)
+        per_view_err.append(float(np.sqrt(np.mean(np.sum((proj.reshape(-1,2) - ip.reshape(-1,2))**2, axis=1)))))
+    idx = int(np.argsort(per_view_err)[len(per_view_err)//2])
+    R, _ = cv2.Rodrigues(rvecs[idx]); t = tvecs[idx].reshape(3)
+
     return CameraResult(K, D.reshape(-1), R, t, float(rms)), image_size
+
+
 
 def save_camera_json(
     out_path: str,
