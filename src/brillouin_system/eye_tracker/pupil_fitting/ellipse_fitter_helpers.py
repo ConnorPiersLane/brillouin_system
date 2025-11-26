@@ -108,9 +108,9 @@ def find_pupil_ellipse_with_flooding(
     h, w = bw.shape
     mask = np.zeros((h + 2, w + 2), np.uint8)
     cv2.floodFill(bw, mask, (0, 0), 128)
-    # cv2.floodFill(bw, mask, (w - 1, 0), 128)
-    # cv2.floodFill(bw, mask, (0, h - 1), 128)
-    # cv2.floodFill(bw, mask, (w - 1, h - 1), 128)
+    cv2.floodFill(bw, mask, (w - 1, 0), 128)
+    cv2.floodFill(bw, mask, (0, h - 1), 128)
+    cv2.floodFill(bw, mask, (w - 1, h - 1), 128)
     bw[bw == 128] = 0  # remove background marked by 128
 
     # Step 3: Keep largest connected component
