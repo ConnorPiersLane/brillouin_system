@@ -1,21 +1,27 @@
-# config/eye_tracker_config.toml
-
 [eye_tracker]
 sleep = false
-
-# Per-eye thresholds
-binary_threshold_left  = 20
+binary_threshold_left = 20
 binary_threshold_right = 20
-
-# Saving controls
-save_images_path   = ""
+roi_left_center_xy = [
+    500,
+    500,
+]
+roi_left_width_height = [
+    100,
+    100,
+]
+roi_right_center_xy = [
+    500,
+    500,
+]
+roi_right_width_height = [
+    100,
+    100,
+]
+apply_roi = true
+save_images_path = ""
 max_saving_freq_hz = 5
-save_images        = false
-
-# Ellipse fitting & overlay
-do_ellipse_fitting = false
-overlay_ellipse    = false
-
-# Which image is returned by the pipeline
-# one of: "original", "binary", "floodfilled"
+save_images = false
+do_ellipse_fitting = true
+overlay_ellipse = true
 frame_returned = "original"

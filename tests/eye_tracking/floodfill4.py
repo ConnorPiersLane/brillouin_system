@@ -2,9 +2,11 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
+from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import eye_tracker_config
 from brillouin_system.eye_tracker.eye_tracker_helpers import draw_ellipse_rgb, gray_to_rgb
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import (
-    find_pupil_ellipse_with_flooding, PupilImgType
+    find_pupil_ellipse_with_flooding, PupilImgType, extract_roi
 )
 
 
@@ -37,6 +39,11 @@ def floodfill_and_show(path: str, threshold: int = 10):
         raise FileNotFoundError(f"Could not read image: {path}")
 
     # 2) Run detector once to get the ellipse (use fastest stage to avoid extra copies)
+
+    img = extract_roi(img=img,
+                        roi_center_xy=(500,500),
+                        roi_width_height=(800,500))
+
     result_for_ellipse = find_pupil_ellipse_with_flooding(
         img, threshold=threshold, frame_to_be_returned=PupilImgType.FLOODFILLED
     )

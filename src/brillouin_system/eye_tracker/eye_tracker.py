@@ -1,6 +1,4 @@
 from dataclasses import dataclass
-from typing import Literal
-
 
 import numpy as np
 
@@ -11,7 +9,7 @@ from brillouin_system.eye_tracker.eye_tracker_helpers import scale_image, make_b
     ensure_uint8, draw_ellipse_rgb, gray_to_rgb
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
-from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse, PupilImgType
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse
 from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 from brillouin_system.eye_tracker.pupil_fitting.pupil_detector import PupilDetector
 from brillouin_system.eye_tracker.stereo_imaging.calibration_dataclasses import StereoCalibration
@@ -51,12 +49,7 @@ ELLIPSE_OVERLAY_COLOR = (0, 255, 0)  # RGB: green
 ELLIPSE_OVERLAY_THICKNESS = 3
 
 
-RETURN_FRAME_MAPPING = {
-    "original": PupilImgType.ORIGINAL,
-    "binary": PupilImgType.BINARY,
-    "floodfilled": PupilImgType.FLOODFILLED,
-    "contour": PupilImgType.CONTOUR,
-}
+
 
 class EyeTracker:
     def __init__(self, use_dummy=False):
@@ -67,12 +60,12 @@ class EyeTracker:
 
 
         self.pupil_detector = PupilDetector(stereo_cameras=stereo_cameras, left_to_ref=left_to_ref)
-        self.ellipse_fitter = EllipseFitter()
 
-        self.config = None
-        self._min_delta_time = 1
+
+
         config_init = eye_tracker_config.get()
-        self.set_config(config=config_init)
+        self._min_delta_time = 1 / config_init.max_saving_freq_hz
+        self.ellipse_fitter = EllipseFitter(config=config_init)
 
         self.renderer = EyeSceneRenderer(window_size=IMG_SIZE)  # (512, 512)
 
@@ -80,24 +73,13 @@ class EyeTracker:
         self.dual_cam_proxy.start()
 
     def set_config(self, config: EyeTrackerConfig):
-        self.config = config
         self._min_delta_time = 1 / config.max_saving_freq_hz
-        self.ellipse_fitter.set_binary_thresholds(
-            binary_threshold_left=config.binary_threshold_left,
-            binary_threshold_right=config.binary_threshold_right,
-        )
-        self._set_img_return_typ(frame_returned=config.frame_returned)
+        self.ellipse_fitter.set_config(config=config)
 
-    def _set_img_return_typ(self, frame_returned: Literal["original", "binary", "floodfilled", "contour"] = "original"):
-        frame_returned = str(frame_returned).strip().lower()
-        if frame_returned not in RETURN_FRAME_MAPPING:
-            raise ValueError(f"Invalid frame_returned value: {frame_returned}")
-
-        self.ellipse_fitter.set_img_return_type(img_return_type=RETURN_FRAME_MAPPING[frame_returned])
 
     def _get_settings(self) -> EyeTrackerSettings:
         return EyeTrackerSettings(
-            config=self.config,
+            config=self.ellipse_fitter.config,
             stereo_calibration=self.pupil_detector.stereo.st_cal,
         )
 
@@ -154,7 +136,7 @@ class EyeTracker:
         left_img = gray_to_rgb(left_img)
         right_img = gray_to_rgb(right_img)
 
-        if self.config.overlay_ellipse:
+        if self.ellipse_fitter.config.overlay_ellipse:
             if pupil_eL.ellipse is not None:
                 left_img = draw_ellipse_rgb(img_rgb=left_img,
                                            ellipse=pupil_eL.ellipse,
@@ -220,7 +202,7 @@ class EyeTracker:
             rawdata=list(self._stored_data),
         )
         native = dataclass_to_hdf5_native_dict(results)
-        save_dict_to_hdf5(self.config.save_images_path, native)
+        save_dict_to_hdf5(self.ellipse_fitter.config.save_images_path, native)
 
     def _pose_from_pupil3D(self, pupil3D: Pupil3D):
         """
@@ -259,7 +241,7 @@ class EyeTracker:
             right_img_original = None
 
         # Ensure they are all rgb
-        if self.config.do_ellipse_fitting:
+        if self.ellipse_fitter.config.do_ellipse_fitting:
             pupil_eL, pupil_eR = self._get_ellipses(left_img, right_img)
             pupil_3D = self._get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
             cam_left_img, cam_right_img = self._get_cam_imgs_for_display(pupil_eL, pupil_eR)

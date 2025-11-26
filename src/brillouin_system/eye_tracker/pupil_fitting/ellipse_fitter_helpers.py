@@ -85,6 +85,59 @@ def _ensure_u8(img: np.ndarray) -> np.ndarray:
     return np.zeros_like(img, dtype=np.uint8)
 
 
+
+def extract_roi(img, roi_center_xy, roi_width_height):
+    """
+    Return a cropped ROI around (cx, cy) with given (width, height).
+
+    - img:        np.ndarray (H, W) or (H, W, C)
+    - roi_center_xy: (cx, cy) in pixel coordinates
+    - roi_width_height: (w, h) in pixels
+
+    Behavior:
+    - Computes a centered rectangular ROI.
+    - Clips ROI to image bounds.
+
+    Returns:
+    - roi_view: a view of img corresponding to the (clipped) ROI.
+                Modifying this will also modify img.
+    """
+    H, W = img.shape[:2]
+    cx, cy = roi_center_xy
+    rw, rh = roi_width_height
+
+    # Half extents
+    half_w = rw // 2
+    half_h = rh // 2
+
+    # Intended ROI bounds (inclusive)
+    x1 = cx - half_w
+    x2 = cx + half_w
+    y1 = cy - half_h
+    y2 = cy + half_h
+
+    # Clip ROI to image bounds for slicing (note: upper bound is exclusive)
+    x1_clip = max(0, x1)
+    y1_clip = max(0, y1)
+    x2_clip = min(W, x2 + 1)   # +1 because slice end is exclusive
+    y2_clip = min(H, y2 + 1)
+
+    # Handle degenerate case: ROI completely outside image → empty slice
+    if x1_clip >= x2_clip or y1_clip >= y2_clip:
+        return img[0:0, 0:0]   # empty array of correct ndim
+
+    roi = img[y1_clip:y2_clip, x1_clip:x2_clip]
+
+    # Darken the outermost pixels of the original image
+    img[0, :] = 0          # top row
+    img[-1, :] = 0         # bottom row
+    img[:, 0] = 0          # left column
+    img[:, -1] = 0         # right column
+
+    return roi
+
+
+
 def find_pupil_ellipse_with_flooding(
     img: np.ndarray,
     threshold: int = 20,
