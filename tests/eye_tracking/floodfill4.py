@@ -40,7 +40,7 @@ def floodfill_and_show(path: str, threshold: int = 10):
 
     # 2) Run detector once to get the ellipse (use fastest stage to avoid extra copies)
 
-    img = extract_roi(img=img,
+    img, x_clip, y_clip = extract_roi(img=img,
                         roi_center_xy=(500,500),
                         roi_width_height=(800,500))
 

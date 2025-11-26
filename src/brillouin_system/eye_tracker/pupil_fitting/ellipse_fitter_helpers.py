@@ -16,6 +16,8 @@ class PupilImgType(Enum):
         return self.name.lower()
 
 
+
+
 @dataclass
 class PupilEllipse:
     """
@@ -31,6 +33,11 @@ class PupilEllipse:
     pupil_img_type: PupilImgType
     ellipse: Ellipse2D | None
 
+
+def add_center_coordinates_of_original_img(pupil_ellipse: PupilEllipse, x1_clip, y1_clip) -> PupilEllipse:
+    pupil_ellipse.ellipse.cx_original = pupil_ellipse.ellipse.cx + x1_clip
+    pupil_ellipse.ellipse.cy_original = pupil_ellipse.ellipse.cy + y1_clip
+    return pupil_ellipse
 
 def img_to_be_returned(
         pupil_img_type: PupilImgType,
@@ -99,8 +106,9 @@ def extract_roi(img, roi_center_xy, roi_width_height):
     - Clips ROI to image bounds.
 
     Returns:
-    - roi_view: a view of img corresponding to the (clipped) ROI.
-                Modifying this will also modify img.
+    Returns:
+        roi: img[y1_clip:y2_clip, x1_clip:x2_clip]
+        offset_xy: (x1_clip, y1_clip)
     """
     H, W = img.shape[:2]
     cx, cy = roi_center_xy
@@ -134,7 +142,7 @@ def extract_roi(img, roi_center_xy, roi_width_height):
     img[:, 0] = 0          # left column
     img[:, -1] = 0         # right column
 
-    return roi
+    return roi, x1_clip, y1_clip
 
 
 

@@ -4,7 +4,7 @@ import numpy as np
 
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse, \
-    find_pupil_ellipse_with_flooding, PupilImgType, extract_roi
+    find_pupil_ellipse_with_flooding, PupilImgType, extract_roi, add_center_coordinates_of_original_img
 
 RETURN_FRAME_MAPPING = {
     "original": PupilImgType.ORIGINAL,
@@ -35,16 +35,25 @@ class EllipseFitter:
     # ---- Public API ----
 
 
+
+
     def find_pupil_left(self, image: np.ndarray) -> PupilEllipse:
 
         if self.config.apply_roi:
-            image = extract_roi(img=image,
+            image, x_clip, y_clip = extract_roi(img=image,
                                 roi_center_xy=self.config.roi_left_center_xy,
                                 roi_width_height=self.config.roi_left_width_height)
+        else:
+            x_clip, y_clip = 0, 0
 
-        return find_pupil_ellipse_with_flooding(img=image,
+        pupil_ellipse = find_pupil_ellipse_with_flooding(img=image,
                                                 threshold=self.config.binary_threshold_left,
                                                 frame_to_be_returned=RETURN_FRAME_MAPPING[self.config.frame_returned])
+
+        pupil_ellipse = add_center_coordinates_of_original_img(pupil_ellipse, x_clip, y_clip)
+        return pupil_ellipse
+
+
 
     def find_pupil_right(self, image: np.ndarray) -> PupilEllipse:
         if self.config.apply_roi:
