@@ -18,7 +18,7 @@ class EyeTrackerProxy:
     - Spawn the worker in a separate process.
     - Send control commands via req_q ("init", "start", "stop", "set_*", "shutdown").
     - Attach to the shared-memory rings created by the worker.
-    - Provide convenient APIs to fetch frames (left, right, rendered).
+    - Provide convenient APIs to fetch frames (left, right).
     """
 
     def __init__(self, use_dummy: bool = False):
@@ -28,7 +28,6 @@ class EyeTrackerProxy:
 
         self.left_ring: Optional[ShmRing] = None
         self.right_ring: Optional[ShmRing] = None
-        self.rendered_ring: Optional[ShmRing] = None
 
         self.use_dummy = use_dummy
 
@@ -38,7 +37,7 @@ class EyeTrackerProxy:
     def _make_process(self) -> mp.Process:
         # NOTE: adjust this import path to wherever your worker actually lives.
         from brillouin_system.eye_tracker.eye_tracker_worker import eye_tracker_worker
-        return mp.Process(target=eye_tracker_worker, args=(self.req_q, self.evt_q), daemon=True)
+        return mp.Process(target=eye_tracker_worker, args=(self.req_q, self.evt_q), daemon=False)
 
     # -------------------------------------------------------------------------
     # Lifecycle
@@ -84,9 +83,7 @@ class EyeTrackerProxy:
         if self.right_ring:
             self.right_ring.close()
             self.right_ring = None
-        if self.rendered_ring:
-            self.rendered_ring.close()
-            self.rendered_ring = None
+
 
     # -------------------------------------------------------------------------
     # Internal helpers
@@ -99,12 +96,10 @@ class EyeTrackerProxy:
             self.left_ring.close()
         if self.right_ring:
             self.right_ring.close()
-        if self.rendered_ring:
-            self.rendered_ring.close()
 
         self.left_ring = ShmRing(ShmFrameSpec(**evt["left_spec"]), create=False)
         self.right_ring = ShmRing(ShmFrameSpec(**evt["right_spec"]), create=False)
-        self.rendered_ring = ShmRing(ShmFrameSpec(**evt["rendered_spec"]), create=False)
+
 
     def _wait_for(self, typ: str) -> dict:
         """
@@ -141,6 +136,7 @@ class EyeTrackerProxy:
     def set_allied_configs(self, cfg_left, cfg_right) -> None:
         """
         Push new Allied Vision camera configs into the EyeTracker.
+        If the worker reshapes its rings, we reattach and ACK the reshape.
         """
         self.req_q.put({
             "type": "set_allied_configs",
@@ -189,20 +185,17 @@ class EyeTrackerProxy:
     # -------------------------------------------------------------------------
     def get_frame(
         self,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
+    ) -> Tuple[np.ndarray, np.ndarray, Dict]:
         """
         Block until the next frame event arrives, then return the three images
-        (left, right, rendered) and metadata.
+        (left, right) and metadata.
 
         Returns
         -------
-        (left, right, rendered, meta)
+        (left, right, meta)
           left     : np.ndarray (H, W, 3), uint8
           right    : np.ndarray (H, W, 3), uint8
-          rendered : np.ndarray (H, W, 3), uint8
-          meta     : dict with keys:
-                     - "ts": float timestamp
-                     - "idx": int ring index
+          meta     : Dict: {"ts": last["ts"], "idx": last["idx"], "pupil3D": pupil3D}
         """
         while True:
             msg = self.evt_q.get()
@@ -210,19 +203,28 @@ class EyeTrackerProxy:
 
             if typ == "frame":
                 idx = msg["idx"]
-                if not (self.left_ring and self.right_ring and self.rendered_ring):
+                if not (self.left_ring and self.right_ring):
                     raise RuntimeError("Rings not attached")
 
                 left = self.left_ring.read_slot(idx)
                 right = self.right_ring.read_slot(idx)
-                rendered = self.rendered_ring.read_slot(idx)
 
-                meta = {
-                    k: msg[k]
-                    for k in ("ts", "idx")
-                    if k in msg
-                }
-                return left, right, rendered, meta
+                p3d_dict = msg.get("pupil3D")
+                if p3d_dict is not None:
+                    from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
+                    pupil3D = Pupil3D(
+                        center_left=np.array(p3d_dict["center_left"]) if p3d_dict["center_left"] is not None else None,
+                        center_ref=np.array(p3d_dict["center_ref"]) if p3d_dict["center_ref"] is not None else None,
+                        normal_left=np.array(p3d_dict["normal_left"]) if p3d_dict["normal_left"] is not None else None,
+                        normal_ref=np.array(p3d_dict["normal_ref"]) if p3d_dict["normal_ref"] is not None else None,
+                        radius=p3d_dict["radius"],
+                    )
+                else:
+                    pupil3D = None
+
+                meta = {"ts": msg["ts"], "idx": msg["idx"], "pupil3D": pupil3D}
+
+                return left, right, meta
 
             elif typ in ("warn", "started", "stopped", "inited",
                          "allied_configs_applied", "et_config_applied",
@@ -237,12 +239,16 @@ class EyeTrackerProxy:
 
     def get_latest(
         self, timeout: Optional[float] = None
-    ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]]:
+    ) -> Optional[Tuple[np.ndarray, np.ndarray, Dict]]:
         """
         Return the latest frame triple currently queued, or block up to `timeout`
         to wait for one.
 
         If no usable frame arrives, returns None.
+        (left, right, meta)
+          left     : np.ndarray (H, W, 3), uint8
+          right    : np.ndarray (H, W, 3), uint8
+          meta     : Dict: {"ts": last["ts"], "idx": last["idx"], "pupil3D": pupil3D}
         """
         last = None
 
@@ -284,16 +290,26 @@ class EyeTrackerProxy:
             return None
 
         idx = last["idx"]
-        if not (self.left_ring and self.right_ring and self.rendered_ring):
+        if not (self.left_ring and self.right_ring):
             raise RuntimeError("Rings not attached")
 
         left = self.left_ring.read_slot(idx)
         right = self.right_ring.read_slot(idx)
-        rendered = self.rendered_ring.read_slot(idx)
 
-        meta = {
-            k: last[k]
-            for k in ("ts", "idx")
-            if k in last
-        }
-        return left, right, rendered, meta
+        # Rebuild Pupil3D from the last frame message
+        p3d_dict = last.get("pupil3D")
+        if p3d_dict is not None:
+            from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
+            pupil3D = Pupil3D(
+                center_left=np.array(p3d_dict["center_left"]) if p3d_dict["center_left"] is not None else None,
+                center_ref=np.array(p3d_dict["center_ref"]) if p3d_dict["center_ref"] is not None else None,
+                normal_left=np.array(p3d_dict["normal_left"]) if p3d_dict["normal_left"] is not None else None,
+                normal_ref=np.array(p3d_dict["normal_ref"]) if p3d_dict["normal_ref"] is not None else None,
+                radius=p3d_dict["radius"],
+            )
+        else:
+            pupil3D = None
+
+        meta = {"ts": last["ts"], "idx": last["idx"], "pupil3D": pupil3D}
+
+        return left, right, meta

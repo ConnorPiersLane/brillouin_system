@@ -95,7 +95,6 @@ class HiSignaller(QObject):
         )
 
 
-
     def update_system_state(self, new_state: SystemState):
         self.system_state = new_state
         self.update_system_state_in_frontend.emit(new_state)
@@ -108,6 +107,9 @@ class HiSignaller(QObject):
         self.emit_camera_settings()
         self.emit_do_background_subtraction()
         self.emit_do_live_fitting_state()
+        self.update_stage_positions() #xyz stage
+        self.update_zaber_lens_position(self.backend.zaber_eye_lens.get_position()) # lens
+
 
     def _mailbox_push_andor_display(self, display):
         need_notify = False
@@ -332,11 +334,7 @@ class HiSignaller(QObject):
     def snap_and_fit(self):
         try:
             frame, _ = self.backend.get_andor_frame()
-            fitting: FittedSpectrum = self.backend.get_fitted_spectrum(frame)
-            display = self.backend.get_display_results(frame, fitting)
-
-            # push to mailbox and notify GUI
-            self._mailbox_push_andor_display(display)
+            self.backend.display_spectrum(frame=frame)
 
         except Exception as e:
             self.log_message.emit(f"Error snapping frame: {e}")

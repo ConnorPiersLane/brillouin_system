@@ -1,6 +1,11 @@
 import logging
 import os
 
+from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord, RigPupilTransform
+from brillouin_system.eye_tracker.eye_position.cornea_position import calc_distance_laser_corner
+from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
+from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrackerController
 from brillouin_system.logging_utils import logging_setup
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
@@ -23,9 +28,9 @@ from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph import GraphicsLayoutWidget
+from pyqtgraph import GraphicsLayoutWidget, TextItem
 
-from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
+from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap, QImage
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QGridLayout,
@@ -73,38 +78,13 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 
 
-# Testing
-brillouin_manager = HiBackend(
-    camera=DummyCamera(),
-    shutter_manager=ShutterManagerDummy('human_interface'),
-    microwave=MicrowaveDummy(),
-    zaber_eye_lens=ZaberEyeLensDummy(),
-    zaber_hi=ZaberHumanInterfaceDummy(),
-    is_sample_illumination_continuous=True
-)
 
 
 
-# ## Running
-# brillouin_manager = HiBackend(
-#     camera=IxonUltra(
-#         index = 0,
-#         temperature = -40, #"off"
-#         fan_mode = "full",
-#         x_start = 40, x_end  = 120,
-#         y_start= 300, y_end  = 315,
-#         vbin= 1, hbin  = 1,
-#         verbose = True,
-#         advanced_gain_option=False
-#     ),
-#     shutter_manager=ShutterManager('human_interface'),
-#     microwave=Microwave(),
-#     zaber_eye_lens=ZaberEyeLens(),
-#     zaber_hi=ZaberHumanInterface(),
-#     is_sample_illumination_continuous=True
-# )
-
-
+use_backend_dummy = True
+# Eye Tracking
+include_eye_tracking = True
+use_eye_tracker_dummy = True
 
 
 
@@ -120,6 +100,38 @@ class NotifyingViewBox(pg.ViewBox):
             self.userScaled.emit()
 
 
+
+def create_backend(use_dummy: bool) -> HiBackend:
+    # Testing
+    if use_dummy:
+        backend = HiBackend(
+            camera=DummyCamera(),
+            shutter_manager=ShutterManagerDummy('human_interface'),
+            microwave=MicrowaveDummy(),
+            zaber_eye_lens=ZaberEyeLensDummy(),
+            zaber_hi=ZaberHumanInterfaceDummy(),
+            is_sample_illumination_continuous=True
+        )
+
+    else:
+        backend = HiBackend(
+            camera=IxonUltra(
+                index = 0,
+                temperature = -40, #"off"
+                fan_mode = "full",
+                x_start = 40, x_end  = 120,
+                y_start= 300, y_end  = 315,
+                vbin= 1, hbin  = 1,
+                verbose = True,
+                advanced_gain_option=False
+            ),
+            shutter_manager=ShutterManager('human_interface'),
+            microwave=Microwave(),
+            zaber_eye_lens=ZaberEyeLens(),
+            zaber_hi=ZaberHumanInterface(),
+            is_sample_illumination_continuous=True
+        )
+    return backend
 
 class HiFrontend(QWidget):
 
@@ -141,7 +153,6 @@ class HiFrontend(QWidget):
     move_zaber_stage_y_requested = pyqtSignal(float)
     move_zaber_stage_z_requested = pyqtSignal(float)
 
-
     run_calibration_requested = pyqtSignal()
     take_axial_scan_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
@@ -158,10 +169,24 @@ class HiFrontend(QWidget):
     save_selected_axial_scans_requested = pyqtSignal(list)
     remove_selected_axial_scans_requested = pyqtSignal(list)
 
-
+    # Eye Tracking Signals
+    set_et_allied_configs = pyqtSignal(object, object)  # left_cfg, right_cfg
+    start_et_saving = pyqtSignal()
+    stop_et_saving = pyqtSignal()
+    set_et_config = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
+
+        # Attribute
+        self.history_data = deque(maxlen=100)
+        self.laser_focus_position: RigCoord | None = None
+
+
+        # --- Create log_view early so logging can safely use it ---
+        self.log_view = QtWidgets.QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(120)
 
         # --- Logging to GUI (Qt handler) ---
         self.log_bridge = QtLogBridge()
@@ -177,12 +202,9 @@ class HiFrontend(QWidget):
         lg.setLevel(logging.INFO)
 
 
-
-        self.history_data = deque(maxlen=100)
-
         self.setWindowTitle("Brillouin Viewer (Live)")
 
-        self.brillouin_signaller = HiSignaller(manager=brillouin_manager)
+        self.brillouin_signaller = HiSignaller(manager=create_backend(use_backend_dummy))
         self.brillouin_signaller_thread = QThread()
         self.brillouin_signaller.moveToThread(self.brillouin_signaller_thread)
 
@@ -244,15 +266,42 @@ class HiFrontend(QWidget):
         self.save_selected_axial_scans_requested.connect(self.brillouin_signaller.save_multiple_axial_scans)
         self.remove_selected_axial_scans_requested.connect(self.brillouin_signaller.remove_selected_axial_scans)
 
+
+
+
+
         # Connect signals BEFORE starting the thread
         self.brillouin_signaller_thread.started.connect(self.run_gui)
 
         # Start the thread after all connections
         self.brillouin_signaller_thread.start()
 
+        # Build UI (reuses self.log_view created above)
         self.init_ui()
 
         self.update_gui()
+
+        # --- Eye tracker thread & controller ---
+        if include_eye_tracking:
+            self.eye_thread = QThread(self)
+            self.eye_ctrl = EyeTrackerController(use_dummy=use_eye_tracker_dummy)  # or False
+            self.eye_ctrl.moveToThread(self.eye_thread)
+
+            # start/stop/shutdown
+            self.eye_thread.started.connect(self.eye_ctrl.start)
+            self.eye_ctrl.log_message.connect(self._append_log_line)
+            self.destroyed.connect(self.eye_ctrl.shutdown)
+
+            # frames into GUI
+            self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)
+
+            # Sending signals
+            self.set_et_allied_configs.connect(self.eye_ctrl.proxy.set_allied_configs)
+            self.start_et_saving.connect(self.eye_ctrl.proxy.start_saving)
+            self.stop_et_saving.connect(self.eye_ctrl.proxy.end_saving)
+            self.set_et_config.connect(self.eye_ctrl.proxy.set_et_config)
+
+            self.eye_thread.start()
 
     def _append_log_line(self, line: str):
         self.log_view.append(line)
@@ -272,13 +321,10 @@ class HiFrontend(QWidget):
         left_column_layout.addWidget(self.create_allied_vision_group())
         left_column_layout.addWidget(self.create_axial_scans_group())
         left_column_layout.addWidget(self.create_show_scan_results())
-
-
-
         left_column_layout.addStretch()
         outer_layout.addLayout(left_column_layout, 0)
 
-        # Mid COLUMN: Plots
+        # MID COLUMN: Plots + log view
         middle_column_layout = QVBoxLayout()
         middle_column_layout.addWidget(self.create_andor_display_group())
 
@@ -287,25 +333,21 @@ class HiFrontend(QWidget):
         shift_controls_row.addWidget(self.create_take_axial_scan_group())
         middle_column_layout.addLayout(shift_controls_row)
 
-        # in init_ui(): add at the bottom of the left column, for example
-        self.log_view = QtWidgets.QTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setMinimumHeight(120)
-        middle_column_layout.addWidget(self.log_view)
+        # log_view was created in __init__; just add it here
+        # middle_column_layout.addWidget(self.log_view)
 
         outer_layout.addLayout(middle_column_layout, 1)
 
         # FAR RIGHT COLUMN: Eye Tracking
         right_column_layout = QVBoxLayout()
-        right_column_layout.addWidget(self.create_eye_tracking_group())
+        if include_eye_tracking:
+            right_column_layout.addWidget(self.create_eye_tracking_group())
+            right_column_layout.addStretch()
+            outer_layout.addLayout(right_column_layout, 0)
+
+        right_column_layout.addWidget(self.create_log_group())
         right_column_layout.addStretch()
         outer_layout.addLayout(right_column_layout, 0)
-
-    # ---------------- Rendering ---------------- #
-
-
-
-
 
     # ---------------- UI Sections ---------------- #
 
@@ -545,11 +587,11 @@ class HiFrontend(QWidget):
         btn_row = QHBoxLayout()
         self.btn_allied_left = QPushButton("Left")
         self.btn_allied_right = QPushButton("Right")
-        self.btn_allied_fitting = QPushButton("Fitting")
+        self.btn_eye_tracking = QPushButton("Eye Tracking")
 
         btn_row.addWidget(self.btn_allied_left)
         btn_row.addWidget(self.btn_allied_right)
-        btn_row.addWidget(self.btn_allied_fitting)
+        btn_row.addWidget(self.btn_eye_tracking)
         btn_row.addStretch()
 
         # put the row into a real layout and set it on the group
@@ -560,16 +602,15 @@ class HiFrontend(QWidget):
         # wire up
         self.btn_allied_left.clicked.connect(self.open_allied_left_dialog)
         self.btn_allied_right.clicked.connect(self.open_allied_right_dialog)
-        self.btn_allied_fitting.clicked.connect(self.open_fitting_dialog)
+        self.btn_eye_tracking.clicked.connect(self.open_eye_tracker_config_dialog)
 
         return group
 
-
-
     def create_take_axial_scan_group(self):
-        group = QGroupBox("Take Axial Scan")
+        group = QGroupBox("Scan Axial Steps")
         layout = QFormLayout()
 
+        # --- Existing axial scan controls ---
         self.axial_id_input = QLineEdit()
         self.axial_num_input = QLineEdit("5")
         self.axial_step_input = QLineEdit("9")
@@ -578,53 +619,71 @@ class HiFrontend(QWidget):
         layout.addRow("Num Meas:", self.axial_num_input)
         layout.addRow("Step Size (µm):", self.axial_step_input)
 
-        self.axial_btn = QPushButton("Take Axial Scan")
+        self.axial_btn = QPushButton("Scan Axial Steps")
         self.axial_btn.clicked.connect(self.take_axial_scan)
         layout.addRow(self.axial_btn)
 
+        # --- Separator / title for lens scan ---
+        layout.addRow(QLabel("— Lens Scan (Zaber Eye Lens) —"))
+
+        # --- New lens scan controls ---
+        self.lens_scan_speed_input = QLineEdit("500")
+        self.lens_scan_dist_input = QLineEdit("2000")
+
+        self.lens_scan_speed_input.setFixedWidth(60)
+        self.lens_scan_dist_input.setFixedWidth(60)
+
+        layout.addRow("Speed (µm/s):", self.lens_scan_speed_input)
+        layout.addRow("Max Dist (µm):", self.lens_scan_dist_input)
+
+        self.lens_scan_btn = QPushButton("Slew + Frame")
+        # self.lens_scan_btn.clicked.connect(self.on_lens_scan_clicked)
+        layout.addRow(self.lens_scan_btn)
+
+        group.setLayout(layout)
+        return group
+
+    def create_log_group(self):
+        group = QGroupBox("Log Output")
+        layout = QVBoxLayout()
+        layout.addWidget(self.log_view)
         group.setLayout(layout)
         return group
 
     # --- Eye Tracking UI ---
 
     def create_eye_tracking_group(self):
-        """2x2 grid of black placeholders for future eye-tracking frames."""
-
-        def _make_black_pixmap(width=320, height=240):
-            """Small helper to generate a black placeholder image."""
-            pix = QPixmap(width, height)
-            pix.fill(Qt.black)
-            return pix
-
-
         group = QGroupBox("Eye Tracking")
 
-        grid = QGridLayout()
-        grid.setContentsMargins(8, 8, 8, 8)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
+        self.eye_glw = GraphicsLayoutWidget()
+        self.eye_glw.ci.setContentsMargins(4, 4, 4, 4)
+        self.eye_glw.ci.setSpacing(4)
 
-        # create 2x2 black placeholder views
-        self.eye_views = []
+        self.eye_vb = []
+        self.eye_img = []
+
         for i in range(4):
-            lbl = QLabel()
-            lbl.setObjectName(f"eyeView{i+1}")
-            lbl.setAlignment(Qt.AlignCenter)
-            lbl.setMinimumSize(180, 140)
-            lbl.setStyleSheet(
-                "background-color: black; border: 1px solid #444; border-radius: 6px;"
-            )
-            lbl.setPixmap(_make_black_pixmap(320, 240))
-            lbl.setScaledContents(True)
+            if i in (2,):  # example: go to next row after second image
+                self.eye_glw.ci.nextRow()
 
-            grid.addWidget(lbl, i // 2, i % 2)
-            self.eye_views.append(lbl)
+            vb = pg.ViewBox(lockAspect=True, enableMenu=False)
+            img = pg.ImageItem(autoDownsample=True)
+            vb.addItem(img)
+            vb.setBorder((80, 80, 80))
 
-        group.setLayout(grid)
-        group.setMinimumWidth(380)  # keeps the column tidy
+            self.eye_glw.ci.addItem(vb, row=i // 2, col=i % 2)
+
+            self.eye_vb.append(vb)
+            self.eye_img.append(img)
+
+        self._init_laser_position_map()
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.eye_glw)
+        group.setLayout(layout)
+        group.setMinimumWidth(800)
+        group.setMinimumHeight(800)
         return group
-
-
 
     def create_show_scan_results(self):
         """
@@ -1048,12 +1107,14 @@ class HiFrontend(QWidget):
 
     def update_zaber_lens_position(self, pos: float):
         self.lens_pos_display.setText(f"Lens {pos:.2f} µm")
+        self.laser_focus_position = RigCoord(x=0, y=0, z=pos/1000)
 
     # ---------------- GUI Update Loop ---------------- #
 
 
     def run_gui(self):
         self.start_live_requested.emit()
+
 
     def run_one_gui_update(self):
         self.snap_requested.emit()
@@ -1359,27 +1420,203 @@ class HiFrontend(QWidget):
     def _apply_allied_left(self, cfg_obj):
         """
         Called by AlliedConfigDialog on Apply for LEFT.
-        Sends new config to the dual-camera proxy (handles reshape handshake internally).
+        `cfg_obj` is the updated AlliedConfig for the left camera.
+        We emit both left & right configs to the eye-tracker proxy.
         """
-        pass
+        # Push both configs into the eye tracker proxy via our signal
+        self.set_et_allied_configs.emit(cfg_obj, None)
 
     def _apply_allied_right(self, cfg_obj):
         """
         Called by AlliedConfigDialog on Apply for RIGHT.
         """
-        pass
 
-    def _get_dual_proxy(self):
-        """
-        Locate the DualCameraProxy instance.
-        Adjust this if your app stores it differently.
-        """
-        pass
+        self.set_et_allied_configs.emit(None, cfg_obj)
 
+    def open_eye_tracker_config_dialog(self):
+        """
+        Open the EyeTrackerConfigDialog and on Apply send the config to the
+        eye-tracker worker via EyeTrackerProxy.set_et_config.
+        """
+
+        def _on_apply(cfg):
+            """
+            Called by EyeTrackerConfigDialog.apply() after updating the
+            global ThreadSafeConfig. `cfg` is an EyeTrackerConfig instance.
+            """
+            try:
+                # Emit our signal, which is connected to proxy.set_et_config
+                self.set_et_config.emit(cfg)
+                log.info("[EyeTracker] Sent new eye tracker config to proxy.")
+            except Exception as e:
+                log.exception(f"[EyeTracker] Failed to send config to proxy: {e}")
+
+        dlg = EyeTrackerConfigDialog(
+            on_apply=_on_apply,
+            parent=self,
+        )
+        dlg.exec_()
+
+    def _init_laser_position_map(self):
+        """
+        Initializes the position map display in eye_vb[2].
+        Includes:
+            - Concentric circles (radius 1..4)
+            - Radial lines at 0°, 45°, 90°, 135°
+            - Moving laser point
+            - Text display (x, y, Δz) in upper-right corner
+        """
+        vb = self.eye_vb[2]
+
+        # -------------------------------
+        # Configure ViewBox
+        # -------------------------------
+        vb.setAspectLocked(True)  # Keep it square
+        vb.setRange(xRange=(-4, 4), yRange=(-4, 4))
+        vb.invertY(False)  # make y-axis normal (upward is +y)
+        # If you want "y from 4 down to -4", then:
+        # vb.invertY(True)
+
+        # -------------------------------
+        # Draw concentric circles
+        # -------------------------------
+        angles = np.linspace(0, 2 * np.pi, 720)
+        for r in range(1, 5):
+            x = r * np.cos(angles)
+            y = r * np.sin(angles)
+            circle = pg.PlotDataItem(
+                x, y,
+                pen=pg.mkPen(150, 150, 150)  # light gray
+            )
+            vb.addItem(circle)
+
+        # -------------------------------
+        # Radial lines: 0°, 45°, 90°, 135°
+        # -------------------------------
+        for angle_deg in [0, 45, 90, 135, 180, 225, 270, 315, ]:
+            theta = np.deg2rad(angle_deg)
+            x = [1 * np.cos(theta), 4 * np.cos(theta)]
+            y = [1 * np.sin(theta), 4 * np.sin(theta)]
+
+            line = pg.PlotDataItem(
+                x, y,
+                pen=pg.mkPen(150, 150, 150, style=QtCore.Qt.DashLine)
+            )
+            vb.addItem(line)
+
+        # -------------------------------
+        # Moving laser dot
+        # -------------------------------
+        self.laser_point = pg.ScatterPlotItem(
+            [0.0], [0.0],
+            size=12,
+            brush=pg.mkBrush('r'),
+            pen=pg.mkPen('r')
+        )
+        vb.addItem(self.laser_point)
+
+        # -------------------------------
+        # Text display (top-right)
+        # -------------------------------
+        self.pos_text = TextItem(
+            text="x=\ny=\nΔz=",
+            color=(0, 0, 0),
+            anchor=(1, 0)  # right-top anchor
+        )
+        vb.addItem(self.pos_text)
+
+        # Place it at the exact upper-right of the defined range
+        # If invertY(False): top = +4
+        # If invertY(True):  top = -4
+        top_y = 4 if not vb.yInverted() else -4
+
+        self.pos_text.setPos(4, top_y)
+
+    def update_laser_position_cartesian(self, x: float, y: float):
+        """
+        Update the laser position on the map using Cartesian coordinates.
+        """
+
+        if hasattr(self, "laser_point"):
+            self.laser_point.setData([x], [y])
+            self.laser_point.setVisible(True)
+
+    def clear_laser_position(self):
+        if hasattr(self, "laser_point"):
+            # Option 1: no points
+            self.laser_point.setData([], [])
+            # Option 2 (optional): also hide it
+            self.laser_point.setVisible(False)
+
+    def update_position_text(self, x=None, y=None, dz=None):
+        """
+        Update the x, y, Δz display with fixed width fields.
+        If a value is None, show blank padded fields.
+        """
+
+        def fmt(v):
+            return f"{v:6.3f}" if v is not None else " " * 6
+
+        tx = fmt(x)
+        ty = fmt(y)
+        tz = fmt(dz)
+
+        self.pos_text.setText(
+            f"x = {tx}\n"
+            f"y = {ty}\n"
+            f"Δz = {tz}"
+        )
+
+    # def update_laser_position_polar(self, r: float, theta_deg: float):
+    #     """
+    #     Update the laser position using polar coordinates (radius, degrees).
+    #     0° = +X axis, 90° = +Y axis, etc.
+    #     """
+    #     theta = np.deg2rad(theta_deg)
+    #     x = r * np.cos(theta)
+    #     y = r * np.sin(theta)
+    #     self.update_laser_position_cartesian(x, y)
+
+
+
+    @QtCore.pyqtSlot(object, object, dict)
+    def on_eye_frames_ready(self, left, right, meta):
+        """
+        (left, right, meta)
+          left     : np.ndarray (H, W, 3), uint8
+          right    : np.ndarray (H, W, 3), uint8
+          meta     : Dict: {"ts": last["ts"], "idx": last["idx"], "pupil3D": pupil3D}
+        """
+        # left/right/rendered: np.ndarray(H, W, 3), uint8
+
+        # pyqtgraph's ImageItem can handle 3-channel images, but a safe option is
+        # to convert to grayscale for now:
+
+        self.eye_img[0].setImage(left, autoLevels=True)
+        self.eye_img[1].setImage(right, autoLevels=True)
+        pupil3D: Pupil3D = meta['pupil3D']
+        # self.eye_img[2].setImage(rgb_to_gray(rendered), autoLevels=True)
+        # self.eye_img[3].setImage(rgb_to_gray(rendered), autoLevels=True)
+
+
+        if pupil3D is not None:
+            transform = RigPupilTransform(pupil_center=RigCoord(x=pupil3D.center_ref.x,
+                                                                y=pupil3D.center_ref.y,
+                                                                z=pupil3D.center_ref.z)
+                                          )
+            laser_pupil_coord = transform.rig_to_pupil(self.laser_focus_position)
+            self.update_laser_position_cartesian(x=laser_pupil_coord.x, y=laser_pupil_coord.y)
+            delta_laser_corner = calc_distance_laser_corner(laser_pupil_coord)
+            self.update_position_text(x=laser_pupil_coord.x, y=laser_pupil_coord.y, dz=delta_laser_corner)
+
+        else:
+            self.clear_laser_position()
+            self.update_position_text(None, None, None)
+
+        self.update_laser_position_cartesian(x=1, y=2)
+        self.update_position_text(1, 2, self.laser_focus_position.z)# Test
     # ---- Fitting button (placeholder) ----
-    def open_fitting_dialog(self):
-        # Replace with your real fitting/config dialog
-        QMessageBox.information(self, "Fitting", "Fitting configuration dialog not implemented yet.")
+
 
     def closeEvent(self, event):
         log.info("GUI shutdown initiated...")

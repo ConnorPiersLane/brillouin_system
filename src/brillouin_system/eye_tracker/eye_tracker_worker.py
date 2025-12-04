@@ -14,7 +14,7 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
     img_shape = (IMG_SIZE[0], IMG_SIZE[1], 3) # All images are made to rgb
 
-    left_ring = right_ring = rendered_ring = None
+    left_ring = right_ring = None
     idx = 0
     running = False
     eye_tracker = None
@@ -42,7 +42,6 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
                     left_base_name  = f"{process_name}_left"
                     right_base_name = f"{process_name}_right"
-                    rendered_base_name  = f"{process_name}_rendered"
 
                     left_s = ShmFrameSpec(
                         name=left_base_name,
@@ -56,22 +55,14 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
                         dtype=DTYPE,
                         slots=SLOTS,
                     )
-                    rendered_s = ShmFrameSpec(
-                        name=rendered_base_name,
-                        shape=img_shape,
-                        dtype=DTYPE,
-                        slots=SLOTS,
-                    )
 
                     left_ring  = ShmRing(left_s, create=True)
                     right_ring = ShmRing(right_s, create=True)
-                    rendered_ring = ShmRing(rendered_s, create=True)
 
                     evt_q.put({
                         "type": "inited",
                         "left_spec": left_s.__dict__,
                         "right_spec": right_s.__dict__,
-                        "rendered_spec": rendered_s.__dict__,
                     })
 
                 elif typ == "start":
@@ -119,34 +110,44 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
                     break
 
             # ---- streaming loop ----
-            if running and eye_tracker and left_ring and right_ring and rendered_ring:
+            if running and eye_tracker and left_ring and right_ring:
                 results_for_gui: EyeTrackerResultsForGui = eye_tracker.get_results_for_gui()
                 left_frame = results_for_gui.cam_left_img
                 right_frame = results_for_gui.cam_right_img
-                rendered_frame = results_for_gui.rendered_img
 
+                p3d = results_for_gui.pupil3D
+                if p3d is not None:
+                    p3d_dict = {
+                        "center_left": p3d.center_left.tolist() if p3d.center_left is not None else None,
+                        "center_ref": p3d.center_ref.tolist() if p3d.center_ref is not None else None,
+                        "normal_left": p3d.normal_left.tolist() if p3d.normal_left is not None else None,
+                        "normal_ref": p3d.normal_ref.tolist() if p3d.normal_ref is not None else None,
+                        "radius": p3d.radius,
+                    }
+                else:
+                    p3d_dict = None
 
                 # Guard against mismatches (avoid assert in write_slot)
                 if (tuple(getattr(left_frame,  "shape", ()))  != tuple(left_ring.spec.shape) or
-                    tuple(getattr(right_frame, "shape", ())) != tuple(right_ring.spec.shape) or
-                    tuple(getattr(rendered_frame, "shape", ())) != tuple(rendered_ring.spec.shape)
+                    tuple(getattr(right_frame, "shape", ())) != tuple(right_ring.spec.shape)
                     ):
                     # Optionally emit a diagnostic; skip this pair
                     evt_q.put({
                         "type": "warn",
                         "msg": f"Frame/Spec mismatch: Left {getattr(left_frame,'shape',None)} vs {left_ring.spec.shape}, "
                                f"Right {getattr(right_frame,'shape',None)} vs {right_ring.spec.shape}, "
-                               f"Rendered {getattr(rendered_frame, 'shape', None)} vs {rendered_ring.spec.shape}, "
                     })
                     continue
 
                 left_ring.write_slot(idx, left_frame)
                 right_ring.write_slot(idx, right_frame)
-                rendered_ring.write_slot(idx, rendered_frame)
 
-                evt_q.put({"type": "frame",
-                           "idx": idx,
-                           "ts": time.time()})
+                evt_q.put({
+                    "type": "frame",
+                    "idx": idx,
+                    "ts": time.time(),
+                    "pupil3D": p3d_dict,
+                })
                 idx = (idx + 1) % SLOTS
 
     except Exception as e:
@@ -159,7 +160,6 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
             left_ring.close(); left_ring.unlink()
         if right_ring:
             right_ring.close(); right_ring.unlink()
-        if rendered_ring:
-            rendered_ring.close(); rendered_ring.unlink()
+
 
 

@@ -148,5 +148,3 @@ def draw_ellipse_rgb(img_rgb, ellipse, color_rgb=(0, 255, 0), thickness=1):
         bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
         cv2.ellipse(bgr, opencv_ellipse, bgr_color, thickness)
         return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-
-

@@ -34,11 +34,6 @@ class PupilEllipse:
     ellipse: Ellipse2D | None
 
 
-def add_center_coordinates_of_original_img(pupil_ellipse: PupilEllipse, x1_clip, y1_clip) -> PupilEllipse:
-    pupil_ellipse.ellipse.cx_original = pupil_ellipse.ellipse.cx + x1_clip
-    pupil_ellipse.ellipse.cy_original = pupil_ellipse.ellipse.cy + y1_clip
-    return pupil_ellipse
-
 def img_to_be_returned(
         pupil_img_type: PupilImgType,
         original_frame: np.ndarray | None,

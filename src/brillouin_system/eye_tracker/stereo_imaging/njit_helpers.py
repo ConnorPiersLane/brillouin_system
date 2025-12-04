@@ -82,7 +82,7 @@ def _lm_refine_point(
         # solve H δ = -g
         try:
             delta = -np.linalg.solve(H, g)
-        except np.linalg.LinAlgError:
+        except:
             break
 
         # small step → stop

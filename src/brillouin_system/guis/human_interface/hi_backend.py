@@ -353,13 +353,7 @@ class HiBackend:
         """
 
 
-
-
-        if self.do_background_subtraction:
-            frame_with_sub_bg = self.subtract_background(frame)
-            px, sline = self.spectrum_fitter.get_px_sline_from_image(frame_with_sub_bg)
-        else:
-            px, sline = self.spectrum_fitter.get_px_sline_from_image(frame)
+        px, sline = self.spectrum_fitter.get_px_sline_from_image(frame)
 
         if not self.do_live_fitting and not self.is_reference_mode:
             return self.spectrum_fitter.get_empty_fitting(px, sline)
@@ -394,8 +388,7 @@ class HiBackend:
 
                 frame, ts = self._get_andor_camera_snap()
 
-                fs = self.get_fitted_spectrum(frame, ts)
-                self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
+                self.display_spectrum(frame=frame)
 
                 all_results.append(
                     MeasurementPoint(
@@ -431,8 +424,7 @@ class HiBackend:
 
                     frame, ts = self._get_andor_camera_snap()
 
-                    fs = self.get_fitted_spectrum(frame)
-                    self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
+                    self.display_spectrum(frame=frame)
 
                     all_results.append(
                         MeasurementPoint(
@@ -456,6 +448,16 @@ class HiBackend:
             eye_location= None
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
+
+    def display_spectrum(self, frame):
+        if self.do_background_subtraction:
+            frame_with_sub_bg = self.subtract_background(frame)
+            fs = self.get_fitted_spectrum(frame_with_sub_bg)
+            self.b2f_emit_display_result(self.get_display_results(frame=frame_with_sub_bg, fitting=fs))
+        else:
+            fs = self.get_fitted_spectrum(frame)
+            self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
+
 
     def get_axial_scan_data(self, index: int):
         try:
