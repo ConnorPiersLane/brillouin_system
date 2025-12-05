@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 
 from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord, RigPupilTransform
 from brillouin_system.eye_tracker.eye_position.cornea_position import calc_distance_laser_corner
@@ -173,6 +174,7 @@ class HiFrontend(QWidget):
     set_et_allied_configs = pyqtSignal(object, object)  # left_cfg, right_cfg
     start_et_saving = pyqtSignal()
     stop_et_saving = pyqtSignal()
+    request_eye_shutdown = pyqtSignal()
     set_et_config = pyqtSignal(object)
 
     def __init__(self):
@@ -290,7 +292,6 @@ class HiFrontend(QWidget):
             # start/stop/shutdown
             self.eye_thread.started.connect(self.eye_ctrl.start)
             self.eye_ctrl.log_message.connect(self._append_log_line)
-            self.destroyed.connect(self.eye_ctrl.shutdown)
 
             # frames into GUI
             self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)
@@ -300,6 +301,7 @@ class HiFrontend(QWidget):
             self.start_et_saving.connect(self.eye_ctrl.proxy.start_saving)
             self.stop_et_saving.connect(self.eye_ctrl.proxy.end_saving)
             self.set_et_config.connect(self.eye_ctrl.proxy.set_et_config)
+            self.request_eye_shutdown.connect(self.eye_ctrl.shutdown)
 
             self.eye_thread.start()
 
@@ -932,6 +934,17 @@ class HiFrontend(QWidget):
 
     def on_stop_clicked(self):
         log.info("[Brillouin Viewer] STOP clicked.")
+
+        # --- EMERGENCY: close shutters in a separate thread immediately ---
+        try:
+            threading.Thread(
+                target=self.brillouin_signaller.backend.shutter_manager.close_all,
+                daemon=True
+            ).start()
+        except Exception as e:
+            log.exception("[STOP] Failed to spawn emergency shutter close thread: %s", e)
+
+        # Existing logic: cancel operations + clean stop of live view
         self.brillouin_signaller.cancel_operations()
         self.close_all_shutters_requested.emit()
         self.stop_live_requested.emit()
@@ -1617,25 +1630,22 @@ class HiFrontend(QWidget):
         self.update_position_text(1, 2, self.laser_focus_position.z)# Test
     # ---- Fitting button (placeholder) ----
 
-
     def closeEvent(self, event):
         log.info("GUI shutdown initiated...")
 
-        # ---- your existing orderly shutdown (threads/devices) here ----
-        try:
-            self.brillouin_signaller._running = False
-            self.brillouin_signaller._thread_active = False
-            self.brillouin_signaller.close()  # safe to block on exit
-            self.brillouin_signaller_thread.quit()
-            self.brillouin_signaller_thread.wait(1000)
-        except Exception as e:
-            log.exception(f"Error during GUI shutdown: {e}")
+        # ---- Eye Tracker Shutdown via Signal ----
+        if include_eye_tracking:
+            self.request_eye_shutdown.emit()  # asynchronous
+            self.eye_thread.quit()  # request thread exit
+            self.eye_thread.wait(3000)  # block until it finishes
+
+        # ---- Brillouin backend shutdown (similar pattern if desired) ----
+        self.brillouin_signaller.request_stop.emit()
+        self.brillouin_signaller_thread.quit()
+        self.brillouin_signaller_thread.wait(3000)
 
         log.info("GUI shutdown complete.")
-
-        # Ask writer process to flush & exit (also registered via atexit)
-        shutdown_logging()
-        event.accept()
+        super().closeEvent(event)
 
 
 def main():
