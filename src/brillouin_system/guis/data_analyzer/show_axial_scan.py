@@ -1,10 +1,8 @@
-import sys
-import pickle
 import numpy as np
 
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QLabel, QVBoxLayout,
-    QHBoxLayout, QSpinBox, QFileDialog, QGroupBox, QPushButton, QMessageBox
+    QWidget, QLabel, QVBoxLayout,
+    QHBoxLayout, QSpinBox, QGroupBox, QPushButton, QMessageBox
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -254,7 +252,6 @@ class AxialScanViewer(QWidget):
         print(f"ID: {scan.id}, Internal tracker i: {scan.i}")
         print(f"Number of measurements: {len(scan.measurements)}")
         self.calc.print_current_model()
-        print(f"Eye Location: {getattr(scan.eye_location, 'index', 'None')}")
         ss = scan.system_state
         print(f"System State: reference_mode={ss.is_reference_mode}, "
               f"bg_subtraction={ss.is_do_bg_subtraction_active}, "

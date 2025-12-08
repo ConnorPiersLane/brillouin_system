@@ -23,7 +23,7 @@ from brillouin_system.devices.zaber_engines.zaber_microscope.zaber_microscope im
 
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, MeasurementPoint, AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, MeasurementPoint, AxialScan
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
@@ -415,7 +415,7 @@ class BrillouinBackend:
             frame_right_allied=None,
         )
 
-    def take_axial_scan(self, request_axial_scan: RequestAxialScan):
+    def take_axial_scan(self, request_axial_scan: RequestAxialStepScan):
 
         if self.is_reference_mode:
             print(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")

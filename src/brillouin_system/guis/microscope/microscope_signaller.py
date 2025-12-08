@@ -13,7 +13,7 @@ from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
 
@@ -436,7 +436,7 @@ class BrillouinSignaller(QObject):
             self.update_system_state(new_state=old_state)
 
     @pyqtSlot(object)
-    def take_axial_scan(self, request_axial_scan: RequestAxialScan):
+    def take_axial_scan(self, request_axial_scan: RequestAxialStepScan):
         """
         Generates a series of ZaberPositions using the given axis, n, and step,
         then takes measurements and updates the GUI accordingly.
@@ -447,7 +447,7 @@ class BrillouinSignaller(QObject):
         QCoreApplication.processEvents()
 
         try:
-            self.backend.take_axial_scan(request_axial_scan)
+            self.backend.take_axial_step_scan(request_axial_scan)
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)

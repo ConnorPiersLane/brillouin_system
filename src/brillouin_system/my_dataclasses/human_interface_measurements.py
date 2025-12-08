@@ -16,11 +16,18 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 # -------------- Request for Scan --------------
 @dataclass
-class RequestAxialScan:
+class RequestAxialStepScan:
     id: str
     n_measurements: int
     step_size_um: float
+    laser_position: tuple[float, float, float] | None = None #mm
 
+@dataclass
+class RequestAxialContScan:
+    id: str
+    speed_um_s: float
+    max_distance_um: float
+    laser_position: tuple[float, float, float] | None = None #mm
 # -------------- Scan Result --------------
 
 @dataclass
@@ -31,9 +38,7 @@ class MeasurementPoint:
     # frame_right_allied: np.ndarray | None = None
     time_stamp: float | None = None
 
-@dataclass
-class EyeLocation:
-    index: int = 0
+
 
 @dataclass
 class AxialScan:
@@ -42,7 +47,8 @@ class AxialScan:
     measurements: list[MeasurementPoint]
     system_state: SystemState
     calibration_params: CalibrationPolyfitParameters | None
-    eye_location: None | EyeLocation = None
+    laser_position: tuple[float, float, float] | None = None # in mm
+    scan_speed_um_s: float | None = None
 
 # -------------- Scan Fitting --------------
 

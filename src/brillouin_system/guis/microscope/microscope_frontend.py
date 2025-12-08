@@ -132,7 +132,7 @@ class BrillouinViewerMicroscope(QWidget):
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
         self.acquire_background_requested.connect(self.brillouin_signaller.acquire_background_image)
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
-        self.take_measurement_requested.connect(self.brillouin_signaller.take_axial_scan)
+        self.take_measurement_requested.connect(self.brillouin_signaller.take_axial_step_scan)
         self.gui_ready.connect(self.brillouin_signaller.on_gui_ready)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)

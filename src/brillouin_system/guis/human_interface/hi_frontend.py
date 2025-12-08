@@ -1,26 +1,19 @@
 import logging
-import os
 import threading
 
-from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord, RigPupilTransform
+from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord, RigPupilTransform, PupilCoord
 from brillouin_system.eye_tracker.eye_position.cornea_position import calc_distance_laser_corner
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
 from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrackerController
 from brillouin_system.logging_utils import logging_setup
 
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"  # Qt ≥ 5.14
-
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt
 
 # Must be set before QApplication is constructed:
 QtCore.QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-QtCore.QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
-
+# QtCore.QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
 
 import sys
@@ -39,8 +32,6 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5 import QtCore
-
-
 
 from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
 from brillouin_system.logging_utils.logging_setup import start_logging, install_crash_hooks, get_logger, \
@@ -64,7 +55,8 @@ from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
 from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan, \
+    RequestAxialContScan
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
 
@@ -76,18 +68,10 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-
-
-
-
-
-
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
 use_eye_tracker_dummy = True
-
-
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -99,8 +83,6 @@ class NotifyingViewBox(pg.ViewBox):
         super().mouseDragEvent(ev, axis)
         if ev.isFinish():
             self.userScaled.emit()
-
-
 
 def create_backend(use_dummy: bool) -> HiBackend:
     # Testing
@@ -155,7 +137,8 @@ class HiFrontend(QWidget):
     move_zaber_stage_z_requested = pyqtSignal(float)
 
     run_calibration_requested = pyqtSignal()
-    take_axial_scan_requested = pyqtSignal(object)
+    take_axial_step_scan_requested = pyqtSignal(object)
+    take_axial_cont_scan_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
@@ -183,7 +166,8 @@ class HiFrontend(QWidget):
         # Attribute
         self.history_data = deque(maxlen=100)
         self.laser_focus_position: RigCoord | None = None
-
+        self._andor_exposure_time: float | None = None
+        self.current_laser_pos: PupilCoord | None = None
 
         # --- Create log_view early so logging can safely use it ---
         self.log_view = QtWidgets.QTextEdit()
@@ -229,7 +213,8 @@ class HiFrontend(QWidget):
         self.move_zaber_stage_z_requested.connect(self.brillouin_signaller.move_zaber_stage_z_relative)
 
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
-        self.take_axial_scan_requested.connect(self.brillouin_signaller.take_axial_scan)
+        self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
+        self.take_axial_cont_scan_requested.connect(self.brillouin_signaller.take_axial_cont_scan)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
@@ -332,7 +317,12 @@ class HiFrontend(QWidget):
 
         shift_controls_row = QHBoxLayout()
         shift_controls_row.addWidget(self.create_zaber_manual_movement_group())
-        shift_controls_row.addWidget(self.create_take_axial_scan_group())
+
+        axial_column = QVBoxLayout()
+        axial_column.addWidget(self.create_take_axial_scan_group())
+        axial_column.addWidget(self.create_axial_scan_cont_group())
+
+        shift_controls_row.addLayout(axial_column)
         middle_column_layout.addLayout(shift_controls_row)
 
         # log_view was created in __init__; just add it here
@@ -612,38 +602,90 @@ class HiFrontend(QWidget):
         group = QGroupBox("Scan Axial Steps")
         layout = QFormLayout()
 
-        # --- Existing axial scan controls ---
+        # --- Axial scan (step mode) controls ---
         self.axial_id_input = QLineEdit()
-        self.axial_num_input = QLineEdit("5")
-        self.axial_step_input = QLineEdit("9")
+        self.axial_num_input = QLineEdit("10")
+        self.axial_step_input = QLineEdit("10")
 
         layout.addRow("ID:", self.axial_id_input)
         layout.addRow("Num Meas:", self.axial_num_input)
         layout.addRow("Step Size (µm):", self.axial_step_input)
 
         self.axial_btn = QPushButton("Scan Axial Steps")
-        self.axial_btn.clicked.connect(self.take_axial_scan)
+        self.axial_btn.clicked.connect(self.take_axial_step_scan)
         layout.addRow(self.axial_btn)
-
-        # --- Separator / title for lens scan ---
-        layout.addRow(QLabel("— Lens Scan (Zaber Eye Lens) —"))
-
-        # --- New lens scan controls ---
-        self.lens_scan_speed_input = QLineEdit("500")
-        self.lens_scan_dist_input = QLineEdit("2000")
-
-        self.lens_scan_speed_input.setFixedWidth(60)
-        self.lens_scan_dist_input.setFixedWidth(60)
-
-        layout.addRow("Speed (µm/s):", self.lens_scan_speed_input)
-        layout.addRow("Max Dist (µm):", self.lens_scan_dist_input)
-
-        self.lens_scan_btn = QPushButton("Slew + Frame")
-        # self.lens_scan_btn.clicked.connect(self.on_lens_scan_clicked)
-        layout.addRow(self.lens_scan_btn)
 
         group.setLayout(layout)
         return group
+
+    def create_axial_scan_cont_group(self):
+        """
+        Continuous axial scan widget.
+
+        Uses Andor exposure time ("Exp. Time (s)") and speed (µm/s) to compute:
+            Scanned Dist (µm) = speed * exposure_time
+
+        User still specifies:
+            - ID
+            - Max Dist (µm)
+        """
+        group = QGroupBox("Axial Scan Cont.")
+        layout = QFormLayout()
+
+        # ID (similar to step scan)
+        self.axial_cont_id_input = QLineEdit()
+
+        # Speed (µm/s)
+        self.axial_cont_speed_input = QLineEdit("500")
+        self.axial_cont_speed_input.setFixedWidth(80)
+        self.axial_cont_speed_input.textChanged.connect(self.update_axial_cont_distance)
+
+        # Computed scanned distance (read-only)
+        self.axial_cont_scanned_dist_label = QLabel("0.00 µm")
+
+        # Max Dist (µm) – user can set this again
+        self.axial_cont_max_dist_input = QLineEdit("2000")
+        self.axial_cont_max_dist_input.setFixedWidth(80)
+
+        layout.addRow("ID:", self.axial_cont_id_input)
+        layout.addRow("Speed (µm/s):", self.axial_cont_speed_input)
+        layout.addRow("Scanned Dist (µm):", self.axial_cont_scanned_dist_label)
+        layout.addRow("Max Dist (µm):", self.axial_cont_max_dist_input)
+
+        # Button (no backend wiring yet)
+        self.axial_cont_btn = QPushButton("Axial Scan Cont.")
+        self.axial_cont_btn.clicked.connect(self.take_axial_cont_scan)
+        layout.addRow(self.axial_cont_btn)
+
+        group.setLayout(layout)
+
+        # Initialize the scanned distance from current exposure & speed
+
+        return group
+
+    def update_axial_cont_distance(self):
+        """
+        Compute Scanned Dist (µm) = speed (µm/s) * exposure_time (s, from Andor)
+        and update the label in the Axial Scan Cont. group.
+        """
+        # If the continuous scan widgets aren't created yet, just ignore
+        if not hasattr(self, "axial_cont_scanned_dist_label"):
+            return
+
+        try:
+            # Speed (µm/s) from Axial Scan Cont.
+            speed_str = self.axial_cont_speed_input.text().strip()
+            speed = float(speed_str) if speed_str else 0.0
+
+            # Exposure time (s) from Andor camera group
+            exposure_s = self._andor_exposure_time if self._andor_exposure_time else 0.0
+
+            dist_um = speed * exposure_s
+            self.axial_cont_scanned_dist_label.setText(f"{dist_um:.2f} µm")
+        except Exception:
+            # If parsing fails, show a neutral placeholder
+            self.axial_cont_scanned_dist_label.setText("—")
+
 
     def create_log_group(self):
         group = QGroupBox("Log Output")
@@ -749,8 +791,8 @@ class HiFrontend(QWidget):
     def create_andor_display_group(self):
         # White theme + fast options
         pg.setConfigOptions(
-            useOpenGL=True,
-            antialias=False,
+            useOpenGL=False,
+            antialias=True,
             imageAxisOrder='row-major',
             background='w',
             foreground='k'
@@ -780,7 +822,7 @@ class HiFrontend(QWidget):
             labels={'left': 'Intensity', 'bottom': 'Pixel (X)'}
         )
         self.spec_plot.setMenuEnabled(False)
-        self.spec_plot.setClipToView(True)
+        self.spec_plot.setClipToView(False)
         self.spec_plot.enableAutoRange(x=True, y=True)
         self.spec_plot.setTitle("Spectrum + Fit", color=(40, 40, 40))
         self.spec_plot.getViewBox().setBorder((170, 170, 170))
@@ -823,7 +865,7 @@ class HiFrontend(QWidget):
             labels={'left': 'GHz', 'bottom': 'Frame'}
         )
         self.hist_plot.setMenuEnabled(False)
-        self.hist_plot.setClipToView(True)
+        self.hist_plot.setClipToView(False)
         self.hist_plot.enableAutoRange(x=True, y=True)
         self.hist_plot.setTitle("Shift History", color=(40, 40, 40))
         self.hist_plot.getViewBox().setBorder((170, 170, 170))
@@ -913,9 +955,9 @@ class HiFrontend(QWidget):
 
         # Stage X
         self.x_left_btn.clicked.connect(
-            lambda: self.move_zaber_stage_x_requested.emit(-float(self.x_step_input.text())))
-        self.x_right_btn.clicked.connect(
             lambda: self.move_zaber_stage_x_requested.emit(+float(self.x_step_input.text())))
+        self.x_right_btn.clicked.connect(
+            lambda: self.move_zaber_stage_x_requested.emit(-float(self.x_step_input.text())))
 
         # Stage Y
         self.y_up_btn.clicked.connect(lambda: self.move_zaber_stage_y_requested.emit(+float(self.y_step_input.text())))
@@ -1064,9 +1106,6 @@ class HiFrontend(QWidget):
         dialog = CalibrationConfigDialog(self)
         dialog.exec_()
 
-    def on_allied_settings_clicked(self):
-        log.info("[Brillouin Viewer] Allied Vision Settings button clicked.")
-        # TODO: Launch settings dialog when available
 
     def update_bg_subtraction(self, enabled: bool):
         if enabled:
@@ -1209,7 +1248,9 @@ class HiFrontend(QWidget):
         self.toggle_camera_shutter_btn.setText(text)
 
     def populate_camera_ui(self, settings: dict):
-        self.exposure_input.setText(str(settings["exposure"]))
+        self._andor_exposure_time = settings["exposure"]
+        self.update_axial_cont_distance()
+        self.exposure_input.setText(str(self._andor_exposure_time))
         self.gain_input.setText(str(settings["gain"]))
 
 
@@ -1223,10 +1264,10 @@ class HiFrontend(QWidget):
                 "gain": gain,
             }
 
-            self.apply_camera_settings_requested.emit(settings)  # ✅ thread-safe
+            self.apply_camera_settings_requested.emit(settings)
             log.info("[Brillouin Viewer] Sent new camera settings to worker.")
 
-            self.emit_camera_settings_requested.emit()  # ✅ thread-safe
+            self.emit_camera_settings_requested.emit()
 
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to apply camera settings: {e}")
@@ -1388,7 +1429,7 @@ class HiFrontend(QWidget):
         self._show_cali = False
         self._save_cali = True
 
-    def take_axial_scan(self):
+    def take_axial_step_scan(self):
         try:
             id_str = self.axial_id_input.text().strip()
             n_meas = int(self.axial_num_input.text())
@@ -1399,17 +1440,40 @@ class HiFrontend(QWidget):
                 f"[Brillouin Viewer] Axial Scan Request | ID: {id_str}, N: {n_meas}, Step: {step} µm")
 
 
-            request = RequestAxialScan(
+            request = RequestAxialStepScan(
                 id=id_str,
                 n_measurements=n_meas,
                 step_size_um=step,
+                laser_position=(self.laser_focus_position.x, self.laser_focus_position.y, self.laser_focus_position.z),
             )
 
-            self.take_axial_scan_requested.emit(request)
+            self.take_axial_step_scan_requested.emit(request)
 
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
+    def take_axial_cont_scan(self):
+        try:
+            id_str = self.axial_cont_id_input.text().strip()
+            speed = float(self.axial_cont_speed_input.text())
+            max_dist = float(self.axial_cont_max_dist_input.text())
+
+            # Log info
+            log.info(
+                f"[Brillouin Viewer] Axial Continuous Scan Request | ID: {id_str} with {speed}µm/s, Safety max: {max_dist} µm")
+
+
+            request = RequestAxialContScan(
+                id=id_str,
+                speed_um_s=speed,
+                max_distance_um=max_dist,
+                laser_position=(self.laser_focus_position.x, self.laser_focus_position.y, self.laser_focus_position.z),
+            )
+
+            self.take_axial_cont_scan_requested.emit(request)
+
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
     def clear_measurements(self):
         self._stored_measurements.clear()
@@ -1532,7 +1596,7 @@ class HiFrontend(QWidget):
         # Text display (top-right)
         # -------------------------------
         self.pos_text = TextItem(
-            text="x=\ny=\nΔz=",
+            text="x=\ny=\nz=\nΔc=",
             color=(0, 0, 0),
             anchor=(1, 0)  # right-top anchor
         )
@@ -1561,7 +1625,7 @@ class HiFrontend(QWidget):
             # Option 2 (optional): also hide it
             self.laser_point.setVisible(False)
 
-    def update_position_text(self, x=None, y=None, dz=None):
+    def update_position_text(self, x=None, y=None, z=None, dc=None):
         """
         Update the x, y, Δz display with fixed width fields.
         If a value is None, show blank padded fields.
@@ -1572,12 +1636,14 @@ class HiFrontend(QWidget):
 
         tx = fmt(x)
         ty = fmt(y)
-        tz = fmt(dz)
+        tz = fmt(z)
+        tdc = fmt(dc)
 
         self.pos_text.setText(
             f"x = {tx}\n"
             f"y = {ty}\n"
-            f"Δz = {tz}"
+            f"z = {tz}\n"
+            f"Δc = {tdc}"
         )
 
     # def update_laser_position_polar(self, r: float, theta_deg: float):
@@ -1617,18 +1683,21 @@ class HiFrontend(QWidget):
                                                                 y=pupil3D.center_ref.y,
                                                                 z=pupil3D.center_ref.z)
                                           )
-            laser_pupil_coord = transform.rig_to_pupil(self.laser_focus_position)
+            laser_pupil_coord: PupilCoord = transform.rig_to_pupil(self.laser_focus_position)
+            self.current_laser_pos = laser_pupil_coord
             self.update_laser_position_cartesian(x=laser_pupil_coord.x, y=laser_pupil_coord.y)
             delta_laser_corner = calc_distance_laser_corner(laser_pupil_coord)
-            self.update_position_text(x=laser_pupil_coord.x, y=laser_pupil_coord.y, dz=delta_laser_corner)
+            self.update_position_text(x=laser_pupil_coord.x, y=laser_pupil_coord.y, z=laser_pupil_coord.z, dc=delta_laser_corner)
 
         else:
             self.clear_laser_position()
-            self.update_position_text(None, None, None)
+            self.update_position_text(None, None, None, None)
 
         self.update_laser_position_cartesian(x=1, y=2)
-        self.update_position_text(1, 2, self.laser_focus_position.z)# Test
+        self.update_position_text(1, 2, 1000, self.laser_focus_position.z)# Test
     # ---- Fitting button (placeholder) ----
+
+
 
     def closeEvent(self, event):
         log.info("GUI shutdown initiated...")
@@ -1640,7 +1709,7 @@ class HiFrontend(QWidget):
             self.eye_thread.wait(3000)  # block until it finishes
 
         # ---- Brillouin backend shutdown (similar pattern if desired) ----
-        self.brillouin_signaller.request_stop.emit()
+        self.stop_live_requested.emit()
         self.brillouin_signaller_thread.quit()
         self.brillouin_signaller_thread.wait(3000)
 
@@ -1651,11 +1720,12 @@ class HiFrontend(QWidget):
 def main():
     # Set rounding policy before constructing QApplication (Qt ≥ 5.14)
     try:
-        QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
-            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-        )
+        if hasattr(QtWidgets.QApplication, "setHighDpiScaleFactorRoundingPolicy"):
+            QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor
+            )
     except Exception:
-        pass  # Older Qt — env var above still helps
+        pass
 
     app = QApplication(sys.argv)
     app.setStyleSheet("""

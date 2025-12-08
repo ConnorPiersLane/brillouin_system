@@ -19,7 +19,8 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_in
 
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialScan, MeasurementPoint, AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, MeasurementPoint, \
+    AxialScan, RequestAxialContScan
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
@@ -330,12 +331,12 @@ class HiBackend:
         return frame.astype(np.float64), ts
 
 
-    def get_andor_frame(self) -> tuple[np.ndarray, float]:
+    def get_andor_frame(self, timeout: float = 3.0) -> tuple[np.ndarray, float]:
         # Get the frame:
         if self.is_reference_mode or self.is_sample_illumination_continuous:
             frame, ts = self._get_andor_camera_snap()
         else:
-            frame, ts = self._open_sample_shutter_get_frame_close_shutter(timeout=1)
+            frame, ts = self._open_sample_shutter_get_frame_close_shutter(timeout=timeout)
 
         return frame, ts
 
@@ -346,7 +347,6 @@ class HiBackend:
 
         Args:
             frame (np.ndarray): The input camera frame.
-            ts: timestamep time.time()
 
         Returns:
             FittedSpectrum: Dataclass containing fit results and metadata.
@@ -372,7 +372,7 @@ class HiBackend:
             self.calibration_poly_fit_params = calibrate(data=self.calibration_data)
             self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(parameters=self.calibration_poly_fit_params)
 
-    def take_axial_scan(self, request_axial_scan: RequestAxialScan):
+    def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan):
 
         if self.is_reference_mode:
             print(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
@@ -445,9 +445,45 @@ class HiBackend:
             measurements=all_results,
             system_state=self.get_current_system_state(),
             calibration_params=self.calibration_poly_fit_params,
-            eye_location= None
+            laser_position=request_axial_scan.laser_position,
+            scan_speed_um_s=None,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
+
+    def take_axial_cont_scan(self, request_axial_scan: RequestAxialContScan):
+
+
+        lens_x0 = self.zaber_eye_lens.get_position()
+        speed = request_axial_scan.speed_um_s
+        max_distance = request_axial_scan.max_distance_um
+        max_time = max_distance / speed
+
+        print(f"[Axial Scan] Starting scan...")
+        self.zaber_eye_lens.start_slewing_guarded(speed_um_per_s=speed,
+                                                  max_distance_um=max_distance)
+        frame, ts = self.get_andor_frame(timeout=max_time)
+        self.zaber_eye_lens.stop_slewing()
+        self.zaber_eye_lens.move_abs(lens_x0)
+
+        self.display_spectrum(frame=frame)
+
+        mp =MeasurementPoint(
+                        frame_andor=frame,
+                        lens_zaber_position=lens_x0,
+                        time_stamp=ts)
+
+
+        axial_scan = AxialScan(
+            i=self._i_axial_scans,
+            id=request_axial_scan.id,
+            measurements=[mp],
+            system_state=self.get_current_system_state(),
+            calibration_params=self.calibration_poly_fit_params,
+            laser_position=request_axial_scan.laser_position,
+            scan_speed_um_s= speed
+        )
+        self.axial_scan_dict[axial_scan.i] = axial_scan
+
 
     def display_spectrum(self, frame):
         if self.do_background_subtraction:
@@ -499,7 +535,6 @@ class HiBackend:
                 x_pixels=fitting.x_pixels,
                 sline=fitting.sline,
             )
-
 
 
     def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> tuple[np.ndarray, float]:
