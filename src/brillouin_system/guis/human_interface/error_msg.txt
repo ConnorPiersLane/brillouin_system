@@ -1,0 +1,105 @@
+[INFO] [ZaberDummy] Initialized on port COM5, axis 1
+[INFO] [ZaberDummy] Homed. All positions reset to 0.0 µm
+[INFO] [ZaberDummy] Moving X absolute → 12000.00 µm
+[INFO] [ZaberDummy] Moving Y absolute → 10000.00 µm
+[INFO] [ZaberDummy] Moving Z absolute → 12000.00 µm
+[INFO] [ZaberDummy] Absolute move(s) completed.
+[INFO] [ZaberDummy] Current positions → X=12000.00, Y=10000.00, Z=12000.00
+[INFO] StereoCameras loaded (baseline = 130.57 mm, ref=left)
+EyeTracker started.
+[INFO] [EyeTracker] Sent new eye tracker config to proxy.
+EyeTracker polling error: Eye tracker worker error: Failed in nopython mode pipeline (step: nopython frontend)
+Cannot bind 'args=(Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True), Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True)) kws={}' to signature '(K, dist, R, t, X)' due to "TypeError: missing a required argument: 'X'".
+During: resolving callee type: type(CPUDispatcher(<function _project_opencv_numba at 0x0000023A92B989D0>))
+During: typing of call at C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\stereo_imaging\njit_helpers.py (111)
+
+
+File "..\..\eye_tracker\stereo_imaging\njit_helpers.py", line 111:
+def _lm_refine_point(
+    <source elided>
+    uLf, vLf = _project_opencv_numba(K_L, dist_L, R_L, t_L, X)
+    uRf, vRf = _project_opencv_numba(K_R, dist_R, R_R, X)
+    ^
+
+During: Pass nopython_type_inference
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker_worker.py", line 114, in eye_tracker_worker
+    results_for_gui: EyeTrackerResultsForGui = eye_tracker.get_results_for_gui()
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker.py", line 251, in get_results_for_gui
+    pupil_3D = self.get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker.py", line 107, in get_pupil3D
+    return self.pupil_detector.triangulate_center(eL=eL, eR=eR)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\pupil_fitting\pupil_detector.py", line 59, in triangulate_center
+    X_left, _ = self.stereo.triangulate_best(eL.center, eR.center)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\stereo_imaging\stereo_cameras.py", line 232, in triangulate_best
+    X_refined, rms_refined = _lm_refine_point(
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\numba\core\dispatcher.py", line 424, in _compile_for_args
+    error_rewrite(e, 'typing')
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\numba\core\dispatcher.py", line 365, in error_rewrite
+    raise e.with_traceback(None)
+numba.core.errors.TypingError: Failed in nopython mode pipeline (step: nopython frontend)
+Cannot bind 'args=(Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True), Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True)) kws={}' to signature '(K, dist, R, t, X)' due to "TypeError: missing a required argument: 'X'".
+During: resolving callee type: type(CPUDispatcher(<function _project_opencv_numba at 0x0000023A92B989D0>))
+During: typing of call at C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\stereo_imaging\njit_helpers.py (111)
+
+
+File "..\..\eye_tracker\stereo_imaging\njit_helpers.py", line 111:
+def _lm_refine_point(
+    <source elided>
+    uLf, vLf = _project_opencv_numba(K_L, dist_L, R_L, t_L, X)
+    uRf, vRf = _project_opencv_numba(K_R, dist_R, R_R, X)
+    ^
+
+During: Pass nopython_type_inference
+
+[CRITICAL] UNCAUGHT EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\eye_tracker_controller.py", line 58, in _poll
+    raise e
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\eye_tracker_controller.py", line 51, in _poll
+    result = self.proxy.get_latest(timeout=0)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker_proxy.py", line 266, in get_latest
+    raise RuntimeError(
+RuntimeError: Eye tracker worker error: Failed in nopython mode pipeline (step: nopython frontend)
+Cannot bind 'args=(Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True), Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True)) kws={}' to signature '(K, dist, R, t, X)' due to "TypeError: missing a required argument: 'X'".
+During: resolving callee type: type(CPUDispatcher(<function _project_opencv_numba at 0x0000023A92B989D0>))
+During: typing of call at C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\stereo_imaging\njit_helpers.py (111)
+
+
+File "..\..\eye_tracker\stereo_imaging\njit_helpers.py", line 111:
+def _lm_refine_point(
+    <source elided>
+    uLf, vLf = _project_opencv_numba(K_L, dist_L, R_L, t_L, X)
+    uRf, vRf = _project_opencv_numba(K_R, dist_R, R_R, X)
+    ^
+
+During: Pass nopython_type_inference
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker_worker.py", line 114, in eye_tracker_worker
+    results_for_gui: EyeTrackerResultsForGui = eye_tracker.get_results_for_gui()
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker.py", line 251, in get_results_for_gui
+    pupil_3D = self.get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\eye_tracker.py", line 107, in get_pupil3D
+    return self.pupil_detector.triangulate_center(eL=eL, eR=eR)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\pupil_fitting\pupil_detector.py", line 59, in triangulate_center
+    X_left, _ = self.stereo.triangulate_best(eL.center, eR.center)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\stereo_imaging\stereo_cameras.py", line 232, in triangulate_best
+    X_refined, rms_refined = _lm_refine_point(
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\numba\core\dispatcher.py", line 424, in _compile_for_args
+    error_rewrite(e, 'typing')
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\numba\core\dispatcher.py", line 365, in error_rewrite
+    raise e.with_traceback(None)
+numba.core.errors.TypingError: Failed in nopython mode pipeline (step: nopython frontend)
+Cannot bind 'args=(Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True), Array(float64, 2, 'C', False, aligned=True), Array(float64, 1, 'C', False, aligned=True)) kws={}' to signature '(K, dist, R, t, X)' due to "TypeError: missing a required argument: 'X'".
+During: resolving callee type: type(CPUDispatcher(<function _project_opencv_numba at 0x0000023A92B989D0>))
+During: typing of call at C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\eye_tracker\stereo_imaging\njit_helpers.py (111)
+
+
+File "..\..\eye_tracker\stereo_imaging\njit_helpers.py", line 111:
+def _lm_refine_point(
+    <source elided>
+    uLf, vLf = _project_opencv_numba(K_L, dist_L, R_L, t_L, X)
+    uRf, vRf = _project_opencv_numba(K_R, dist_R, R_R, X)
+    ^
+
+During: Pass nopython_type_inference

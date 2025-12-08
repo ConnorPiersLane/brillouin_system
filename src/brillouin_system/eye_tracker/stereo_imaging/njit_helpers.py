@@ -108,7 +108,7 @@ def _lm_refine_point(
 
     # final RMS
     uLf, vLf = _project_opencv_numba(K_L, dist_L, R_L, t_L, X)
-    uRf, vRf = _project_opencv_numba(K_R, dist_R, R_R, X)
+    uRf, vRf = _project_opencv_numba(K_R, dist_R, R_R, t_R, X)
     r0 = np.array([uLf-uvL_u[0], vLf-uvL_u[1], uRf-uvR_u[0], vRf-uvR_u[1]])
     rms = float(np.sqrt((r0*r0).mean()))
     return X, rms

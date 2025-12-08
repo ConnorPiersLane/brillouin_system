@@ -71,7 +71,10 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = True
+use_eye_tracker_dummy = False
+
+
+#ToDo: shutdown not working correctly,
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -711,6 +714,7 @@ class HiFrontend(QWidget):
                 self.eye_glw.ci.nextRow()
 
             vb = pg.ViewBox(lockAspect=True, enableMenu=False)
+            vb.invertY(True)
             img = pg.ImageItem(autoDownsample=True)
             vb.addItem(img)
             vb.setBorder((80, 80, 80))
@@ -1679,6 +1683,7 @@ class HiFrontend(QWidget):
 
 
         if pupil3D is not None:
+            #TOdo: bug here: AttributeError: 'numpy.ndarray' object has no attribute 'x' center_ref is tuple
             transform = RigPupilTransform(pupil_center=RigCoord(x=pupil3D.center_ref.x,
                                                                 y=pupil3D.center_ref.y,
                                                                 z=pupil3D.center_ref.z)
