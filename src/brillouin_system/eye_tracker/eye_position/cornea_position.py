@@ -3,7 +3,7 @@ import math
 from brillouin_system.eye_tracker.eye_position.coordinates import PupilCoord
 
 
-def calc_anterior_cornea_z_position(x, y):
+def calc_anterior_cornea_z_position(x, y) -> float | None:
     r = 7.8   # anterior corneal radius (mm)
     acd = 3.0 # anterior chamber depth (mm)
 
@@ -18,7 +18,10 @@ def calc_anterior_cornea_z_position(x, y):
 
 
 
-def calc_distance_laser_corner(laser_position: PupilCoord) -> float:
+def calc_distance_laser_corner(laser_position: PupilCoord) -> float | None:
     cornea_height = calc_anterior_cornea_z_position(x=laser_position.x,
                                                     y=laser_position.y)
-    return laser_position.z - cornea_height
+    if cornea_height is None:
+        return  None
+    else:
+        return laser_position.z - cornea_height

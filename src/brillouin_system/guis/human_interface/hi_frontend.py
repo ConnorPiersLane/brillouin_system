@@ -71,7 +71,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = True
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -91,8 +91,10 @@ def create_backend(use_dummy: bool) -> HiBackend:
             camera=DummyCamera(),
             shutter_manager=ShutterManagerDummy('human_interface'),
             microwave=MicrowaveDummy(),
-            zaber_eye_lens=ZaberEyeLensDummy(),
-            zaber_hi=ZaberHumanInterfaceDummy(),
+            # zaber_eye_lens=ZaberEyeLensDummy(),
+            # zaber_hi=ZaberHumanInterfaceDummy(),
+            zaber_eye_lens=ZaberEyeLens(),
+            zaber_hi=ZaberHumanInterface(),
             is_sample_illumination_continuous=True
         )
 
@@ -1680,10 +1682,9 @@ class HiFrontend(QWidget):
 
 
         if pupil3D is not None:
-            #TOdo: bug here: AttributeError: 'numpy.ndarray' object has no attribute 'x' center_ref is tuple
-            transform = RigPupilTransform(pupil_center=RigCoord(x=pupil3D.center_ref.x,
-                                                                y=pupil3D.center_ref.y,
-                                                                z=pupil3D.center_ref.z)
+            transform = RigPupilTransform(pupil_center=RigCoord(x=pupil3D.center_ref[0],
+                                                                y=pupil3D.center_ref[1],
+                                                                z=pupil3D.center_ref[2])
                                           )
             laser_pupil_coord: PupilCoord = transform.rig_to_pupil(self.laser_focus_position)
             self.current_laser_pos = laser_pupil_coord
@@ -1695,8 +1696,8 @@ class HiFrontend(QWidget):
             self.clear_laser_position()
             self.update_position_text(None, None, None, None)
 
-        self.update_laser_position_cartesian(x=1, y=2)
-        self.update_position_text(1, 2, 1000, self.laser_focus_position.z)# Test
+        # self.update_laser_position_cartesian(x=1, y=2)
+        # self.update_position_text(1, 2, 1000, self.laser_focus_position.z)# Test
     # ---- Fitting button (placeholder) ----
 
 
