@@ -71,10 +71,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = False
-
-
-#ToDo: shutdown not working correctly,
+use_eye_tracker_dummy = True
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -1705,7 +1702,7 @@ class HiFrontend(QWidget):
 
 
     def closeEvent(self, event):
-        log.info("GUI shutdown initiated...")
+        print("GUI shutdown initiated...")
 
         # ---- Eye Tracker Shutdown via Signal ----
         if include_eye_tracking:
@@ -1715,10 +1712,12 @@ class HiFrontend(QWidget):
 
         # ---- Brillouin backend shutdown (similar pattern if desired) ----
         self.stop_live_requested.emit()
+        self.shutdown_requested.emit()
         self.brillouin_signaller_thread.quit()
         self.brillouin_signaller_thread.wait(3000)
-
-        log.info("GUI shutdown complete.")
+        for t in threading.enumerate():
+            print(t, t.name, t.is_alive())
+        print("GUI shutdown complete.")
         super().closeEvent(event)
 
 
@@ -1752,6 +1751,3 @@ if __name__ == "__main__":
     # enable_console_fallback(force=True)
 
     main()
-
-    # (Optional) Explicit shutdown — also happens via atexit in logging_setup
-    shutdown_logging()
