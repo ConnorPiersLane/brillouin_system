@@ -84,7 +84,8 @@ class NotifyingViewBox(pg.ViewBox):
         if ev.isFinish():
             self.userScaled.emit()
 
-# todo: axial scans are not added, but replace
+# todo: axial scans are not added, but replace, incompplete frame
+# iframes
 
 def create_backend(use_dummy: bool) -> HiBackend:
     # Testing

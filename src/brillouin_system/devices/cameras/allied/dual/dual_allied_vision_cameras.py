@@ -135,7 +135,7 @@ class DualAlliedVisionCameras(BaseDualCameras):
         self._setup_snap_mode()
 
         # Start streaming now; queues will hold latest frames
-        self.start_stream()
+        self.start_dual_cam_stream()
 
     def _set_transport(self, cam, mbps_per_cam: float, delay_ticks: int | None):
         # Bytes per second cap: AlliedVisionCamera.init uses bytes/s features
@@ -185,7 +185,7 @@ class DualAlliedVisionCameras(BaseDualCameras):
         t2 = threading.Thread(target=lambda: self.right.camera.get_feature_by_name("TriggerSoftware").run())
         t1.start(); t2.start(); t1.join(); t2.join()
 
-    def start_stream(self):
+    def start_dual_cam_stream(self):
         """Start streaming once and keep queues ready."""
         self.left.camera.start_streaming(_handler0, buffer_count=40)
         self.right.camera.start_streaming(_handler1, buffer_count=40)
@@ -231,7 +231,7 @@ class DualAlliedVisionCameras(BaseDualCameras):
             print(f"[DualCamera] Failed to apply configs: {e}")
         finally:
             if was_streaming:
-                self.start_stream()
+                self.start_dual_cam_stream()
 
     def close(self):
         """Close both cameras cleanly."""
