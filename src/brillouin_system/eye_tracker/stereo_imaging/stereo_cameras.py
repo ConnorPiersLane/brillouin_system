@@ -229,6 +229,9 @@ class StereoCameras:
         uvL_u = np.array(uvL, dtype=np.float64)
         uvR_u = np.array(uvR, dtype=np.float64)
 
+        if rms_curr < 1e-9:  # tiny error → LM unstable / unnecessary
+            return X, rms_curr
+
         X_refined, rms_refined = _lm_refine_point(
             X, K_L, dist_L, R_L, t_L, K_R, dist_R, R_R, t_R, uvL_u, uvR_u,
             max_iters=max_iters, eps=1e-6, lam0=lm_lambda,

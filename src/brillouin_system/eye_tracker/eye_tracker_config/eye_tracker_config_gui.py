@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QFileDialog,
 )
 from PyQt5.QtGui import QIntValidator
-from PyQt5.QtCore import Qt
+
 
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import (
     EyeTrackerConfig,
@@ -75,10 +75,6 @@ class EyeTrackerConfigDialog(QDialog):
             h.addWidget(widget, 1)
             v.addLayout(h)
 
-        # Sleep / pause
-        w_sleep = QCheckBox("Sleep / Pause processing")
-        inputs["sleep"] = w_sleep
-        add_row("Sleep", w_sleep)
 
         # Thresholds
         le_left_thr = QLineEdit()
@@ -91,35 +87,47 @@ class EyeTrackerConfigDialog(QDialog):
         inputs["binary_threshold_right"] = le_right_thr
         add_row("Binary threshold (right)", le_right_thr)
 
-        # Save images options
-        chk_save = QCheckBox("Enable saving")
-        inputs["save_images"] = chk_save
-        add_row("Save images", chk_save)
+        # Masking radii
+        le_mask_left = QLineEdit()
+        le_mask_left.setValidator(QIntValidator(1, 10000))
+        inputs["masking_radius_left"] = le_mask_left
+        add_row("Masking radius (left)", le_mask_left)
 
-        spath = QLineEdit()
-        inputs["save_images_path"] = spath
-        btn_browse = QPushButton("Browse…")
+        le_mask_right = QLineEdit()
+        le_mask_right.setValidator(QIntValidator(1, 10000))
+        inputs["masking_radius_right"] = le_mask_right
+        add_row("Masking radius (right)", le_mask_right)
 
-        def browse():
-            d = QFileDialog.getExistingDirectory(self, "Select folder", "")
-            if d:
-                spath.setText(d)
+        # --- Masking center (left) cx, cy ---
+        le_mask_center_left_cx = QLineEdit()
+        le_mask_center_left_cx.setValidator(QIntValidator(-5000, 5000))
+        inputs["masking_center_left_cx"] = le_mask_center_left_cx
 
-        btn_browse.clicked.connect(browse)
+        le_mask_center_left_cy = QLineEdit()
+        le_mask_center_left_cy.setValidator(QIntValidator(-5000, 5000))
+        inputs["masking_center_left_cy"] = le_mask_center_left_cy
 
-        h_path = QHBoxLayout()
-        h_path.addWidget(spath, 1)
-        h_path.addWidget(btn_browse)
+        row_left_center = QHBoxLayout()
+        row_left_center.addWidget(QLabel("Masking center (left) cx, cy"))
+        row_left_center.addWidget(le_mask_center_left_cx)
+        row_left_center.addWidget(le_mask_center_left_cy)
+        v.addLayout(row_left_center)
 
-        hv_path = QVBoxLayout()
-        hv_path.addWidget(QLabel("Save folder"))
-        hv_path.addLayout(h_path)
-        v.addLayout(hv_path)
+        # --- Masking center (right) cx, cy ---
+        le_mask_center_right_cx = QLineEdit()
+        le_mask_center_right_cx.setValidator(QIntValidator(-5000, 5000))
+        inputs["masking_center_right_cx"] = le_mask_center_right_cx
 
-        freq = QLineEdit()
-        freq.setValidator(QIntValidator(1, 1000))
-        inputs["max_saving_freq_hz"] = freq
-        add_row("Max saving frequency (Hz)", freq)
+        le_mask_center_right_cy = QLineEdit()
+        le_mask_center_right_cy.setValidator(QIntValidator(-5000, 5000))
+        inputs["masking_center_right_cy"] = le_mask_center_right_cy
+
+        row_right_center = QHBoxLayout()
+        row_right_center.addWidget(QLabel("Masking center (right) cx, cy"))
+        row_right_center.addWidget(le_mask_center_right_cx)
+        row_right_center.addWidget(le_mask_center_right_cy)
+        v.addLayout(row_right_center)
+
 
         # Ellipse fitting / overlay
         de = QCheckBox("Run ellipse fitting")
@@ -163,17 +171,24 @@ class EyeTrackerConfigDialog(QDialog):
     # ------------------------------------------------------------------ #
 
     def _set_fields(self, cfg: EyeTrackerConfig):
-        # Sleep
-        self.inputs["sleep"].setChecked(bool(cfg.sleep))
 
         # Thresholds
         self.inputs["binary_threshold_left"].setText(str(cfg.binary_threshold_left))
         self.inputs["binary_threshold_right"].setText(str(cfg.binary_threshold_right))
 
-        # Saving
-        self.inputs["save_images"].setChecked(bool(cfg.save_images))
-        self.inputs["save_images_path"].setText(cfg.save_images_path or "")
-        self.inputs["max_saving_freq_hz"].setText(str(cfg.max_saving_freq_hz))
+        # Masking
+        self.inputs["masking_radius_left"].setText(str(cfg.masking_radius_left))
+        self.inputs["masking_radius_right"].setText(str(cfg.masking_radius_right))
+
+        lcx, lcy = cfg.masking_center_left
+        rcx, rcy = cfg.masking_center_right
+
+        self.inputs["masking_center_left_cx"].setText(str(lcx))
+        self.inputs["masking_center_left_cy"].setText(str(lcy))
+
+        self.inputs["masking_center_right_cx"].setText(str(rcx))
+        self.inputs["masking_center_right_cy"].setText(str(rcy))
+
 
         # Ellipse fitting
         self.inputs["do_ellipse_fitting"].setChecked(bool(cfg.do_ellipse_fitting))
@@ -194,12 +209,18 @@ class EyeTrackerConfigDialog(QDialog):
             return int(text) if text else default
 
         return {
-            "sleep": bool(self.inputs["sleep"].isChecked()),
             "binary_threshold_left": _intval("binary_threshold_left", 20),
             "binary_threshold_right": _intval("binary_threshold_right", 20),
-            "save_images": bool(self.inputs["save_images"].isChecked()),
-            "save_images_path": self.inputs["save_images_path"].text(),
-            "max_saving_freq_hz": _intval("max_saving_freq_hz", 5),
+            "masking_radius_left": _intval("masking_radius_left", 500),
+            "masking_radius_right": _intval("masking_radius_right", 500),
+            "masking_center_left": (
+                _intval("masking_center_left_cx", 500),
+                _intval("masking_center_left_cy", 0),
+            ),
+            "masking_center_right": (
+                _intval("masking_center_right_cx", 500),
+                _intval("masking_center_right_cy", 0),
+            ),
             "do_ellipse_fitting": bool(self.inputs["do_ellipse_fitting"].isChecked()),
             "overlay_ellipse": bool(self.inputs["overlay_ellipse"].isChecked()),
             "frame_returned": self.inputs["frame_returned"].currentText(),

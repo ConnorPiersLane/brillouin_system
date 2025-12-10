@@ -1,10 +1,11 @@
 import logging
 import threading
+import time
 
-from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord, RigPupilTransform, PupilCoord
-from brillouin_system.eye_tracker.eye_position.cornea_position import calc_distance_laser_corner
+from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord
+from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
-from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
+from brillouin_system.eye_tracker.eye_tracker_results import get_eye_tracker_results, EyeTrackerResults
 from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrackerController
 from brillouin_system.logging_utils import logging_setup
 
@@ -24,7 +25,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import GraphicsLayoutWidget, TextItem
 
-from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap, QImage
+from PyQt5.QtGui import QDoubleValidator, QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QGridLayout,
@@ -71,7 +72,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = False
+use_eye_tracker_dummy = True
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -84,8 +85,6 @@ class NotifyingViewBox(pg.ViewBox):
         if ev.isFinish():
             self.userScaled.emit()
 
-# todo: axial scans are not added, but replace, incompplete frame
-# iframes
 
 def create_backend(use_dummy: bool) -> HiBackend:
     # Testing
@@ -94,10 +93,10 @@ def create_backend(use_dummy: bool) -> HiBackend:
             camera=DummyCamera(),
             shutter_manager=ShutterManagerDummy('human_interface'),
             microwave=MicrowaveDummy(),
-            # zaber_eye_lens=ZaberEyeLensDummy(),
-            # zaber_hi=ZaberHumanInterfaceDummy(),
-            zaber_eye_lens=ZaberEyeLens(),
-            zaber_hi=ZaberHumanInterface(),
+            zaber_eye_lens=ZaberEyeLensDummy(),
+            zaber_hi=ZaberHumanInterfaceDummy(),
+            # zaber_eye_lens=ZaberEyeLens(),
+            # zaber_hi=ZaberHumanInterface(),
             is_sample_illumination_continuous=True
         )
 
@@ -160,8 +159,6 @@ class HiFrontend(QWidget):
 
     # Eye Tracking Signals
     set_et_allied_configs = pyqtSignal(object, object)  # left_cfg, right_cfg
-    start_et_saving = pyqtSignal()
-    stop_et_saving = pyqtSignal()
     request_eye_shutdown = pyqtSignal()
     set_et_config = pyqtSignal(object)
 
@@ -170,9 +167,11 @@ class HiFrontend(QWidget):
 
         # Attribute
         self.history_data = deque(maxlen=100)
+
+
         self.laser_focus_position: RigCoord | None = None
+        self.last_eye_tracker_results: EyeTrackerResults | None = None
         self._andor_exposure_time: float | None = None
-        self.current_laser_pos: PupilCoord | None = None
 
         # --- Create log_view early so logging can safely use it ---
         self.log_view = QtWidgets.QTextEdit()
@@ -288,9 +287,7 @@ class HiFrontend(QWidget):
 
             # Sending signals
             self.set_et_allied_configs.connect(self.eye_ctrl.proxy.set_allied_configs)
-            self.start_et_saving.connect(self.eye_ctrl.proxy.start_saving)
-            self.stop_et_saving.connect(self.eye_ctrl.proxy.end_saving)
-            self.set_et_config.connect(self.eye_ctrl.proxy.set_et_config)
+            self.set_et_config.connect(self.eye_ctrl.send_config)
             self.request_eye_shutdown.connect(self.eye_ctrl.shutdown)
 
             self.eye_thread.start()
@@ -578,28 +575,39 @@ class HiFrontend(QWidget):
         return group
 
     def create_allied_vision_group(self):
-        group = QGroupBox("Allied Vision Cameras")
+        group = QGroupBox("Eye Tracker")
 
         # Buttons row for Allied Vision Cameras
         btn_row = QHBoxLayout()
         self.btn_allied_left = QPushButton("Left")
         self.btn_allied_right = QPushButton("Right")
-        self.btn_eye_tracking = QPushButton("Eye Tracking")
+        self.btn_eye_tracking = QPushButton("Config")
 
         btn_row.addWidget(self.btn_allied_left)
         btn_row.addWidget(self.btn_allied_right)
         btn_row.addWidget(self.btn_eye_tracking)
         btn_row.addStretch()
 
+        btn_row2 = QHBoxLayout()
+        self.btn_restart_eye = QPushButton("ReStart")
+        self.btn_close_eye = QPushButton("Shutdown")
+
+        btn_row2.addWidget(self.btn_restart_eye)
+        btn_row2.addWidget(self.btn_close_eye)
+        btn_row2.addStretch()
+
         # put the row into a real layout and set it on the group
         v = QVBoxLayout()
         v.addLayout(btn_row)
+        v.addLayout(btn_row2)
         group.setLayout(v)
 
         # wire up
         self.btn_allied_left.clicked.connect(self.open_allied_left_dialog)
         self.btn_allied_right.clicked.connect(self.open_allied_right_dialog)
         self.btn_eye_tracking.clicked.connect(self.open_eye_tracker_config_dialog)
+        self.btn_restart_eye.clicked.connect(self.on_restart_eye_clicked)
+        self.btn_close_eye.clicked.connect(self.shutdown_eye_tracker)
 
         return group
 
@@ -1344,6 +1352,7 @@ class HiFrontend(QWidget):
         self.acquire_background_requested.emit()
 
     def receive_axial_scan_list(self, scan_list: list):
+
         # Update QListWidget
         self.axial_scans_list.clear()
         self.axial_scans_list.addItems(scan_list)
@@ -1368,11 +1377,8 @@ class HiFrontend(QWidget):
         except Exception as e:
             log.exception(f"[AxialScanViewer] Failed to show data: {e}")
 
-
-
     def run_calibration(self):
         self.run_calibration_requested.emit()
-
 
     def show_calibration_results(self):
         self._show_cali = True
@@ -1450,7 +1456,7 @@ class HiFrontend(QWidget):
                 id=id_str,
                 n_measurements=n_meas,
                 step_size_um=step,
-                laser_position=(self.laser_focus_position.x, self.laser_focus_position.y, self.laser_focus_position.z),
+                eye_tracker_results=self.last_eye_tracker_results,
             )
 
             self.take_axial_step_scan_requested.emit(request)
@@ -1473,7 +1479,7 @@ class HiFrontend(QWidget):
                 id=id_str,
                 speed_um_s=speed,
                 max_distance_um=max_dist,
-                laser_position=(self.laser_focus_position.x, self.laser_focus_position.y, self.laser_focus_position.z),
+                eye_tracker_results=self.last_eye_tracker_results,
             )
 
             self.take_axial_cont_scan_requested.emit(request)
@@ -1522,7 +1528,7 @@ class HiFrontend(QWidget):
         eye-tracker worker via EyeTrackerProxy.set_et_config.
         """
 
-        def _on_apply(cfg):
+        def _on_apply(cfg: EyeTrackerConfig):
             """
             Called by EyeTrackerConfigDialog.apply() after updating the
             global ThreadSafeConfig. `cfg` is an EyeTrackerConfig instance.
@@ -1631,7 +1637,7 @@ class HiFrontend(QWidget):
             # Option 2 (optional): also hide it
             self.laser_point.setVisible(False)
 
-    def update_position_text(self, x=None, y=None, z=None, dc=None):
+    def update_laser_position_text_eye_tracker(self, x=None, y=None, z=None, dc=None):
         """
         Update the x, y, Δz display with fixed width fields.
         If a value is None, show blank padded fields.
@@ -1664,6 +1670,8 @@ class HiFrontend(QWidget):
 
 
 
+
+
     @QtCore.pyqtSlot(object, object, dict)
     def on_eye_frames_ready(self, left, right, meta):
         """
@@ -1679,48 +1687,62 @@ class HiFrontend(QWidget):
 
         self.eye_img[0].setImage(left, autoLevels=True)
         self.eye_img[1].setImage(right, autoLevels=True)
-        pupil3D: Pupil3D = meta['pupil3D']
-        # self.eye_img[2].setImage(rgb_to_gray(rendered), autoLevels=True)
-        # self.eye_img[3].setImage(rgb_to_gray(rendered), autoLevels=True)
 
-
-        if pupil3D is not None:
-            transform = RigPupilTransform(pupil_center=RigCoord(x=pupil3D.center_ref[0],
-                                                                y=pupil3D.center_ref[1],
-                                                                z=pupil3D.center_ref[2])
-                                          )
-            laser_pupil_coord: PupilCoord = transform.rig_to_pupil(self.laser_focus_position)
-            self.current_laser_pos = laser_pupil_coord
-            self.update_laser_position_cartesian(x=laser_pupil_coord.x, y=laser_pupil_coord.y)
-            delta_laser_corner = calc_distance_laser_corner(laser_pupil_coord)
-            self.update_position_text(x=laser_pupil_coord.x, y=laser_pupil_coord.y, z=laser_pupil_coord.z, dc=delta_laser_corner)
-
+        self.last_eye_tracker_results = get_eye_tracker_results(
+            left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
+        )
+        laser_position = self.last_eye_tracker_results.laser_position
+        if laser_position is not None:
+            self.update_laser_position_cartesian(x=laser_position[0], y=laser_position[1])
+            self.update_laser_position_text_eye_tracker(x=laser_position[0],
+                                                        y=laser_position[1],
+                                                        z=laser_position[2],
+                                                        dc=self.last_eye_tracker_results.delta_laser_corner)
         else:
             self.clear_laser_position()
-            self.update_position_text(None, None, None, None)
+            self.update_laser_position_text_eye_tracker(None, None, None, None)
 
-        # self.update_laser_position_cartesian(x=1, y=2)
-        # self.update_position_text(1, 2, 1000, self.laser_focus_position.z)# Test
     # ---- Fitting button (placeholder) ----
 
+    def shutdown_eye_tracker(self):
+        self.request_eye_shutdown.emit()
+        time.sleep(5)
+        self.eye_thread.quit()
+        self.eye_thread.wait()
 
+    def restart_eye_tracker(self):
+        self.eye_thread = QThread(self)
+        self.eye_ctrl = EyeTrackerController(use_dummy=use_eye_tracker_dummy)
+        self.eye_ctrl.moveToThread(self.eye_thread)
+
+        # Reconnect signals
+        self.eye_thread.started.connect(self.eye_ctrl.start)
+        self.eye_ctrl.log_message.connect(self._append_log_line)
+        self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)
+
+        # Start new thread
+        self.eye_thread.start()
+
+    def on_restart_eye_clicked(self):
+        # Close old eye tracker
+        self.shutdown_eye_tracker()
+        # Create fresh controller + thread
+        self.restart_eye_tracker()
 
     def closeEvent(self, event):
         print("GUI shutdown initiated...")
 
         # ---- Eye Tracker Shutdown via Signal ----
         if include_eye_tracking:
-            self.request_eye_shutdown.emit()  # asynchronous
-            self.eye_thread.quit()  # request thread exit
-            self.eye_thread.wait(3000)  # block until it finishes
+            self.shutdown_eye_tracker()
 
         # ---- Brillouin backend shutdown (similar pattern if desired) ----
         self.stop_live_requested.emit()
+        time.sleep(5)
         self.shutdown_requested.emit()
+        time.sleep(5)
         self.brillouin_signaller_thread.quit()
         self.brillouin_signaller_thread.wait(3000)
-        for t in threading.enumerate():
-            print(t, t.name, t.is_alive())
         print("GUI shutdown complete.")
         super().closeEvent(event)
 
@@ -1743,6 +1765,7 @@ def main():
     viewer.show()
     exit_code = app.exec_()
     sys.exit(exit_code)
+    return
 
 
 

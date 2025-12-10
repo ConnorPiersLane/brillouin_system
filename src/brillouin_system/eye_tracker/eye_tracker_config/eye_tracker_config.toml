@@ -1,10 +1,16 @@
 [eye_tracker]
-sleep = false
 binary_threshold_left = 20
 binary_threshold_right = 20
-save_images_path = ""
-max_saving_freq_hz = 5
-save_images = false
-do_ellipse_fitting = true
-overlay_ellipse = true
+masking_radius_left = 500
+masking_radius_right = 500
+masking_center_left = [
+    0,
+    0,
+]
+masking_center_right = [
+    0,
+    0,
+]
+do_ellipse_fitting = false
+overlay_ellipse = false
 frame_returned = "original"

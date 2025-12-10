@@ -1,3 +1,5 @@
+import os
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -51,46 +53,37 @@ ELLIPSE_OVERLAY_THICKNESS = 3
 
 class EyeTracker:
     def __init__(self, use_dummy=False):
-        self._save_data = False
-        self._save_data_timestamps: list[float] = []
-        self._save_data_N: int = 0
-        self._stored_data: list[EyeTrackerRawData] = []
 
+        self._config: EyeTrackerConfig | None = None
 
         self.pupil_detector = PupilDetector(stereo_cameras=stereo_cameras, left_to_ref=left_to_ref)
+        self.ellipse_fitter = EllipseFitter()
 
-
-
-        config_init = eye_tracker_config.get()
-        self._min_delta_time = 1 / config_init.max_saving_freq_hz
-        self.ellipse_fitter = EllipseFitter(config=config_init)
+        init_config = eye_tracker_config.get()
+        self.set_config(config=init_config)
 
         self.dual_cam_proxy = DualCameraProxy(dtype="uint8", slots=8, use_dummy=use_dummy)
         self.dual_cam_proxy.start()
 
     def set_config(self, config: EyeTrackerConfig):
-        self._min_delta_time = 1 / config.max_saving_freq_hz
-        self.ellipse_fitter.set_config(config=config)
+        self._config = config
 
+        self.ellipse_fitter.set_config(
+            binary_threshold_left=config.binary_threshold_left,
+            binary_threshold_right=config.binary_threshold_right,
+            masking_radius_left=config.masking_radius_left,
+            masking_radius_right=config.masking_radius_right,
+            masking_center_left=config.masking_center_left,
+            masking_center_right=config.masking_center_right,
+            frame_to_be_returned=config.frame_returned,
+        )
 
     def _get_settings(self) -> EyeTrackerSettings:
         return EyeTrackerSettings(
-            config=self.ellipse_fitter.config,
+            config=self._config,
             stereo_calibration=self.pupil_detector.stereo.st_cal,
         )
 
-    def _clear_stored_data(self):
-        self._stored_data.clear()
-        self._save_data_timestamps.clear()
-        self._save_data_N = 0
-
-    def start_saving(self):
-        self._save_data = True
-
-    def end_saving(self):
-        self._save_data = False
-        self._save_data_to_disk()
-        self._clear_stored_data()
 
     def _get_frames(self) -> tuple[np.ndarray, np.ndarray, float]:
         left_img, right_img, meta = self.dual_cam_proxy.get_frames()
@@ -102,7 +95,7 @@ class EyeTracker:
         pupil_eR: PupilEllipse = self.ellipse_fitter.find_pupil_right(right_img)
         return pupil_eL, pupil_eR
 
-    def get_pupil3D(self, eL: Ellipse2D | None, eR: Ellipse2D | None) -> Pupil3D:
+    def get_pupil3D(self, eL: Ellipse2D | None, eR: Ellipse2D | None) -> Pupil3D | None:
         # return self.pupil_detector.triangulate_center_using_cones(eL=eL, eR=eR)
         return self.pupil_detector.triangulate_center(eL=eL, eR=eR)
 
@@ -133,7 +126,7 @@ class EyeTracker:
         left_img = gray_to_rgb(left_img)
         right_img = gray_to_rgb(right_img)
 
-        if self.ellipse_fitter.config.overlay_ellipse:
+        if self._config.overlay_ellipse:
             if pupil_eL.ellipse is not None:
                 left_img = draw_ellipse_rgb(img_rgb=left_img,
                                            ellipse=pupil_eL.ellipse,
@@ -168,38 +161,7 @@ class EyeTracker:
     # ---------------------------
     # rate-limited saver
     # ---------------------------
-    def _should_save(self, timestamp: float) -> bool:
-        if not self._save_data:
-            return False
-        if not self._save_data_timestamps:
-            return True
-        return (timestamp - self._save_data_timestamps[-1]) >= self._min_delta_time
 
-
-
-    def _add_data_for_saving(self, timestamp: float,
-                             left_img_original: np.ndarray,
-                             right_img_original: np.ndarray,
-                             pupil3D: Pupil3D | None):
-
-        self._stored_data.append(
-            EyeTrackerRawData(
-                timestamp=timestamp,  # now actually seconds, but you can rename field later
-                left_img_original=left_img_original,
-                right_img_original=right_img_original,
-                pupil3D=pupil3D,
-            )
-        )
-        self._save_data_timestamps.append(timestamp)
-        self._save_data_N += 1
-
-    def _save_data_to_disk(self) -> None:
-        results = EyeTrackerResultsForDiskSave(
-            settings=self._get_settings(),
-            rawdata=list(self._stored_data),
-        )
-        native = dataclass_to_hdf5_native_dict(results)
-        save_dict_to_hdf5(self.ellipse_fitter.config.save_images_path, native)
 
     # def _pose_from_pupil3D(self, pupil3D: Pupil3D):
     #     """
@@ -225,6 +187,37 @@ class EyeTracker:
     #
     #     return C_cornea, gaze
 
+    def get_eye_tracker_results_from_original_imgs(self,
+                                                   left_img: np.ndarray,
+                                                   right_img: np.ndarray) -> EyeTrackerResultsForGui:
+        # Ensure they are all rgb
+        if self._config.do_ellipse_fitting:
+            pupil_eL, pupil_eR = self._get_ellipses(left_img, right_img)
+            pupil_3D = self.get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
+            cam_left_img, cam_right_img = self._get_cam_imgs_for_display(pupil_eL, pupil_eR)
+
+        else:
+            pupil_3D=None
+            cam_left_img = gray_to_rgb(ensure_uint8(left_img))
+            cam_right_img = gray_to_rgb(ensure_uint8(right_img))
+
+
+        # Ensure all images are correctly scaled
+        # ensure correct scaling and rgb (for shared memory space) for GUI display
+        cam_left_img = scale_image(cam_left_img, IMG_SIZE)
+        cam_right_img = scale_image(cam_right_img, IMG_SIZE)
+
+        cam_left_img = ensure_uint8(cam_left_img)
+        cam_right_img = ensure_uint8(cam_right_img)
+
+
+
+        return EyeTrackerResultsForGui(
+            pupil3D = pupil_3D,
+            cam_left_img=cam_left_img,
+            cam_right_img=cam_right_img,
+        )
+
     def get_results_for_gui(self) -> EyeTrackerResultsForGui:
 
         try:
@@ -236,50 +229,11 @@ class EyeTracker:
                 cam_right_img=make_black_image(max_size=IMG_SIZE, channels=3),
             )
 
-        _should_save = self._should_save(timestamp=ts)
-
-        if _should_save:
-            left_img_original = left_img.copy()
-            right_img_original = right_img.copy()
-        else:
-            left_img_original = None
-            right_img_original = None
-
         # Ensure they are all rgb
-        if self.ellipse_fitter.config.do_ellipse_fitting:
-            pupil_eL, pupil_eR = self._get_ellipses(left_img, right_img)
-            pupil_3D = self.get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
-            cam_left_img, cam_right_img = self._get_cam_imgs_for_display(pupil_eL, pupil_eR)
-
-        else:
-            pupil_3D=None
-            cam_left_img = gray_to_rgb(ensure_uint8(left_img))
-            cam_right_img = gray_to_rgb(ensure_uint8(right_img))
-
-        if _should_save:
-            self._add_data_for_saving(timestamp=ts,
-                                      left_img_original=left_img_original,
-                                      right_img_original=right_img_original,
-                                      pupil3D=pupil_3D)
+        et_results = self.get_eye_tracker_results_from_original_imgs(left_img=left_img, right_img=right_img)
 
 
-        # Ensure all images are correctly scaled
-        # ensure correct scaling and rgb (for shared memory space) for GUI display
-        cam_left_img = scale_image(cam_left_img, IMG_SIZE)
-        cam_right_img = scale_image(cam_right_img, IMG_SIZE)
-
-
-        #
-        cam_left_img = ensure_uint8(cam_left_img)
-        cam_right_img = ensure_uint8(cam_right_img)
-
-
-
-        return EyeTrackerResultsForGui(
-            pupil3D = pupil_3D,
-            cam_left_img=cam_left_img,
-            cam_right_img=cam_right_img,
-        )
+        return et_results
 
     def set_allied_vision_configs(self, cfg_left: AlliedConfig, cfg_right: AlliedConfig):
         self.dual_cam_proxy.set_configs(cfg_left=cfg_left, cfg_right=cfg_right)

@@ -445,7 +445,7 @@ class HiBackend:
             measurements=all_results,
             system_state=self.get_current_system_state(),
             calibration_params=self.calibration_poly_fit_params,
-            laser_position=request_axial_scan.laser_position,
+            eye_tracker_results=request_axial_scan.eye_tracker_results,
             scan_speed_um_s=None,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
@@ -472,6 +472,7 @@ class HiBackend:
                         lens_zaber_position=lens_x0,
                         time_stamp=ts)
 
+        self._i_axial_scans += 1
 
         axial_scan = AxialScan(
             i=self._i_axial_scans,
@@ -479,7 +480,7 @@ class HiBackend:
             measurements=[mp],
             system_state=self.get_current_system_state(),
             calibration_params=self.calibration_poly_fit_params,
-            laser_position=request_axial_scan.laser_position,
+            eye_tracker_results=request_axial_scan.eye_tracker_results,
             scan_speed_um_s= speed
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan

@@ -18,17 +18,14 @@ class EyeTrackerConfig:
     Keep it small so you rarely need to touch it.
     """
 
-    # Basic control
-    sleep: bool = False
-
     # Per-eye thresholds
     binary_threshold_left: int = 20
     binary_threshold_right: int = 20
 
-    # Saving controls
-    save_images_path: str = ""
-    max_saving_freq_hz: int = 5
-    save_images: bool = False
+    masking_radius_left: int = 500
+    masking_radius_right: int = 500
+    masking_center_left: tuple[int, int] = (0,0)
+    masking_center_right: tuple[int, int] = (0,0)
 
     # Ellipse fitting & overlay
     do_ellipse_fitting: bool = False

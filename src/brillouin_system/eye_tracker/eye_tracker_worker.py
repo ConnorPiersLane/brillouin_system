@@ -92,20 +92,6 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
                         eye_tracker.set_config(cfg_et)
                         evt_q.put({"type": "et_config_applied"})
 
-                elif typ == "start_saving":
-                    if not eye_tracker:
-                        evt_q.put({"type": "error", "msg": "EyeTracker not initialized"})
-                    else:
-                        eye_tracker.start_saving()
-                        evt_q.put({"type": "started_saving"})
-
-                elif typ == "end_saving":
-                    if not eye_tracker:
-                        evt_q.put({"type": "error", "msg": "EyeTracker not initialized"})
-                    else:
-                        eye_tracker.end_saving()
-                        evt_q.put({"type": "ended_saving"})
-
                 elif typ == "shutdown":
                     break
 

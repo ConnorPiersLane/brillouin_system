@@ -1,6 +1,5 @@
 # pupil_detector.py
 from __future__ import annotations
-from dataclasses import dataclass
 import numpy as np
 
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
@@ -48,13 +47,13 @@ class PupilDetector:
         self,
         eL: Ellipse2D,
         eR: Ellipse2D,
-    ) -> Pupil3D:
+    ) -> Pupil3D | None:
         """
         Simple baseline: triangulate the image-ellipse centers (weak perspective).
         Uses the rig's robust triangulator and then maps to the selected reference via SE3.
         """
         if eL is None or eR is None:
-            return Pupil3D(center_left=None, center_ref=None, normal_left=None, normal_ref=None, radius=None)
+            return None
 
         X_left, _ = self.stereo.triangulate_best(eL.center, eR.center)
 

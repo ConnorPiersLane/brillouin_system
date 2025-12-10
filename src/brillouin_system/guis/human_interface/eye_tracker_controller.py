@@ -1,6 +1,7 @@
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 from PyQt5 import QtCore
 
+from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_proxy import EyeTrackerProxy
 
 
@@ -43,6 +44,11 @@ class EyeTrackerController(QObject):
         except Exception:
             pass
         self.log_message.emit("EyeTracker shutdown complete.")
+
+    @QtCore.pyqtSlot(object)
+    def send_config(self, config: EyeTrackerConfig):
+        self.proxy.set_et_config(config)
+        self.log_message.emit("Send new config to EyeTracker")
 
     def _poll(self):
         if not self._running:

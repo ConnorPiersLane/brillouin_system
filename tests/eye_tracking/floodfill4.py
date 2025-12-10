@@ -6,7 +6,7 @@ from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import e
 from brillouin_system.eye_tracker.eye_tracker_helpers import draw_ellipse_rgb, gray_to_rgb
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import (
-    find_pupil_ellipse_with_flooding, PupilImgType, extract_roi
+    find_pupil_ellipse_with_flooding, PupilImgType, extract_roi, make_img_black_outside_ring_around_center
 )
 
 
@@ -40,9 +40,9 @@ def floodfill_and_show(path: str, threshold: int = 20):
 
     # 2) Run detector once to get the ellipse (use fastest stage to avoid extra copies)
 
-    img, x_clip, y_clip = extract_roi(img=img,
-                        roi_center_xy=(600,500),
-                        roi_width_height=(400,400))
+    # img, x_clip, y_clip = extract_roi(img=img,
+    #                     roi_center_xy=(600,500),
+    #                     roi_width_height=(400,400))
 
     result_for_ellipse = find_pupil_ellipse_with_flooding(
         img, threshold=threshold, frame_to_be_returned=PupilImgType.FLOODFILLED
@@ -63,6 +63,10 @@ def floodfill_and_show(path: str, threshold: int = 20):
 
     images = []
     for stype, _title in stages:
+        img = make_img_black_outside_ring_around_center(img=img,
+                                                          ring_radius=300,
+                                                          center=(200,100),
+                                                          make_copy=False)
         r = find_pupil_ellipse_with_flooding(
             img, threshold=threshold, frame_to_be_returned=stype
         )
@@ -98,5 +102,5 @@ def floodfill_and_show(path: str, threshold: int = 20):
 
 
 if __name__ == "__main__":
-    params = floodfill_and_show("left/pair_0002_left.png", threshold=12)
+    params = floodfill_and_show("left/pair_0001_left.png", threshold=12)
     print("Ellipse:", params)

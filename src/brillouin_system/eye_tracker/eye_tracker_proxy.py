@@ -152,19 +152,6 @@ class EyeTrackerProxy:
         self.req_q.put({"type": "set_et_config", "cfg_et": cfg_et})
         self._wait_for("et_config_applied")
 
-    def start_saving(self) -> None:
-        """
-        Ask the eye tracker to start saving its data.
-        """
-        self.req_q.put({"type": "start_saving"})
-        self._wait_for("started_saving")
-
-    def end_saving(self) -> None:
-        """
-        Ask the eye tracker to stop saving its data.
-        """
-        self.req_q.put({"type": "end_saving"})
-        self._wait_for("ended_saving")
 
     def stop_streaming(self) -> None:
         """

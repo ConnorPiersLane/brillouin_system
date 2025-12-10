@@ -140,6 +140,53 @@ def extract_roi(img, roi_center_xy, roi_width_height):
     return roi, x1_clip, y1_clip
 
 
+def make_img_black_outside_ring_around_center(img: np.ndarray,
+                                              ring_radius: int,
+                                              center: tuple[int, int] = (0,0,),
+                                              make_copy: bool = False) -> np.ndarray:
+    """
+    Zero (black) all pixels whose distance from the image center is > ring_radius.
+    Keeps whatever is inside the circle, blackens everything outside.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Grayscale or color image.
+    ring_radius : int
+        Radius (in pixels) of the kept circular region around the center.
+    center: tuple[int, int],
+        cx, cy (horizontal: left to right, vertical: bottom to top)
+    make_copy: bool
+        makes a copy of the image if True
+
+    Returns
+    -------
+    np.ndarray
+        New image with pixels outside the circle set to 0.
+    """
+    h, w = img.shape[:2]
+    cy, cx = h // 2 - center[1], w // 2 + center[0]
+
+    # Build distance grid
+    yy, xx = np.ogrid[:h, :w]
+    dist2 = (yy - cy) ** 2 + (xx - cx) ** 2
+
+    # Mask for points INSIDE the circle
+    mask = dist2 <= ring_radius ** 2
+
+    if make_copy:
+        out = img.copy()
+    else:
+        out = img
+
+    if img.ndim == 2:
+        # Grayscale
+        out[~mask] = 0
+    else:
+        # Color: broadcast mask over channels
+        out[~mask, :] = 0
+
+    return out
 
 def find_pupil_ellipse_with_flooding(
     img: np.ndarray,
@@ -164,9 +211,9 @@ def find_pupil_ellipse_with_flooding(
     h, w = bw.shape
     mask = np.zeros((h + 2, w + 2), np.uint8)
     cv2.floodFill(bw, mask, (0, 0), 128)
-    cv2.floodFill(bw, mask, (w - 1, 0), 128)
-    cv2.floodFill(bw, mask, (0, h - 1), 128)
-    cv2.floodFill(bw, mask, (w - 1, h - 1), 128)
+    # cv2.floodFill(bw, mask, (w - 1, 0), 128)
+    # cv2.floodFill(bw, mask, (0, h - 1), 128)
+    # cv2.floodFill(bw, mask, (w - 1, h - 1), 128)
     bw[bw == 128] = 0  # remove background marked by 128
 
     # Step 3: Keep largest connected component

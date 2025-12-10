@@ -14,6 +14,9 @@ def _project_opencv_numba(K, dist, R, t, X):
     Xc2 = R[2,0]*X[0] + R[2,1]*X[1] + R[2,2]*X[2] + t[2]
 
     # normalized
+    # safeguard → NEVER allow division by near-zero Z
+    if Xc2 < 1e-9:
+        Xc2 = 1e-9
     x = Xc0 / Xc2
     y = Xc1 / Xc2
 

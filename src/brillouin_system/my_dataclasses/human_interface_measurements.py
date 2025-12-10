@@ -4,6 +4,7 @@ import numpy as np
 
 from brillouin_system.calibration.calibration import CalibrationCalculator, CalibrationPolyfitParameters
 from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -20,14 +21,14 @@ class RequestAxialStepScan:
     id: str
     n_measurements: int
     step_size_um: float
-    laser_position: tuple[float, float, float] | None = None #mm
+    eye_tracker_results: EyeTrackerResults | None = None
 
 @dataclass
 class RequestAxialContScan:
     id: str
     speed_um_s: float
     max_distance_um: float
-    laser_position: tuple[float, float, float] | None = None #mm
+    eye_tracker_results: EyeTrackerResults | None = None
 # -------------- Scan Result --------------
 
 @dataclass
@@ -47,8 +48,8 @@ class AxialScan:
     measurements: list[MeasurementPoint]
     system_state: SystemState
     calibration_params: CalibrationPolyfitParameters | None
-    laser_position: tuple[float, float, float] | None = None # in mm
     scan_speed_um_s: float | None = None
+    eye_tracker_results: EyeTrackerResults | None = None
 
 # -------------- Scan Fitting --------------
 
