@@ -1765,7 +1765,7 @@ def main():
     viewer.show()
     exit_code = app.exec_()
     sys.exit(exit_code)
-    return
+    return 0
 
 
 
