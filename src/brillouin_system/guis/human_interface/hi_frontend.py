@@ -69,10 +69,10 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-use_backend_dummy = True
+use_backend_dummy = False
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = True
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -93,10 +93,10 @@ def create_backend(use_dummy: bool) -> HiBackend:
             camera=DummyCamera(),
             shutter_manager=ShutterManagerDummy('human_interface'),
             microwave=MicrowaveDummy(),
-            zaber_eye_lens=ZaberEyeLensDummy(),
-            zaber_hi=ZaberHumanInterfaceDummy(),
-            # zaber_eye_lens=ZaberEyeLens(),
-            # zaber_hi=ZaberHumanInterface(),
+            # zaber_eye_lens=ZaberEyeLensDummy(),
+            # zaber_hi=ZaberHumanInterfaceDummy(),
+            zaber_eye_lens=ZaberEyeLens(),
+            zaber_hi=ZaberHumanInterface(),
             is_sample_illumination_continuous=True
         )
 
@@ -104,7 +104,7 @@ def create_backend(use_dummy: bool) -> HiBackend:
         backend = HiBackend(
             camera=IxonUltra(
                 index = 0,
-                temperature = -40, #"off"
+                temperature = "off",
                 fan_mode = "full",
                 x_start = 40, x_end  = 120,
                 y_start= 300, y_end  = 315,
@@ -1741,10 +1741,13 @@ class HiFrontend(QWidget):
         time.sleep(5)
         self.shutdown_requested.emit()
         time.sleep(5)
+        #Todo: backend takes longer to close. wait for a signal from the backend, then proceed closing
         self.brillouin_signaller_thread.quit()
         self.brillouin_signaller_thread.wait(3000)
         print("GUI shutdown complete.")
         super().closeEvent(event)
+
+
 
 
 def main():
