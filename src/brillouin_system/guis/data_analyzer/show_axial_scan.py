@@ -17,7 +17,7 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
     MeasuredStatistics
-
+#Todo: change displayed frame to subtracted
 
 class AxialScanViewer(QWidget):
     """GUI for visualizing and analyzing axial scan data."""
