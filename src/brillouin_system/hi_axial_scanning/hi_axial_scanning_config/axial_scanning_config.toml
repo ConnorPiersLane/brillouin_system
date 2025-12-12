@@ -1,0 +1,20 @@
+[eye_tracker]
+max_continuous_scanning_distance_um = 2000
+steps_while_searching_for_reflection_um = 20
+max_distance_while_searching_for_reflection_um = 2000
+step_after_detecting_reflection_um = 20
+sline_threshold_value =
+
+masking_radius_left = 400
+masking_radius_right = 400
+masking_center_left = [
+    0,
+    0,
+]
+masking_center_right = [
+    0,
+    0,
+]
+do_ellipse_fitting = true
+overlay_ellipse = true
+frame_returned = "original"

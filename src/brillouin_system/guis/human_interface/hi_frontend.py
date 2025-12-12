@@ -69,9 +69,6 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-#todo:
-# zaber engine position not saving correctly
-# lens should go back after stepping
 
 use_backend_dummy = True
 # Eye Tracking
@@ -97,10 +94,10 @@ def create_backend(use_dummy: bool) -> HiBackend:
             camera=DummyCamera(),
             shutter_manager=ShutterManagerDummy('human_interface'),
             microwave=MicrowaveDummy(),
-            # zaber_eye_lens=ZaberEyeLensDummy(),
-            # zaber_hi=ZaberHumanInterfaceDummy(),
-            zaber_eye_lens=ZaberEyeLens(),
-            zaber_hi=ZaberHumanInterface(),
+            zaber_eye_lens=ZaberEyeLensDummy(),
+            zaber_hi=ZaberHumanInterfaceDummy(),
+            # zaber_eye_lens=ZaberEyeLens(),
+            # zaber_hi=ZaberHumanInterface(),
             is_sample_illumination_continuous=True
         )
 

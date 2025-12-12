@@ -97,6 +97,23 @@ class SpectrumFitter:
             sline=sline,
         )
 
+    def get_total_sline_value(self, sline) -> float:
+        """
+        Return the total integrated intensity of the sline.
+
+        Parameters:
+            sline (np.ndarray): 1D spectrum intensity array
+
+        Returns:
+            int: Total summed intensity
+        """
+        if sline is None:
+            return 0
+
+        return np.sum(sline)
+
+
+
     def fit(self, px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
         # Select config/model
         model = (self.reference_config if is_reference_mode else self.sample_config).fitting_model

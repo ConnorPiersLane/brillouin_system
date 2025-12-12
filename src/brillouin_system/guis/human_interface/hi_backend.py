@@ -67,7 +67,8 @@ class HiBackend:
 
         # Devices
         self.andor_camera: BaseCamera | DummyCamera = camera
-        self.andor_camera.set_from_config_file(andor_frame_config.get())
+        self._andor_config: AndorConfig = andor_frame_config.get()
+        self.update_andor_config_settings(andor_config=self._andor_config)
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
 
@@ -136,7 +137,7 @@ class HiBackend:
             self.shutter_manager.sample.close()
 
     def init_camera_settings(self):
-        andor_config = andor_frame_config.get()
+        andor_config = self._andor_config
 
         self.andor_camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
         self.andor_camera.set_vss_index(index=andor_config.vss_index)
@@ -252,7 +253,7 @@ class HiBackend:
         self.bg_image: ImageStatistics = self.get_bg_image()
 
 
-    def get_bg_image(self):
+    def get_bg_image(self) -> ImageStatistics:
         """Capture and average multiple frames to use as background."""
 
         if self.is_sample_illumination_continuous:
@@ -261,7 +262,7 @@ class HiBackend:
             pass # shutter should already be closed
         time.sleep(0.05)  # Optional delay before acquisition
 
-        andor_config = andor_frame_config.get()
+        andor_config = self._andor_config
 
         n_bg_images = andor_config.n_bg_images
         print(f"[BrillouinBackend] Taking {n_bg_images} Background Images...")
@@ -283,7 +284,7 @@ class HiBackend:
 
 
     def get_dark_image(self) -> ImageStatistics | None:
-        andor_config = andor_frame_config.get()
+        andor_config = self._andor_config
 
         n_dark_images = andor_config.n_dark_images
 
@@ -374,11 +375,11 @@ class HiBackend:
 
     def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan):
 
+        lens_x0 = self.zaber_eye_lens.get_position()
+        all_results = []
+
         if self.is_reference_mode:
             print(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
-            lens_x0 = self.zaber_eye_lens.get_position()
-
-            all_results = []
 
             for i in range(request_axial_scan.n_measurements):
                 print(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
@@ -398,14 +399,11 @@ class HiBackend:
                 )
 
         else:
-            lens_x0 = self.zaber_eye_lens.get_position()
             dx = request_axial_scan.step_size_um
 
             print(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
                   f"step size: {request_axial_scan.step_size_um} µm, "
                   f"ID: {request_axial_scan.id}")
-
-            all_results = []
 
             try:
                 if not self.is_sample_illumination_continuous:
@@ -429,13 +427,18 @@ class HiBackend:
                     all_results.append(
                         MeasurementPoint(
                             frame_andor=frame,
-                            lens_zaber_position=lens_x0,
+                            lens_zaber_position=zaber_pos,
                             time_stamp=ts)
                     )
 
             finally:
                 if not self.is_sample_illumination_continuous:
                     self.shutter_manager.sample.close()
+
+        # Move lens back to original position
+        self.zaber_eye_lens.move_abs(lens_x0)
+        zaber_pos = self.zaber_eye_lens.get_position()
+        self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
         self._i_axial_scans += 1
 
@@ -449,6 +452,8 @@ class HiBackend:
             scan_speed_um_s=None,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
+
+
 
     def take_axial_cont_scan(self, request_axial_scan: RequestAxialContScan):
 
@@ -464,6 +469,9 @@ class HiBackend:
         frame, ts = self.get_andor_frame(timeout=max_time)
         self.zaber_eye_lens.stop_slewing()
         self.zaber_eye_lens.move_abs(lens_x0)
+        zaber_pos = self.zaber_eye_lens.get_position()
+        self.b2f_emit_update_zaber_lens_position(zaber_pos)
+
 
         self.display_spectrum(frame=frame)
 
@@ -575,6 +583,7 @@ class HiBackend:
 
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.andor_camera.set_from_config_file(andor_config)
+        self._andor_config = andor_config
 
     @contextmanager
     def force_reference_mode(self):
@@ -637,7 +646,8 @@ class HiBackend:
             print(f"[Calibration] Exception: {e}")
             return False
 
-
+    def find_reflection_with_quick_steps_and_then_scan_continuously(self):
+        pass
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""
