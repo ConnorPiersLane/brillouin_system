@@ -1,7 +1,7 @@
 [andor_frame]
 advanced_gain_option = false
-x_start = 35
-x_end = 100
+x_start = 32
+x_end = 102
 y_start = 300
 y_end = 315
 vbin = 1

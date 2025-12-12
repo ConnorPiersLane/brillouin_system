@@ -54,7 +54,7 @@ def test_ixon_camera():
 
     # --- Snap image test
     shape = cam.get_frame_shape()
-    frame = cam.snap()
+    frame, _ = cam.snap()
     assert isinstance(frame, np.ndarray)
     assert frame.shape == shape
     assert frame.dtype in [np.uint16, np.uint32, np.float64]

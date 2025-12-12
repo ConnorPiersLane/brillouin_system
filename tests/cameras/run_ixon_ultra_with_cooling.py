@@ -53,7 +53,7 @@ def test_ixon_camera():
     print("[OK] Preamp mode index verified.")
 
     # --- Snap image test
-    frame = cam.snap()
+    frame, _  = cam.snap()
     assert isinstance(frame, np.ndarray)
     assert frame.shape == shape
     assert frame.dtype in [np.uint16, np.uint32, np.float64]
