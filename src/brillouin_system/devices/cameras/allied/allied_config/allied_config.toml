@@ -5,7 +5,7 @@ offset_y = 500
 width = 1000
 height = 1000
 gain = 0
-exposure = 119275
+exposure = 192669
 gamma = 1.0
 
 [right]
@@ -15,5 +15,5 @@ offset_y = 500
 width = 1000
 height = 1000
 gain = 0
-exposure = 134565
+exposure = 165146
 gamma = 1.0
