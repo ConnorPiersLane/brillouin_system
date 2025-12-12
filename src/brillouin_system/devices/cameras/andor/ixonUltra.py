@@ -192,7 +192,7 @@ class IxonUltra(BaseCamera):
             time.sleep(10)
         print("[IxonUltra] Warning: cooling did not stabilize within timeout.")
 
-    def _wait_for_warmup(self, target_temp=0, timeout=1200):
+    def _wait_for_warmup(self, target_temp=15, timeout=1200):
         start = time.time()
         while time.time() - start < timeout:
             temp = self.cam.get_temperature()
@@ -408,10 +408,11 @@ class IxonUltra(BaseCamera):
         self.set_vss_index(config.vss_index)
 
         if config.temperature == "off":
-            if not self.cam.get_temperature() > 0:
-                print("[IxonUltra] Warming up to 0°C before turning off cooler...")
-                self.cam.set_temperature(0, enable_cooler=True)
-                self._wait_for_warmup(target_temp=0)
+            target_temp = 15
+            if not self.cam.get_temperature() > target_temp:
+                print(f"[IxonUltra] Warming up to {target_temp}°C before turning off cooler...")
+                self.cam.set_temperature(target_temp, enable_cooler=True)
+                self._wait_for_warmup(target_temp=target_temp)
                 print("[IxonUltra] Turning off cooler...")
                 self.cam.set_cooler(False)
             else:
@@ -427,14 +428,17 @@ class IxonUltra(BaseCamera):
     def is_opened(self) -> bool:
         return self.cam is not None and self.cam.is_opened()
 
+
+
     def close(self):
         #with self._lock:
             if hasattr(self, "cam") and self.cam is not None and self.cam.is_opened():
                 try:
-                    if not self.cam.get_temperature() > 0:
-                        print("[IxonUltra] Warming up to 0°C before shutdown...")
-                        self.cam.set_temperature(0, enable_cooler=True)
-                        self._wait_for_warmup(target_temp=0)
+                    target_temp = 15
+                    if not self.cam.get_temperature() > target_temp:
+                        print(f"[IxonUltra] Warming up to {target_temp}°C before shutdown...")
+                        self.cam.set_temperature(target_temp, enable_cooler=True)
+                        self._wait_for_warmup(target_temp=target_temp)
                         print("[IxonUltra] Turning off cooler...")
                         self.cam.set_cooler(False)
                 except Exception as e:
