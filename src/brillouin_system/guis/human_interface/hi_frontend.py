@@ -1743,6 +1743,11 @@ class HiFrontend(QWidget):
         self.shutdown_requested.emit()
         time.sleep(5)
         #Todo: backend takes longer to close. wait for a signal from the backend, then proceed closing
+        # while self.AndorDeviceIxonThread.isRunning():
+        #     time.sleep(0.1)
+        # while self.MakoDeviceThread.isRunning():
+        #     time.sleep(0.1)
+
         self.brillouin_signaller_thread.quit()
         self.brillouin_signaller_thread.wait(3000)
         print("GUI shutdown complete.")
