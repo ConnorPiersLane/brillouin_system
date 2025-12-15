@@ -585,6 +585,7 @@ class HiBackend:
         self.andor_camera.set_from_config_file(andor_config)
         self._andor_config = andor_config
 
+
     @contextmanager
     def force_reference_mode(self):
         was_sample_mode = not self.is_reference_mode

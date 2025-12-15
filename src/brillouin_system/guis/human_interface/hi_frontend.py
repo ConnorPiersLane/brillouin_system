@@ -252,6 +252,7 @@ class HiFrontend(QWidget):
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
         self.brillouin_signaller.send_message_to_frontend.connect(self.message_handler)
+        self.brillouin_signaller.close_event_finished.connect(self._finalize_close)
 
         # Saving Signals
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
@@ -1732,28 +1733,20 @@ class HiFrontend(QWidget):
 
     def closeEvent(self, event):
         print("GUI shutdown initiated...")
+        event.ignore()
 
-        # ---- Eye Tracker Shutdown via Signal ----
         if include_eye_tracking:
             self.shutdown_eye_tracker()
 
-        # ---- Brillouin backend shutdown (similar pattern if desired) ----
         self.stop_live_requested.emit()
-        time.sleep(5)
-        self.shutdown_requested.emit()
-        time.sleep(5)
-        #Todo: backend takes longer to close. wait for a signal from the backend, then proceed closing
-        # while self.AndorDeviceIxonThread.isRunning():
-        #     time.sleep(0.1)
-        # while self.MakoDeviceThread.isRunning():
-        #     time.sleep(0.1)
+        self.shutdown_requested.emit()  # no sleep
 
+    def _finalize_close(self):
+        print("Backend shutdown complete. Closing GUI...")
         self.brillouin_signaller_thread.quit()
         self.brillouin_signaller_thread.wait(3000)
-        print("GUI shutdown complete.")
-        super().closeEvent(event)
 
-
+        QApplication.quit()
 
 
 def main():
@@ -1774,7 +1767,6 @@ def main():
     viewer.show()
     exit_code = app.exec_()
     sys.exit(exit_code)
-    return 0
 
 
 

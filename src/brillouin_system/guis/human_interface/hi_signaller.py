@@ -52,6 +52,7 @@ class HiSignaller(QObject):
     send_axial_scans_to_save = pyqtSignal(list)
     send_message_to_frontend = pyqtSignal(str, str)
     new_andor_display_ready = pyqtSignal()
+    close_event_finished = pyqtSignal()
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -539,3 +540,6 @@ class HiSignaller(QObject):
             self.backend.close()
         except Exception as e:
             print(f"Error during backend shutdown: {e}")
+        finally:
+            self.close_event_finished.emit()
+
