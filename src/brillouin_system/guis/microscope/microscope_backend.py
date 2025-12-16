@@ -285,7 +285,7 @@ class BrillouinBackend:
 
         andor_config = andor_frame_config.get()
 
-        n_bg_images = andor_config.n_bg_images
+        n_bg_images = andor_config.n_bg_images_for_reflection_finding
         print(f"[BrillouinBackend] Taking {n_bg_images} Background Images...")
         n_images = self.take_n_images(n_bg_images)
 

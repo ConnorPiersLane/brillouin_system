@@ -1,9 +1,8 @@
-# eye_tracker_config.py
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import tomli
 import tomli_w
@@ -12,53 +11,56 @@ from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
 
 @dataclass
-class EyeTrackerConfig:
+class AxialScanningConfig:
     """
-    Minimal, robust knobs for fast pupil ellipse fitting.
-    Keep it small so you rarely need to touch it.
+    Axial scanning / find-reflection configuration.
+
+    Split into two UI groups:
+      - Find Reflection Settings
+      - Scan Settings
     """
 
-    # Per-eye thresholds
-    binary_threshold_left: int = 20
-    binary_threshold_right: int = 20
+    # ----------------------------
+    # Find Reflection Settings
+    # ----------------------------
+    exposure_time_for_reflection_finding: float = 0.05  # (units are up to your acquisition pipeline; commonly ms)
+    reflection_threshold_value: float =  5000.0
+    step_distance_um_for_reflection_finding: int = 20
+    max_search_distance_um_for_reflection_finding: int = 2000
+    step_after_finding_reflection_um: int = 20
+    n_bg_images_for_reflection_finding: int = 10
 
-    masking_radius_left: int = 500
-    masking_radius_right: int = 500
-    masking_center_left: tuple[int, int] = (0,0)
-    masking_center_right: tuple[int, int] = (0,0)
-
-    # Ellipse fitting & overlay
-    do_ellipse_fitting: bool = False
-    overlay_ellipse: bool = False
-
-    # Which image is returned by the pipeline
-    frame_returned: Literal["original", "binary", "floodfilled", "contour"] = "original"
+    # ----------------------------
+    # Scan Settings
+    # ----------------------------
+    max_scan_distance_um: int = 2000
 
 
 # Path to the TOML config file
-PUPIL_FIT_TOML_PATH = Path(__file__).parent.resolve() / "eye_tracker_config.toml"
+AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "axial_scanning_config.toml"
 
 
 def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
     """
-    Convert TOML section to EyeTrackerConfig kwargs.
+    Convert TOML section to AxialScanningConfig kwargs.
 
-    We filter out unknown keys (e.g. legacy ROI fields) so older TOML files
-    still load cleanly even if we've removed some fields from the dataclass.
+    Filters unknown keys so older TOML files (or copied templates) still load.
     """
-    allowed = set(EyeTrackerConfig.__dataclass_fields__.keys())
+    allowed = set(AxialScanningConfig.__dataclass_fields__.keys())
     return {k: v for k, v in raw.items() if k in allowed}
 
 
-def _dataclass_to_toml_dict(cfg: EyeTrackerConfig) -> dict[str, Any]:
-    """Convert an EyeTrackerConfig instance to a simple dict for TOML."""
+def _dataclass_to_toml_dict(cfg: AxialScanningConfig) -> dict[str, Any]:
+    """Convert an AxialScanningConfig instance to a simple dict for TOML."""
     return asdict(cfg)
 
 
-def load_eye_tracker_config(path: Path, section: str = "eye_tracker") -> EyeTrackerConfig:
+def load_axial_scanning_config(
+    path: Path, section: str = "axial_scanning"
+) -> AxialScanningConfig:
     """
-    Load EyeTrackerConfig from a TOML file section.
-    If the section is missing, we fall back to the dataclass defaults.
+    Load AxialScanningConfig from a TOML file section.
+    If the section is missing, fall back to dataclass defaults.
     """
     try:
         with path.open("rb") as f:
@@ -68,15 +70,12 @@ def load_eye_tracker_config(path: Path, section: str = "eye_tracker") -> EyeTrac
         raw = {}
 
     kwargs = _toml_to_kwargs(raw)
-    return EyeTrackerConfig(**kwargs)
+    return AxialScanningConfig(**kwargs)
 
 
 def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> None:
     """
-    Persist a ThreadSafeConfig[EyeTrackerConfig] section back to TOML.
-
-    This mirrors the Allied config pattern: we call cfg.get_raw() to obtain
-    the underlying dataclass instance.
+    Persist a ThreadSafeConfig[AxialScanningConfig] section back to TOML.
     """
     try:
         with path.open("rb") as f:
@@ -84,7 +83,6 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> N
     except FileNotFoundError:
         data = {}
 
-    # config is a ThreadSafeConfig[EyeTrackerConfig]
     data[section] = _dataclass_to_toml_dict(config.get_raw())
 
     with path.open("wb") as f:
@@ -92,6 +90,6 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> N
 
 
 # Single global configuration instance, loaded from TOML at import time
-eye_tracker_config = ThreadSafeConfig(
-    load_eye_tracker_config(PUPIL_FIT_TOML_PATH, "eye_tracker")
+axial_scanning_config = ThreadSafeConfig(
+    load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning")
 )

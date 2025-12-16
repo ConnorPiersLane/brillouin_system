@@ -7,6 +7,9 @@ from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import E
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
 from brillouin_system.eye_tracker.eye_tracker_results import get_eye_tracker_results, EyeTrackerResults
 from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrackerController
+from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig
+from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config_gui import \
+    AxialScanningConfigDialog
 from brillouin_system.logging_utils import logging_setup
 
 from PyQt5 import QtCore, QtWidgets
@@ -28,8 +31,7 @@ from pyqtgraph import GraphicsLayoutWidget, TextItem
 from PyQt5.QtGui import QDoubleValidator, QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
-    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QGridLayout,
-    QMessageBox
+    QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QMessageBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5 import QtCore
@@ -152,6 +154,9 @@ class HiFrontend(QWidget):
     close_all_shutters_requested = pyqtSignal()
     update_fitting_configs_requested = pyqtSignal(FittingConfigs)
     request_axial_scan_data = pyqtSignal(int)
+    update_axial_scan_settings_requested = pyqtSignal(object)
+    take_bg_value_reflection_plane_request = pyqtSignal()
+    find_reflection_plane_request = pyqtSignal()
 
     # Saving Signals
     save_all_axial_scans_requested = pyqtSignal()
@@ -228,6 +233,9 @@ class HiFrontend(QWidget):
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
         self.update_fitting_configs_requested.connect(self.brillouin_signaller.update_fitting_configs)
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
+        self.update_axial_scan_settings_requested.connect(self.brillouin_signaller.update_axial_scan_settings)
+        self.take_bg_value_reflection_plane_request.connect(self.brillouin_signaller.delegate_take_and_store_bg_value_for_reflection_finding)
+        self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -319,15 +327,19 @@ class HiFrontend(QWidget):
         middle_column_layout = QVBoxLayout()
         middle_column_layout.addWidget(self.create_andor_display_group())
 
-        shift_controls_row = QHBoxLayout()
-        shift_controls_row.addWidget(self.create_zaber_manual_movement_group())
+        zaber_movement_and_scan_layout = QHBoxLayout()
+        first_column = QVBoxLayout()
+
+        first_column.addWidget(self.create_zaber_manual_movement_group())
+        first_column.addWidget(self.create_axial_scan_settings_group())
+        zaber_movement_and_scan_layout.addLayout(first_column)
 
         axial_column = QVBoxLayout()
         axial_column.addWidget(self.create_take_axial_scan_group())
         axial_column.addWidget(self.create_axial_scan_cont_group())
 
-        shift_controls_row.addLayout(axial_column)
-        middle_column_layout.addLayout(shift_controls_row)
+        zaber_movement_and_scan_layout.addLayout(axial_column)
+        middle_column_layout.addLayout(zaber_movement_and_scan_layout)
 
         # log_view was created in __init__; just add it here
         # middle_column_layout.addWidget(self.log_view)
@@ -613,22 +625,67 @@ class HiFrontend(QWidget):
 
         return group
 
+    def create_axial_scan_settings_group(self):
+        group = QGroupBox("Axial Scan Settings and Reflection Plane Finding")
+        layout = QFormLayout()
+
+        self.axial_settings_btn = QPushButton("Settings")
+        self.axial_settings_btn.clicked.connect(self.open_axial_scan_settings_dialog)
+
+        self.take_bg_value_btn = QPushButton("Take BG Value")
+        self.take_bg_value_btn.clicked.connect(self.take_bg_value_for_finding_reflection_plane)
+
+        self.find_reflection_plane_btn = QPushButton("Find Reflection Plane")
+        self.find_reflection_plane_btn.clicked.connect(self.find_reflection_plane)
+
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.axial_settings_btn)
+        btn_row.addWidget(self.take_bg_value_btn)
+        btn_row.addWidget(self.find_reflection_plane_btn)
+
+        btn_row.addStretch()
+
+        layout.addRow(btn_row)
+
+        group.setLayout(layout)
+        return group
+
     def create_take_axial_scan_group(self):
         group = QGroupBox("Scan Axial Steps")
         layout = QFormLayout()
 
         # --- Axial scan (step mode) controls ---
         self.axial_id_input = QLineEdit()
+        self.axial_id_input.setFixedWidth(80)
         self.axial_num_input = QLineEdit("10")
+        self.axial_num_input.setFixedWidth(80)
+        self.axial_num_input.textChanged.connect(self.update_axial_step_distance)
         self.axial_step_input = QLineEdit("10")
+        self.axial_step_input.setFixedWidth(80)
+        self.axial_step_input.textChanged.connect(self.update_axial_step_distance)
+
+        self.axial_steps_scanned_dist_label = QLabel("100.00 µm")
+        self.axial_steps_scanned_dist_label.setFixedWidth(80)
+
 
         layout.addRow("ID:", self.axial_id_input)
         layout.addRow("Num Meas:", self.axial_num_input)
         layout.addRow("Step Size (µm):", self.axial_step_input)
+        layout.addRow("Scanned Dist (µm):", self.axial_steps_scanned_dist_label)
 
-        self.axial_btn = QPushButton("Scan Axial Steps")
-        self.axial_btn.clicked.connect(self.take_axial_step_scan)
-        layout.addRow(self.axial_btn)
+        self.axial_btn = QPushButton("Scan")
+        self.axial_btn.clicked.connect(lambda: self.take_axial_step_scan(find_reflection_plane=False))
+
+        self.axial_btn2 = QPushButton("Find -> Scan")
+        self.axial_btn2.clicked.connect(lambda: self.take_axial_step_scan(find_reflection_plane=True))
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.axial_btn)
+        btn_row.addWidget(self.axial_btn2)
+        btn_row.addStretch()
+
+        layout.addRow(btn_row)
 
         group.setLayout(layout)
         return group
@@ -649,6 +706,7 @@ class HiFrontend(QWidget):
 
         # ID (similar to step scan)
         self.axial_cont_id_input = QLineEdit()
+        self.axial_cont_id_input.setFixedWidth(80)
 
         # Speed (µm/s)
         self.axial_cont_speed_input = QLineEdit("500")
@@ -657,26 +715,52 @@ class HiFrontend(QWidget):
 
         # Computed scanned distance (read-only)
         self.axial_cont_scanned_dist_label = QLabel("0.00 µm")
+        self.axial_cont_scanned_dist_label.setFixedWidth(80)
 
-        # Max Dist (µm) – user can set this again
-        self.axial_cont_max_dist_input = QLineEdit("2000")
-        self.axial_cont_max_dist_input.setFixedWidth(80)
 
         layout.addRow("ID:", self.axial_cont_id_input)
         layout.addRow("Speed (µm/s):", self.axial_cont_speed_input)
         layout.addRow("Scanned Dist (µm):", self.axial_cont_scanned_dist_label)
-        layout.addRow("Max Dist (µm):", self.axial_cont_max_dist_input)
 
         # Button (no backend wiring yet)
-        self.axial_cont_btn = QPushButton("Axial Scan Cont.")
-        self.axial_cont_btn.clicked.connect(self.take_axial_cont_scan)
-        layout.addRow(self.axial_cont_btn)
+        self.axial_cont_btn = QPushButton("Scan")
+        self.axial_cont_btn.clicked.connect(lambda: self.take_axial_cont_scan(find_reflection_plane=False))
+
+        self.axial_cont_btn2 = QPushButton("Find -> Scan")  # <-- name/text as you like
+        self.axial_cont_btn2.clicked.connect(lambda: self.take_axial_cont_scan(find_reflection_plane=True))
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.axial_cont_btn)
+        btn_row.addWidget(self.axial_cont_btn2)
+        btn_row.addStretch()
+
+        layout.addRow(btn_row)
 
         group.setLayout(layout)
 
         # Initialize the scanned distance from current exposure & speed
 
         return group
+
+    def update_axial_step_distance(self):
+        """
+        Compute Scanned Dist (µm) = #steps-1 () * distance (um)
+        and update the label in the Axial Scan Cont. group.
+        """
+        # If the continuous scan widgets aren't created yet, just ignore
+        try:
+            # Speed (µm/s) from Axial Scan Cont.
+            N = self.axial_num_input.text().strip()
+            N = int(N)
+
+            step = self.axial_step_input.text().strip()
+            step = float(step)
+
+            dist_um = N * step
+            self.axial_steps_scanned_dist_label.setText(f"{dist_um:.2f} µm")
+        except Exception:
+            # If parsing fails, show a neutral placeholder
+            self.axial_steps_scanned_dist_label.setText("—")
 
     def update_axial_cont_distance(self):
         """
@@ -1111,6 +1195,9 @@ class HiFrontend(QWidget):
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.update_andor_config_requested.emit(andor_config)
 
+    def update_axial_scan_settings(self, axial_scan_settings: AxialScanningConfig):
+        self.update_axial_scan_settings_requested.emit(axial_scan_settings)
+
     def update_fitting_configs(self, fitting_configs: FittingConfigs):
         self.update_fitting_configs_requested.emit(fitting_configs)
 
@@ -1443,7 +1530,7 @@ class HiFrontend(QWidget):
         self._show_cali = False
         self._save_cali = True
 
-    def take_axial_step_scan(self):
+    def take_axial_step_scan(self, find_reflection_plane: bool = False):
         try:
             id_str = self.axial_id_input.text().strip()
             n_meas = int(self.axial_num_input.text())
@@ -1458,6 +1545,7 @@ class HiFrontend(QWidget):
                 id=id_str,
                 n_measurements=n_meas,
                 step_size_um=step,
+                find_reflection_plane=find_reflection_plane,
                 eye_tracker_results=self.last_eye_tracker_results,
             )
 
@@ -1466,21 +1554,20 @@ class HiFrontend(QWidget):
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
-    def take_axial_cont_scan(self):
+    def take_axial_cont_scan(self, find_reflection_plane: bool = False):
         try:
             id_str = self.axial_cont_id_input.text().strip()
             speed = float(self.axial_cont_speed_input.text())
-            max_dist = float(self.axial_cont_max_dist_input.text())
 
             # Log info
             log.info(
-                f"[Brillouin Viewer] Axial Continuous Scan Request | ID: {id_str} with {speed}µm/s, Safety max: {max_dist} µm")
+                f"[Brillouin Viewer] Axial Continuous Scan Request | ID: {id_str} with {speed}µm/s")
 
 
             request = RequestAxialContScan(
                 id=id_str,
                 speed_um_s=speed,
-                max_distance_um=max_dist,
+                find_reflection_plane=find_reflection_plane,
                 eye_tracker_results=self.last_eye_tracker_results,
             )
 
@@ -1543,6 +1630,22 @@ class HiFrontend(QWidget):
                 log.exception(f"[EyeTracker] Failed to send config to proxy: {e}")
 
         dlg = EyeTrackerConfigDialog(
+            on_apply=_on_apply,
+            parent=self,
+        )
+        dlg.exec_()
+
+    def open_axial_scan_settings_dialog(self):
+
+        def _on_apply(cfg: AxialScanningConfig):
+            try:
+                # Emit our signal, which is connected to proxy.set_et_config
+                self.update_axial_scan_settings_requested.emit(cfg)
+                log.info("[Frontend] Sent new axial scan settings.")
+            except Exception as e:
+                log.exception(f"[EyeTracker] Failed to send new axial scan settings: {e}")
+
+        dlg = AxialScanningConfigDialog(
             on_apply=_on_apply,
             parent=self,
         )
@@ -1624,20 +1727,14 @@ class HiFrontend(QWidget):
         self.pos_text.setPos(4, top_y)
 
     def update_laser_position_cartesian(self, x: float, y: float):
-        """
-        Update the laser position on the map using Cartesian coordinates.
-        """
-
-        if hasattr(self, "laser_point"):
-            self.laser_point.setData([x], [y])
-            self.laser_point.setVisible(True)
+        if not (np.isfinite(x) and np.isfinite(y)):
+            self.clear_laser_position()
+            return
+        self.laser_point.setData([float(x)], [float(y)])
+        self.laser_point.setVisible(True)
 
     def clear_laser_position(self):
-        if hasattr(self, "laser_point"):
-            # Option 1: no points
-            self.laser_point.setData([], [])
-            # Option 2 (optional): also hide it
-            self.laser_point.setVisible(False)
+        self.laser_point.setVisible(False)
 
     def update_laser_position_text_eye_tracker(self, x=None, y=None, z=None, dc=None):
         """
@@ -1730,6 +1827,13 @@ class HiFrontend(QWidget):
         self.shutdown_eye_tracker()
         # Create fresh controller + thread
         self.restart_eye_tracker()
+
+    def take_bg_value_for_finding_reflection_plane(self):
+        self.take_bg_value_reflection_plane_request.emit()
+
+    def find_reflection_plane(self):
+        self.find_reflection_plane_request.emit()
+
 
     def closeEvent(self, event):
         print("GUI shutdown initiated...")

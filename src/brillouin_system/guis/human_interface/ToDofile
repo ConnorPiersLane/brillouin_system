@@ -1,4 +1,5 @@
 Step and scan
 
+0. Logging
 1. Remove unused calibration fitting (models and peaks)
 2. add total distance to axial step scan

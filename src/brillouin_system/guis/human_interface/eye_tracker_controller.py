@@ -45,6 +45,7 @@ class EyeTrackerController(QObject):
             pass
         self.log_message.emit("EyeTracker shutdown complete.")
 
+
     @QtCore.pyqtSlot(object)
     def send_config(self, config: EyeTrackerConfig):
         self.proxy.set_et_config(config)

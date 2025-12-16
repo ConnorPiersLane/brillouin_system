@@ -1,20 +1,8 @@
-[eye_tracker]
-max_continuous_scanning_distance_um = 2000
-steps_while_searching_for_reflection_um = 20
-max_distance_while_searching_for_reflection_um = 2000
-step_after_detecting_reflection_um = 20
-sline_threshold_value =
-
-masking_radius_left = 400
-masking_radius_right = 400
-masking_center_left = [
-    0,
-    0,
-]
-masking_center_right = [
-    0,
-    0,
-]
-do_ellipse_fitting = true
-overlay_ellipse = true
-frame_returned = "original"
+[axial_scanning]
+exposure_time_for_reflection_finding = 0.05
+reflection_threshold_value = 5000.0
+step_distance_um_for_reflection_finding = 10
+max_search_distance_um_for_reflection_finding = 3000
+step_after_finding_reflection_um = 10
+n_bg_images_for_reflection_finding = 10
+max_scan_distance_um = 3000

@@ -21,13 +21,14 @@ class RequestAxialStepScan:
     id: str
     n_measurements: int
     step_size_um: float
+    find_reflection_plane: bool | None = None
     eye_tracker_results: EyeTrackerResults | None = None
 
 @dataclass
 class RequestAxialContScan:
     id: str
     speed_um_s: float
-    max_distance_um: float
+    find_reflection_plane: bool | None = None
     eye_tracker_results: EyeTrackerResults | None = None
 # -------------- Scan Result --------------
 

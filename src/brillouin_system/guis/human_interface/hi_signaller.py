@@ -6,10 +6,10 @@ from PyQt5 import QtCore
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
+from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 
-from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestAxialContScan
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
@@ -235,6 +235,10 @@ class HiSignaller(QObject):
     @pyqtSlot(object)
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.backend.update_andor_config_settings(andor_config)
+
+    @pyqtSlot(object)
+    def update_axial_scan_settings(self, axial_scan_settings: AxialScanningConfig):
+        self.backend.update_axial_scan_settings(axial_scan_settings)
 
     @pyqtSlot(FittingConfigs)
     def update_fitting_configs(self, fitting_configs: FittingConfigs):
@@ -490,6 +494,14 @@ class HiSignaller(QObject):
             self.axial_scan_data_ready.emit(scan_data)
         else:
             print(f"[Signaller] Requested scan index {index} not found.")
+
+    @pyqtSlot()
+    def delegate_take_and_store_bg_value_for_reflection_finding(self):
+        self.backend.take_and_store_bg_value_for_reflection_finding()
+
+    @pyqtSlot()
+    def delegate_find_reflection_plane(self):
+        self.backend.find_reflection_plane()
 
 
     @pyqtSlot()

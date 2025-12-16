@@ -82,7 +82,7 @@ class AndorConfigDialog(QDialog):
         self.inputs["flip_image_horizontally"].setChecked(cfg.flip_image_horizontally)
         self.inputs["verbose"].setChecked(cfg.verbose)
         self.inputs["n_dark_images"].setText(str(cfg.n_dark_images))
-        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images))
+        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images_for_reflection_finding))
 
     def _parse_temperature(self, value: str) -> float | str:
         value = value.strip().lower()

@@ -1,5 +1,3 @@
-# eye_tracker_config_gui.py
-
 from __future__ import annotations
 
 from PyQt5.QtWidgets import (
@@ -12,24 +10,20 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QApplication,
     QMessageBox,
-    QCheckBox,
-    QComboBox,
-    QFileDialog,
 )
-from PyQt5.QtGui import QIntValidator
+from PyQt5.QtGui import QIntValidator, QDoubleValidator
 
-
-from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import (
-    EyeTrackerConfig,
-    PUPIL_FIT_TOML_PATH,
-    load_eye_tracker_config,
-    save_config_section,
-    eye_tracker_config,
-)
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import (
+    AxialScanningConfig,
+    AXIAL_SCANNING_TOML_PATH,
+    load_axial_scanning_config,
+    save_config_section,
+    axial_scanning_config,
+)
 
 
-class EyeTrackerConfigDialog(QDialog):
+class AxialScanningConfigDialog(QDialog):
     def __init__(
         self,
         cfg_holder: ThreadSafeConfig | None = None,
@@ -38,24 +32,24 @@ class EyeTrackerConfigDialog(QDialog):
     ):
         """
         cfg_holder:
-            ThreadSafeConfig[EyeTrackerConfig]. If None, the global
-            `eye_tracker_config` is used.
+            ThreadSafeConfig[AxialScanningConfig]. If None, the global
+            `axial_scanning_config` is used.
 
         on_apply:
-            Optional callback taking a single EyeTrackerConfig, called
+            Optional callback taking a single AxialScanningConfig, called
             after cfg_holder has been updated (but before saving).
         """
         super().__init__(parent)
-        self.setWindowTitle("Eye Tracker Configuration")
+        self.setWindowTitle("Axial Scanning Configuration")
 
-        # Store the ThreadSafeConfig, not the raw dataclass
-        self.cfg_holder: ThreadSafeConfig = cfg_holder or eye_tracker_config
+        self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
 
         self.inputs: dict[str, object] = {}
 
         layout = QVBoxLayout()
-        layout.addWidget(self._group_main(self.inputs))
+        layout.addWidget(self._group_find_reflection(self.inputs))
+        layout.addWidget(self._group_scan_settings(self.inputs))
         layout.addLayout(self._buttons())
         self.setLayout(layout)
 
@@ -65,85 +59,70 @@ class EyeTrackerConfigDialog(QDialog):
     # UI construction
     # ------------------------------------------------------------------ #
 
-    def _group_main(self, inputs: dict) -> QGroupBox:
-        g = QGroupBox("Settings")
+    def _group_find_reflection(self, inputs: dict) -> QGroupBox:
+        g = QGroupBox("Find Reflection Settings")
         v = QVBoxLayout()
 
-        def add_row(label: str, widget):
+        def add_row(label: str, widget: QLineEdit):
             h = QHBoxLayout()
             h.addWidget(QLabel(label))
             h.addWidget(widget, 1)
             v.addLayout(h)
 
+        # Exposure time
+        le_exposure = QLineEdit()
+        le_exposure.setValidator(QDoubleValidator(0.0, 1e6, 6))
+        inputs["exposure_time"] = le_exposure
+        add_row("Exposure time [s]", le_exposure)
 
-        # Thresholds
-        le_left_thr = QLineEdit()
-        le_left_thr.setValidator(QIntValidator(0, 255))
-        inputs["binary_threshold_left"] = le_left_thr
-        add_row("Binary threshold (left)", le_left_thr)
+        # Threshold value
+        le_thresh = QLineEdit()
+        le_thresh.setValidator(QDoubleValidator(0.0, 1e18, 6))
+        inputs["reflection_threshold_value"] = le_thresh
+        add_row("Reflection threshold", le_thresh)
 
-        le_right_thr = QLineEdit()
-        le_right_thr.setValidator(QIntValidator(0, 255))
-        inputs["binary_threshold_right"] = le_right_thr
-        add_row("Binary threshold (right)", le_right_thr)
+        # Step distance [um]
+        le_step = QLineEdit()
+        le_step.setValidator(QIntValidator(0, 10_000_000))
+        inputs["step_distance_um"] = le_step
+        add_row("Step distance [um]", le_step)
 
-        # Masking radii
-        le_mask_left = QLineEdit()
-        le_mask_left.setValidator(QIntValidator(1, 10000))
-        inputs["masking_radius_left"] = le_mask_left
-        add_row("Masking radius (left)", le_mask_left)
+        # Max distance [um]
+        le_max_dist = QLineEdit()
+        le_max_dist.setValidator(QIntValidator(0, 10_000_000))
+        inputs["max_distance_um"] = le_max_dist
+        add_row("Max distance [um]", le_max_dist)
 
-        le_mask_right = QLineEdit()
-        le_mask_right.setValidator(QIntValidator(1, 10000))
-        inputs["masking_radius_right"] = le_mask_right
-        add_row("Masking radius (right)", le_mask_right)
+        # Step after finding Reflection [um]
+        le_step_after = QLineEdit()
+        le_step_after.setValidator(QIntValidator(0, 10_000_000))
+        inputs["step_after_finding_reflection_um"] = le_step_after
+        add_row("Step after finding Reflection [um]", le_step_after)
 
-        # --- Masking center (left) cx, cy ---
-        le_mask_center_left_cx = QLineEdit()
-        le_mask_center_left_cx.setValidator(QIntValidator(-5000, 5000))
-        inputs["masking_center_left_cx"] = le_mask_center_left_cx
+        # N BG Images
+        le_n_bg = QLineEdit()
+        le_n_bg.setValidator(QIntValidator(0, 1_000_000))
+        inputs["n_bg_images"] = le_n_bg
+        add_row("N BG Images", le_n_bg)
 
-        le_mask_center_left_cy = QLineEdit()
-        le_mask_center_left_cy.setValidator(QIntValidator(-5000, 5000))
-        inputs["masking_center_left_cy"] = le_mask_center_left_cy
+        g.setLayout(v)
+        return g
 
-        row_left_center = QHBoxLayout()
-        row_left_center.addWidget(QLabel("Masking center (left) cx, cy"))
-        row_left_center.addWidget(le_mask_center_left_cx)
-        row_left_center.addWidget(le_mask_center_left_cy)
-        v.addLayout(row_left_center)
+    def _group_scan_settings(self, inputs: dict) -> QGroupBox:
+        g = QGroupBox("Scan Settings")
+        v = QVBoxLayout()
 
-        # --- Masking center (right) cx, cy ---
-        le_mask_center_right_cx = QLineEdit()
-        le_mask_center_right_cx.setValidator(QIntValidator(-5000, 5000))
-        inputs["masking_center_right_cx"] = le_mask_center_right_cx
+        def add_row(label: str, widget: QLineEdit):
+            h = QHBoxLayout()
+            h.addWidget(QLabel(label))
+            h.addWidget(widget, 1)
+            v.addLayout(h)
 
-        le_mask_center_right_cy = QLineEdit()
-        le_mask_center_right_cy.setValidator(QIntValidator(-5000, 5000))
-        inputs["masking_center_right_cy"] = le_mask_center_right_cy
-
-        row_right_center = QHBoxLayout()
-        row_right_center.addWidget(QLabel("Masking center (right) cx, cy"))
-        row_right_center.addWidget(le_mask_center_right_cx)
-        row_right_center.addWidget(le_mask_center_right_cy)
-        v.addLayout(row_right_center)
-
-
-        # Ellipse fitting / overlay
-        de = QCheckBox("Run ellipse fitting")
-        inputs["do_ellipse_fitting"] = de
-        add_row("Ellipse fitting", de)
-
-        ov = QCheckBox("Overlay ellipse on output")
-        inputs["overlay_ellipse"] = ov
-        add_row("Overlay ellipse", ov)
-
-        # Frame returned
-        cb = QComboBox()
-        frame_options = ["original", "binary", "floodfilled", "contour"]
-        cb.addItems(frame_options)
-        inputs["frame_returned"] = cb
-        add_row("Frame returned", cb)
+        # Max Scan Dista [um].
+        le_max_scan = QLineEdit()
+        le_max_scan.setValidator(QIntValidator(0, 10_000_000))
+        inputs["max_scan_distance_um"] = le_max_scan
+        add_row("Max Scan Dista [um].", le_max_scan)
 
         g.setLayout(v)
         return g
@@ -170,64 +149,37 @@ class EyeTrackerConfigDialog(QDialog):
     # Data <-> UI
     # ------------------------------------------------------------------ #
 
-    def _set_fields(self, cfg: EyeTrackerConfig):
+    def _set_fields(self, cfg: AxialScanningConfig) -> None:
+        self.inputs["exposure_time"].setText(str(cfg.exposure_time_for_reflection_finding))
+        self.inputs["reflection_threshold_value"].setText(str(cfg.reflection_threshold_value))
+        self.inputs["step_distance_um"].setText(str(cfg.step_distance_um_for_reflection_finding))
+        self.inputs["max_distance_um"].setText(str(cfg.max_search_distance_um_for_reflection_finding))
+        self.inputs["step_after_finding_reflection_um"].setText(
+            str(cfg.step_after_finding_reflection_um)
+        )
+        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images_for_reflection_finding))
+        self.inputs["max_scan_distance_um"].setText(str(cfg.max_scan_distance_um))
 
-        # Thresholds
-        self.inputs["binary_threshold_left"].setText(str(cfg.binary_threshold_left))
-        self.inputs["binary_threshold_right"].setText(str(cfg.binary_threshold_right))
-
-        # Masking
-        self.inputs["masking_radius_left"].setText(str(cfg.masking_radius_left))
-        self.inputs["masking_radius_right"].setText(str(cfg.masking_radius_right))
-
-        lcx, lcy = cfg.masking_center_left
-        rcx, rcy = cfg.masking_center_right
-
-        self.inputs["masking_center_left_cx"].setText(str(lcx))
-        self.inputs["masking_center_left_cy"].setText(str(lcy))
-
-        self.inputs["masking_center_right_cx"].setText(str(rcx))
-        self.inputs["masking_center_right_cy"].setText(str(rcy))
-
-
-        # Ellipse fitting
-        self.inputs["do_ellipse_fitting"].setChecked(bool(cfg.do_ellipse_fitting))
-        self.inputs["overlay_ellipse"].setChecked(bool(cfg.overlay_ellipse))
-
-        # Frame returned
-        frame_options = ["original", "binary", "floodfilled", "contour"]
-        try:
-            idx = frame_options.index(cfg.frame_returned)
-        except ValueError:
-            idx = 0
-        self.inputs["frame_returned"].setCurrentIndex(idx)
-
-    def _collect(self) -> dict:
-        # Helper to read an int with fallback
+    def _collect(self) -> dict[str, int]:
         def _intval(key: str, default: int) -> int:
             text = self.inputs[key].text()
             return int(text) if text else default
 
+        def _floatval(key: str, default: float) -> float:
+            text = self.inputs[key].text()
+            return float(text) if text else default
+
         return {
-            "binary_threshold_left": _intval("binary_threshold_left", 20),
-            "binary_threshold_right": _intval("binary_threshold_right", 20),
-            "masking_radius_left": _intval("masking_radius_left", 500),
-            "masking_radius_right": _intval("masking_radius_right", 500),
-            "masking_center_left": (
-                _intval("masking_center_left_cx", 500),
-                _intval("masking_center_left_cy", 0),
-            ),
-            "masking_center_right": (
-                _intval("masking_center_right_cx", 500),
-                _intval("masking_center_right_cy", 0),
-            ),
-            "do_ellipse_fitting": bool(self.inputs["do_ellipse_fitting"].isChecked()),
-            "overlay_ellipse": bool(self.inputs["overlay_ellipse"].isChecked()),
-            "frame_returned": self.inputs["frame_returned"].currentText(),
+            "exposure_time_for_reflection_finding": _floatval("exposure_time", 0.05),
+            "reflection_threshold_value": _floatval("reflection_threshold_value", 5000.0),
+            "step_distance_um_for_reflection_finding": _intval("step_distance_um", 20),
+            "max_search_distance_um_for_reflection_finding": _intval("max_distance_um", 2000),
+            "step_after_finding_reflection_um": _intval("step_after_finding_reflection_um", 20),
+            "n_bg_images_for_reflection_finding": _intval("n_bg_images", 10),
+            "max_scan_distance_um": _intval("max_scan_distance_um", 2000),
         }
 
-    def _load(self):
-        """Load current config from the ThreadSafeConfig into the widgets."""
+    def _load(self) -> None:
         cfg = self.cfg_holder.get()
         self._set_fields(cfg)
 
@@ -235,34 +187,28 @@ class EyeTrackerConfigDialog(QDialog):
     # Actions
     # ------------------------------------------------------------------ #
 
-    def apply(self):
+    def apply(self) -> None:
         """Apply settings to in-memory config (but do not save TOML)."""
         try:
             kwargs = self._collect()
-            # ThreadSafeConfig.update(**kwargs)
             self.cfg_holder.update(**kwargs)
 
             if self.on_apply:
-                # Pass the updated EyeTrackerConfig instance
                 self.on_apply(self.cfg_holder.get())
 
             QMessageBox.information(self, "Applied", "Settings applied (not saved).")
         except Exception as e:
             QMessageBox.critical(self, "Apply Error", f"Failed to apply config:\n{e}")
 
-    def save(self):
-        """
-        Apply then persist to TOML.
-        This mirrors the Allied config pattern: we call save_config_section
-        with the ThreadSafeConfig.
-        """
+    def save(self) -> None:
+        """Apply then persist to TOML."""
         try:
             self.apply()
-            save_config_section(PUPIL_FIT_TOML_PATH, "eye_tracker", self.cfg_holder)
+            save_config_section(AXIAL_SCANNING_TOML_PATH, "axial_scanning", self.cfg_holder)
             QMessageBox.information(
                 self,
                 "Saved",
-                f"Saved to {PUPIL_FIT_TOML_PATH.name}.",
+                f"Saved to {AXIAL_SCANNING_TOML_PATH.name}.",
             )
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save:\n{e}")
@@ -271,11 +217,10 @@ class EyeTrackerConfigDialog(QDialog):
 if __name__ == "__main__":
     import sys
 
-    # Load existing config and wrap in ThreadSafeConfig
     holder = ThreadSafeConfig(
-        load_eye_tracker_config(PUPIL_FIT_TOML_PATH, "eye_tracker")
+        load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning")
     )
     app = QApplication(sys.argv)
-    dlg = EyeTrackerConfigDialog(cfg_holder=holder)
+    dlg = AxialScanningConfigDialog(cfg_holder=holder)
     dlg.show()
     sys.exit(app.exec_())
