@@ -3,11 +3,12 @@ from PyQt5 import QtCore
 
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_proxy import EyeTrackerProxy
+from brillouin_system.logging_utils.logging_setup import get_logger
 
+log = get_logger(__name__)
 
 class EyeTrackerController(QObject):
     frames_ready = QtCore.pyqtSignal(object, object, dict)  # left, right, rendered, meta
-    log_message = QtCore.pyqtSignal(str)
 
     def __init__(self, use_dummy: bool):
         super().__init__()
@@ -22,9 +23,9 @@ class EyeTrackerController(QObject):
             self.proxy.start()  # launches worker process and attaches rings
             self._running = True
             self._timer.start(15)  # ~60–70 Hz polling
-            self.log_message.emit("EyeTracker started.")
+            log.info("EyeTracker started.")
         except Exception as e:
-            self.log_message.emit(f"Failed to start EyeTracker: {e}")
+            log.warning(f"Failed to start EyeTracker: {e}")
             raise e
 
     @QtCore.pyqtSlot()
@@ -43,13 +44,13 @@ class EyeTrackerController(QObject):
             self.proxy.shutdown()
         except Exception:
             pass
-        self.log_message.emit("EyeTracker shutdown complete.")
+        log.info("EyeTracker shutdown complete.")
 
 
     @QtCore.pyqtSlot(object)
     def send_config(self, config: EyeTrackerConfig):
         self.proxy.set_et_config(config)
-        self.log_message.emit("Send new config to EyeTracker")
+        log.info("Send new config to EyeTracker")
 
     def _poll(self):
         if not self._running:
@@ -61,5 +62,5 @@ class EyeTrackerController(QObject):
             left, right, meta = result
             self.frames_ready.emit(left, right, meta)
         except Exception as e:
-            self.log_message.emit(f"EyeTracker polling error: {e}")
+            log.warning(f"EyeTracker polling error: {e}")
             raise e

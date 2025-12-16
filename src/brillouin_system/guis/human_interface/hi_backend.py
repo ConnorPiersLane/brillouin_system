@@ -18,6 +18,7 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_in
     ZaberHumanInterfaceDummy
 from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig, \
     axial_scanning_config
+from brillouin_system.logging_utils.logging_setup import get_logger
 
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
@@ -32,6 +33,9 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+
+
+log = get_logger(__name__)
 
 
 class SystemType(Enum):
@@ -49,10 +53,6 @@ def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
 
 class HiBackend:
 
-    @staticmethod
-    def log_message(msg: str):
-        """Optional helper to log messages — or use the signaller’s emit if needed."""
-        print(f"[BrillouinBackend] {msg}")
 
     def __init__(self,
                  camera: BaseCamera | DummyCamera,
@@ -211,12 +211,12 @@ class HiBackend:
     def change_illumination_mode_to_continuous(self):
         self.is_sample_illumination_continuous = True
         self.shutter_manager.sample.open()
-        print("[BrillouinBackend] Switched to continuous illumination mode.")
+        log.info("[BrillouinBackend] Switched to continuous illumination mode.")
 
     def change_illumination_mode_to_pulsed(self):
         self.is_sample_illumination_continuous = False
         self.shutter_manager.sample.close()
-        print("[BrillouinBackend] Switched to pulsed illumination mode.")
+        log.info("[BrillouinBackend] Switched to pulsed illumination mode.")
 
     def change_system_state(self, state_mode: SystemState):
         self.is_reference_mode = state_mode.is_reference_mode
@@ -242,7 +242,7 @@ class HiBackend:
 
         self.shutter_manager.change_to_reference()
         self.change_system_state(state_mode=self.reference_state_mode)
-        print("[BrillouinBackend] Switched to reference mode.")
+        log.info("[BrillouinBackend] Switched to reference mode.")
 
 
     def change_to_sample_mode(self):
@@ -250,7 +250,7 @@ class HiBackend:
         self.reference_state_mode = self.get_current_system_state()
         self.shutter_manager.change_to_objective()
         self.change_system_state(state_mode=self.sample_state_mode)
-        print("[BrillouinBackend] Switched to sample mode.")
+        log.info("[BrillouinBackend] Switched to sample mode.")
 
 
 
@@ -261,14 +261,14 @@ class HiBackend:
             self.do_background_subtraction = True
         else:
             self.do_background_subtraction = False
-            print("[BrillouinBackend] No Background Image available")
+            log.info("[BrillouinBackend] No Background Image available")
 
     def stop_background_subtraction(self):
         self.do_background_subtraction = False
 
     def subtract_background(self, frame: np.ndarray) -> np.ndarray:
         if not self.is_background_image_available():
-            print("[AcquisitionManager] No background image available")
+            log.info("[AcquisitionManager] No background image available")
             return frame
         return subtract_background(frame=frame, bg_frame=self.bg_image)
 
@@ -296,14 +296,14 @@ class HiBackend:
 
         # andor_config = self._andor_config
 
-        self.log_message(f"Taking {n_images} Background Images...")
+        log.info(f"Taking {n_images} Background Images...")
         n_images = self.take_n_images(n_images)
 
         if isinstance(self.andor_camera, DummyCamera):
             n_images = n_images * 0.8
 
 
-        print("[BrillouinBackend] ...Background Images acquired.")
+        log.info("[BrillouinBackend] ...Background Images acquired.")
 
 
         if self.is_sample_illumination_continuous:
@@ -319,8 +319,7 @@ class HiBackend:
         n_dark_images = n_images
 
         if n_dark_images == 0:
-            print(
-                f"[BrillouinBackend] No Dark Images Requested")
+            log.info("No Dark Images Requested")
             return None
 
         # Info:
@@ -335,7 +334,7 @@ class HiBackend:
         self.andor_camera.open_shutter()
         time.sleep(0.05)
 
-        print(f"[BrillouinBackend] {n_dark_images} dark images acquired with: {self.andor_camera.get_exposure_dataclass()}")
+        log.info(f"{n_dark_images} dark images acquired with: {self.andor_camera.get_exposure_dataclass()}")
 
         return generate_image_statistics_dataclass(n_images)
 
@@ -389,7 +388,7 @@ class HiBackend:
         try:
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode)
         except Exception as e:
-            print(f"[BrillouinBackend] Fitting error: {e}")
+            log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
     def update_calibration_calculator(self):
@@ -409,12 +408,12 @@ class HiBackend:
         all_results = []
 
         if self.is_reference_mode:
-            print(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
+            log.info(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
 
             for i in range(request_axial_scan.n_measurements):
-                print(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
+                log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
                 if self.f2b_cancel_callback():
-                    print(f"[Axial Scan] Cancelled during step {i}.")
+                    log.info(f"[Axial Scan] Cancelled during step {i}.")
                     return False
 
                 frame, ts = self._get_andor_camera_snap()
@@ -431,7 +430,7 @@ class HiBackend:
         else:
             dx = request_axial_scan.step_size_um
 
-            print(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
+            log.info(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
                   f"step size: {request_axial_scan.step_size_um} µm, "
                   f"ID: {request_axial_scan.id}")
 
@@ -452,11 +451,11 @@ class HiBackend:
 
                 for i in range(request_axial_scan.n_measurements):
                     if self.f2b_cancel_callback():
-                        print(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
+                        log.info(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
                         self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
                         return False
 
-                    print(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
+                    log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
                     self.zaber_eye_lens.move_rel(dx)
                     zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
@@ -497,7 +496,7 @@ class HiBackend:
     def take_axial_cont_scan(self, request_axial_scan: RequestAxialContScan):
 
         if self.is_reference_mode:
-            self.log_message('In Reference Mode: Change to Sample Mode for continuous scanning')
+            log.warning('In Reference Mode: Change to Sample Mode for continuous scanning')
             return
 
         lens_x0 = self.zaber_eye_lens.get_position()
@@ -505,7 +504,7 @@ class HiBackend:
         max_distance = self._axial_scan_config.max_scan_distance_um
         max_time = max_distance / speed
 
-        print(f"[Axial Scan] Starting scan...")
+        log.info(f"[Axial Scan] Starting scan...")
         self.zaber_eye_lens.start_slewing_guarded(speed_um_per_s=speed,
                                                   max_distance_um=max_distance)
         frame, ts = self.get_andor_frame(timeout=max_time)
@@ -644,7 +643,7 @@ class HiBackend:
 
         config: CalibrationConfig = calibration_config.get()
 
-        print("[Calibration] Starting calibration.")
+        log.info("[Calibration] Starting calibration.")
 
         try:
             with self.force_reference_mode():
@@ -652,7 +651,7 @@ class HiBackend:
 
                 for freq in config.calibration_freqs:
                     if self.f2b_cancel_callback():
-                        print("[Calibration] Cancelled by user.")
+                        log.info("[Calibration] Cancelled by user.")
                         return False
 
                     self.microwave.set_frequency(freq)
@@ -660,7 +659,7 @@ class HiBackend:
 
                     for _ in range(config.n_per_freq):
                         if self.f2b_cancel_callback():
-                            print("[Calibration] Cancelled by user.")
+                            log.info("[Calibration] Cancelled by user.")
                             return False
 
                         frame, _ = self.get_andor_frame()
@@ -682,11 +681,11 @@ class HiBackend:
 
                 self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
                 self.update_calibration_calculator()
-                print("[Calibration] Completed successfully.")
+                log.info("[Calibration] Completed successfully.")
                 return True
 
         except Exception as e:
-            print(f"[Calibration] Exception: {e}")
+            log.info(f"[Calibration] Exception: {e}")
             return False
 
     def take_and_store_bg_value_for_reflection_finding(self):
@@ -716,7 +715,7 @@ class HiBackend:
             take_new_bg_value = False
 
         if take_new_bg_value:
-            self.log_message("(Re)taking BG value for reflection finding")
+            log.info("(Re)taking BG value for reflection finding")
             self.take_and_store_bg_value_for_reflection_finding()
 
         return self._bg_value_for_reflection_finding
@@ -726,7 +725,7 @@ class HiBackend:
 
         # Must be in sample mode
         if self.is_reference_mode:
-            self.log_message("In Reference Mode: Change to Sample Mode for reflection finding")
+            log.warning("In Reference Mode: Change to Sample Mode for reflection finding")
             return z0, 0
 
         threshold = self._axial_scan_config.reflection_threshold_value
@@ -738,12 +737,13 @@ class HiBackend:
 
         max_steps = int(max_dist // step) if step > 0 else 0
         if max_steps <= 0:
-            self.log_message(f"Number of allowed steps: {max_steps}")
+            log.warning(f"Number of allowed steps: {max_steps}")
             return z0, 0
 
         def measure_value() -> float:
             frame, _ = self._get_andor_camera_snap()
             _, sline = self.spectrum_fitter.get_px_sline_from_image(frame)
+            # TODO: Display image
             v = self.spectrum_fitter.get_total_sline_value(sline=sline) - bg_value
             # Be robust to NaN/inf
             if not np.isfinite(v):
@@ -794,7 +794,7 @@ class HiBackend:
 
             if not candidate_found:
                 self.move_and_update_gui_zaber_eye_lens_abs(z0)
-                self.log_message("Did not find a reflection plane")
+                log.warning("Did not find a reflection plane")
                 return z0, 0
 
             # --------------------------------------------------
@@ -850,7 +850,7 @@ class HiBackend:
             z_best, v_best = max(candidates, key=lambda t: t[1])
 
             self.move_and_update_gui_zaber_eye_lens_abs(z_best)
-            self.log_message(
+            log.info(
                 f"Reflection plane found at {z_best:.2f} µm with value {v_best:.2f}"
             )
             return z_best, v_best
@@ -861,32 +861,32 @@ class HiBackend:
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""
-        self.log_message("Shutting down BrillouinBackend devices...")
+        print("Shutting down BrillouinBackend devices...")
 
         try:
             self.shutter_manager.close_all()
-            self.log_message("Shutters closed.")
+            print("Shutters closed.")
         except Exception as e:
-            self.log_message(f"Error closing shutter manager: {e}")
+            print(f"Error closing shutter manager: {e}")
 
         try:
             self.andor_camera.close()
-            self.log_message("Andor camera closed.")
+            print("Andor camera closed.")
         except Exception as e:
-            self.log_message(f"Error closing Andor camera: {e}")
+            print(f"Error closing Andor camera: {e}")
 
         try:
             self.microwave.shutdown()
-            self.log_message("Microwave shut down.")
+            print("Microwave shut down.")
         except Exception as e:
-            self.log_message(f"Error shutting down microwave: {e}")
+            print(f"Error shutting down microwave: {e}")
 
         try:
             self.zaber_eye_lens.close()
-            self.log_message("Zaber controller closed.")
+            print("Zaber controller closed.")
         except Exception as e:
-            self.log_message(f"Error closing Zaber controller: {e}")
+            print(f"Error closing Zaber controller: {e}")
 
 
-        self.log_message("BrillouinBackend shutdown complete.")
+        print("BrillouinBackend shutdown complete.")
 

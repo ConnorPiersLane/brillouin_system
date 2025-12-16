@@ -290,7 +290,6 @@ class HiFrontend(QWidget):
 
             # start/stop/shutdown
             self.eye_thread.started.connect(self.eye_ctrl.start)
-            self.eye_ctrl.log_message.connect(self._append_log_line)
 
             # frames into GUI
             self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)

@@ -7,11 +7,14 @@ from PyQt5 import QtCore
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig
+from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestAxialContScan
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
+
+log = get_logger(__name__)
 
 
 class SystemState(Enum):
@@ -23,8 +26,6 @@ class SystemState(Enum):
 
 class HiSignaller(QObject):
 
-    # Log
-    log_message = pyqtSignal(str)
 
     # Start / Stop Signals
     start_live_signal = pyqtSignal()
@@ -147,12 +148,12 @@ class HiSignaller(QObject):
     def toggle_background_subtraction(self):
         if self.backend.do_background_subtraction:
             self.backend.stop_background_subtraction()
-            self.log_message.emit("Background subtraction disabled")
+            log.info("Background subtraction disabled")
         elif self.backend.is_background_image_available():
             self.backend.start_background_subtraction()
-            self.log_message.emit("Background subtraction enabled")
+            log.info("Background subtraction enabled")
         else:
-            self.log_message.emit("Cannot enable background subtraction: no background image available")
+            log.info("Cannot enable background subtraction: no background image available")
             return
 
         # Emit updated state to viewer
@@ -171,7 +172,7 @@ class HiSignaller(QObject):
     @pyqtSlot()
     def toggle_do_live_fitting(self):
         self.backend.do_live_fitting = not self.backend.do_live_fitting
-        self.log_message.emit(f"Do Live Fitting toggled to: {self.backend.do_live_fitting}")
+        log.info(f"Do Live Fitting toggled to: {self.backend.do_live_fitting}")
         self.do_live_fitting_state.emit(self.backend.do_live_fitting)
 
     @pyqtSlot()
@@ -183,11 +184,11 @@ class HiSignaller(QObject):
         if self.backend.is_sample_illumination_continuous:
             self.backend.change_illumination_mode_to_pulsed()
             self.stop_live_view()
-            self.log_message.emit("Switched to pulsed illumination")
+            log.info("Switched to pulsed illumination")
         else:
             self.backend.change_illumination_mode_to_continuous()
             self.start_live_view()
-            self.log_message.emit("Switched to continuous illumination")
+            log.info("Switched to continuous illumination")
 
         self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
 
@@ -219,9 +220,9 @@ class HiSignaller(QObject):
                 exposure_time=settings["exposure"],
                 emccd_gain=settings["gain"],
             )
-            self.log_message.emit(f"Camera settings applied: {settings}")
+            log.info(f"Camera settings applied: {settings}")
         except Exception as e:
-            self.log_message.emit(f"Failed to apply camera settings: {e}")
+            log.info(f"Failed to apply camera settings: {e}")
 
         # Remove Background if sample mode
         if not self.backend.is_reference_mode:
@@ -252,16 +253,16 @@ class HiSignaller(QObject):
             if self._camera_shutter_open:
                 cam.close_shutter()
                 self._camera_shutter_open = False
-                self.log_message.emit("Camera shutter closed.")
+                log.info("Camera shutter closed.")
             else:
                 cam.open_shutter()
                 self._camera_shutter_open = True
-                self.log_message.emit("Camera shutter opened.")
+                log.info("Camera shutter opened.")
 
             self.camera_shutter_state_changed.emit(self._camera_shutter_open)
 
         except Exception as e:
-            self.log_message.emit(f"Failed to toggle camera shutter: {e}")
+            log.warning(f"Failed to toggle camera shutter: {e}")
 
     def update_zaber_lens_position(self, pos: float):
         self.zaber_lens_position_updated.emit(pos)
@@ -298,17 +299,17 @@ class HiSignaller(QObject):
             x, y, z = self.backend.zaber_hi.get_position()
             self.zaber_stage_positions_updated.emit(x, y, z)
         except Exception as e:
-            self.log_message.emit(f"Failed to read stage positions: {e}")
+            log.warning(f"Failed to read stage positions: {e}")
 
     @pyqtSlot(float)
     def set_microwave_frequency(self, freq: float):
         try:
             self.backend.microwave.set_frequency(freq)
             freq_real = self.backend.microwave.get_frequency()
-            self.log_message.emit(f"Microwave frequency set to {freq_real:.3f} GHz")
+            log.info(f"Microwave frequency set to {freq_real:.3f} GHz")
             self.microwave_frequency_updated.emit(freq)
         except Exception as e:
-            self.log_message.emit(f"Failed to set microwave frequency: {e}")
+            log.warning(f"Failed to set microwave frequency: {e}")
 
 
     @pyqtSlot()
@@ -317,7 +318,7 @@ class HiSignaller(QObject):
             freq = self.backend.microwave.get_frequency()
             self.microwave_frequency_updated.emit(freq)
         except Exception as e:
-            self.log_message.emit(f"Failed to read microwave frequency: {e}")
+            log.warning(f"Failed to read microwave frequency: {e}")
 
     @pyqtSlot()
     def acquire_background_image(self):
@@ -328,9 +329,9 @@ class HiSignaller(QObject):
         try:
             self.backend.take_bg_and_darknoise_images()
             self.background_available_state.emit(self.backend.is_background_image_available())
-            self.log_message.emit("Background image acquired.")
+            log.info("Background image acquired.")
         except Exception as e:
-            self.log_message.emit(f"Failed to acquire background image: {e}")
+            log.warning(f"Failed to acquire background image: {e}")
 
 
         self.restart_live_view_when_ready()
@@ -342,7 +343,7 @@ class HiSignaller(QObject):
             self.backend.display_spectrum(frame=frame)
 
         except Exception as e:
-            self.log_message.emit(f"Error snapping frame: {e}")
+            log.warning(f"Error snapping frame: {e}")
 
     @pyqtSlot()
     def start_live_view(self):
@@ -493,7 +494,7 @@ class HiSignaller(QObject):
         if scan_data is not None:
             self.axial_scan_data_ready.emit(scan_data)
         else:
-            print(f"[Signaller] Requested scan index {index} not found.")
+            log.warning(f"Requested scan index {index} not found.")
 
     @pyqtSlot()
     def delegate_take_and_store_bg_value_for_reflection_finding(self):
@@ -532,9 +533,9 @@ class HiSignaller(QObject):
             if index in self.backend.axial_scan_dict:
                 del self.backend.axial_scan_dict[index]
                 removed += 1
-                self.log_message.emit(f"Removed axial scan {index}")
+                log.info(f"Removed axial scan {index}")
             else:
-                self.log_message.emit(f"Scan {index} not found for removal")
+                log.warning(f"Scan {index} not found for removal")
 
         if removed > 0:
             self.update_stored_axial_scans()
