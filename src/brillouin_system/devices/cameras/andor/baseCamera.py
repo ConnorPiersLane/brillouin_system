@@ -16,6 +16,10 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
+    def set_from_camera_info(self, info: AndorCameraInfo, do_set_temperature: bool = False):
+        pass
+
+    @abstractmethod
     def get_name(self) -> str:
         pass
 
@@ -101,7 +105,11 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
-    def set_pre_amp_mode(self, index: int):
+    def set_fixed_pre_amp_mode(self, index: int):
+        pass
+
+    @abstractmethod
+    def get_fixed_pre_amp_mode(self) -> int:
         pass
 
     @abstractmethod

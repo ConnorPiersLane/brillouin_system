@@ -160,7 +160,7 @@ class BrillouinBackend:
     def init_camera_settings(self):
         andor_config = andor_frame_config.get()
 
-        self.andor_camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
+        self.andor_camera.set_fixed_pre_amp_mode(index=andor_config.pre_amp_mode)
         self.andor_camera.set_vss_index(index=andor_config.vss_index)
 
         self.andor_camera.set_roi(x_start=andor_config.x_start,

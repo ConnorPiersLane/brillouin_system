@@ -18,7 +18,7 @@ def test_ixon_camera():
     print(f"[OK] Exposure verified: {actual_exp}s")
 
     # --- Test EMCCD gain
-    cam.set_pre_amp_mode(index=2)
+    cam.set_fixed_pre_amp_mode(index=2)
     gain_value = 100
     cam.set_emccd_gain(gain_value)
     assert cam.get_emccd_gain() == gain_value
@@ -48,7 +48,7 @@ def test_ixon_camera():
     print("[OK] VSS index verified.")
 
     # --- Preamp mode test
-    cam.set_pre_amp_mode(5)
+    cam.set_fixed_pre_amp_mode(5)
     assert cam.get_pre_amp_mode() == 5
     print("[OK] Preamp mode index verified.")
 

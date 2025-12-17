@@ -6,7 +6,7 @@ from PyQt5 import QtCore
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
-from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig
+from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
@@ -226,20 +226,23 @@ class HiSignaller(QObject):
 
         # Remove Background if sample mode
         if not self.backend.is_reference_mode:
-            # Reset background
-            self.backend.stop_background_subtraction()
-            self.backend.bg_image = None
-            self.background_subtraction_state.emit(False)
-            self.background_available_state.emit(False)
+            self.remove_background()
 
+    def remove_background(self):
+        self.backend.stop_background_subtraction()
+        self.backend.bg_image = None
+        self.background_subtraction_state.emit(False)
+        self.background_available_state.emit(False)
+        log.info("Background subtraction stopped (if had been running) and BGs removed")
 
     @pyqtSlot(object)
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.backend.update_andor_config_settings(andor_config)
+        self.remove_background()
 
     @pyqtSlot(object)
-    def update_axial_scan_settings(self, axial_scan_settings: AxialScanningConfig):
-        self.backend.update_axial_scan_settings(axial_scan_settings)
+    def update_scanning_config(self, scanning_config: ScanningConfig):
+        self.backend.update_scanning_config_file(scanning_config)
 
     @pyqtSlot(FittingConfigs)
     def update_fitting_configs(self, fitting_configs: FittingConfigs):

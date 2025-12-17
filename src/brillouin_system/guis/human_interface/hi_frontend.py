@@ -7,8 +7,8 @@ from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import E
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
 from brillouin_system.eye_tracker.eye_tracker_results import get_eye_tracker_results, EyeTrackerResults
 from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrackerController
-from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig
-from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config_gui import \
+from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
+from brillouin_system.scan_managers.scanning_config.scanning_config_gui import \
     AxialScanningConfigDialog
 from brillouin_system.logging_utils import logging_setup
 
@@ -154,7 +154,7 @@ class HiFrontend(QWidget):
     close_all_shutters_requested = pyqtSignal()
     update_fitting_configs_requested = pyqtSignal(FittingConfigs)
     request_axial_scan_data = pyqtSignal(int)
-    update_axial_scan_settings_requested = pyqtSignal(object)
+    update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
 
@@ -233,7 +233,7 @@ class HiFrontend(QWidget):
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
         self.update_fitting_configs_requested.connect(self.brillouin_signaller.update_fitting_configs)
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
-        self.update_axial_scan_settings_requested.connect(self.brillouin_signaller.update_axial_scan_settings)
+        self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.take_bg_value_reflection_plane_request.connect(self.brillouin_signaller.delegate_take_and_store_bg_value_for_reflection_finding)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
 
@@ -1194,8 +1194,8 @@ class HiFrontend(QWidget):
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.update_andor_config_requested.emit(andor_config)
 
-    def update_axial_scan_settings(self, axial_scan_settings: AxialScanningConfig):
-        self.update_axial_scan_settings_requested.emit(axial_scan_settings)
+    def request_scanning_config_file_update(self, scanning_config: ScanningConfig):
+        self.update_scanning_config_requested.emit(scanning_config)
 
     def update_fitting_configs(self, fitting_configs: FittingConfigs):
         self.update_fitting_configs_requested.emit(fitting_configs)
@@ -1636,10 +1636,10 @@ class HiFrontend(QWidget):
 
     def open_axial_scan_settings_dialog(self):
 
-        def _on_apply(cfg: AxialScanningConfig):
+        def _on_apply(cfg: ScanningConfig):
             try:
                 # Emit our signal, which is connected to proxy.set_et_config
-                self.update_axial_scan_settings_requested.emit(cfg)
+                self.update_scanning_config_requested.emit(cfg)
                 log.info("[Frontend] Sent new axial scan settings.")
             except Exception as e:
                 log.exception(f"[EyeTracker] Failed to send new axial scan settings: {e}")

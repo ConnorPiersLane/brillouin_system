@@ -14,8 +14,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
-from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import (
-    AxialScanningConfig,
+from brillouin_system.scan_managers.scanning_config.scanning_config import (
+    ScanningConfig,
     AXIAL_SCANNING_TOML_PATH,
     load_axial_scanning_config,
     save_config_section,
@@ -74,6 +74,11 @@ class AxialScanningConfigDialog(QDialog):
         le_exposure.setValidator(QDoubleValidator(0.0, 1e6, 6))
         inputs["exposure_time"] = le_exposure
         add_row("Exposure time [s]", le_exposure)
+
+        le_gain = QLineEdit()
+        le_gain.setValidator(QDoubleValidator(0.0, 1e6, 6))
+        inputs["gain"] = le_gain
+        add_row("Gain", le_gain)
 
         # Threshold value
         le_thresh = QLineEdit()
@@ -149,8 +154,9 @@ class AxialScanningConfigDialog(QDialog):
     # Data <-> UI
     # ------------------------------------------------------------------ #
 
-    def _set_fields(self, cfg: AxialScanningConfig) -> None:
+    def _set_fields(self, cfg: ScanningConfig) -> None:
         self.inputs["exposure_time"].setText(str(cfg.exposure_time_for_reflection_finding))
+        self.inputs["gain"].setText(str(cfg.gain_for_reflection_finding))
         self.inputs["reflection_threshold_value"].setText(str(cfg.reflection_threshold_value))
         self.inputs["step_distance_um"].setText(str(cfg.step_distance_um_for_reflection_finding))
         self.inputs["max_distance_um"].setText(str(cfg.max_search_distance_um_for_reflection_finding))
@@ -171,6 +177,7 @@ class AxialScanningConfigDialog(QDialog):
 
         return {
             "exposure_time_for_reflection_finding": _floatval("exposure_time", 0.05),
+            "gain_for_reflection_finding": _intval("gain", 1),  # <-- ADD
             "reflection_threshold_value": _floatval("reflection_threshold_value", 5000.0),
             "step_distance_um_for_reflection_finding": _intval("step_distance_um", 20),
             "max_search_distance_um_for_reflection_finding": _intval("max_distance_um", 2000),

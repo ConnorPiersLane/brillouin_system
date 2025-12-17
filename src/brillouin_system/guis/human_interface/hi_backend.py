@@ -16,7 +16,7 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
-from brillouin_system.hi_axial_scanning.hi_axial_scanning_config.axial_scanning_config import AxialScanningConfig, \
+from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
 from brillouin_system.logging_utils.logging_setup import get_logger
 
@@ -72,9 +72,9 @@ class HiBackend:
         self._andor_config: AndorConfig = andor_frame_config.get()
         self.update_andor_config_settings(andor_config=self._andor_config)
 
-        self._axial_scan_config: AxialScanningConfig = axial_scanning_config.get()
-        self._bg_value_for_reflection_finding: float | None = None
-        self._bg_value_for_reflection_finding_camera_settings: AndorExposure | None = None
+        self._axial_scan_config: ScanningConfig = axial_scanning_config.get()
+        self._reflection_finding_bg: float | None = None
+        self._reflection_finding_cam_settings: AndorExposure | None = None
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
 
@@ -145,7 +145,7 @@ class HiBackend:
     def init_camera_settings(self):
         andor_config = self._andor_config
 
-        self.andor_camera.set_pre_amp_mode(index=andor_config.pre_amp_mode)
+        self.andor_camera.set_fixed_pre_amp_mode(index=andor_config.pre_amp_mode)
         self.andor_camera.set_vss_index(index=andor_config.vss_index)
 
         self.andor_camera.set_roi(x_start=andor_config.x_start,
@@ -265,12 +265,14 @@ class HiBackend:
 
     def stop_background_subtraction(self):
         self.do_background_subtraction = False
+        log.info("[BrillouinBackend] Background subtraction unabled")
 
     def subtract_background(self, frame: np.ndarray) -> np.ndarray:
         if not self.is_background_image_available():
             log.info("[AcquisitionManager] No background image available")
             return frame
         return subtract_background(frame=frame, bg_frame=self.bg_image)
+
 
 
     def take_n_images(self, n_images) -> np.ndarray:
@@ -624,7 +626,7 @@ class HiBackend:
         self.andor_camera.set_from_config_file(andor_config)
         self._andor_config = andor_config
 
-    def update_axial_scan_settings(self, axial_scan_config: AxialScanningConfig):
+    def update_scanning_config_file(self, axial_scan_config: ScanningConfig):
         self._axial_scan_config = axial_scan_config
 
     @contextmanager
@@ -688,176 +690,7 @@ class HiBackend:
             log.info(f"[Calibration] Exception: {e}")
             return False
 
-    def take_and_store_bg_value_for_reflection_finding(self):
-        _current_exposure_time = self.andor_camera.get_exposure_time()
 
-        self.andor_camera.set_exposure_time(seconds=self._axial_scan_config.exposure_time_for_reflection_finding)
-
-        bg: ImageStatistics = self.get_bg_image(n_images=self._axial_scan_config.n_bg_images_for_reflection_finding)
-
-        andor_exposure: AndorExposure = self.andor_camera.get_exposure_dataclass()
-
-        _, sline = self.spectrum_fitter.get_px_sline_from_image(bg.median_image)
-        self._bg_value_for_reflection_finding = self.spectrum_fitter.get_total_sline_value(sline=sline)
-        self._bg_value_for_reflection_finding_camera_settings = andor_exposure
-
-        self.andor_camera.set_exposure_time(seconds=_current_exposure_time)
-
-    def get_bg_value_for_reflection_finding(self) -> float:
-        if self._bg_value_for_reflection_finding is None:
-            take_new_bg_value = True
-        elif abs(self._bg_value_for_reflection_finding_camera_settings.exposure_time_s -
-                 self._axial_scan_config.exposure_time_for_reflection_finding) > 1e-3:
-            take_new_bg_value = True
-        elif self._bg_value_for_reflection_finding_camera_settings.emccd_gain != self.andor_camera.get_emccd_gain():
-            take_new_bg_value = True
-        else:
-            take_new_bg_value = False
-
-        if take_new_bg_value:
-            log.info("(Re)taking BG value for reflection finding")
-            self.take_and_store_bg_value_for_reflection_finding()
-
-        return self._bg_value_for_reflection_finding
-
-    def find_reflection_plane(self) -> tuple[float, float]:
-        z0 = self.zaber_eye_lens.get_position()
-
-        # Must be in sample mode
-        if self.is_reference_mode:
-            log.warning("In Reference Mode: Change to Sample Mode for reflection finding")
-            return z0, 0
-
-        threshold = self._axial_scan_config.reflection_threshold_value
-        bg_value = self.get_bg_value_for_reflection_finding()
-
-        step = self._axial_scan_config.step_distance_um_for_reflection_finding
-        step_after = getattr(self._axial_scan_config, "step_after_finding_reflection_um", step)
-        max_dist = self._axial_scan_config.max_search_distance_um_for_reflection_finding
-
-        max_steps = int(max_dist // step) if step > 0 else 0
-        if max_steps <= 0:
-            log.warning(f"Number of allowed steps: {max_steps}")
-            return z0, 0
-
-        def measure_value() -> float:
-            frame, _ = self._get_andor_camera_snap()
-            _, sline = self.spectrum_fitter.get_px_sline_from_image(frame)
-            # TODO: Display image
-            v = self.spectrum_fitter.get_total_sline_value(sline=sline) - bg_value
-            # Be robust to NaN/inf
-            if not np.isfinite(v):
-                return -np.inf
-            return v
-
-        opened = False
-        try:
-            # Open sample shutter if needed
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.open()
-                opened = True
-
-            # --------------------------------------------------
-            # 0) Measure current position (z0)
-            # --------------------------------------------------
-            val0 = measure_value()
-            best_val = val0
-            best_z = z0
-
-            # --------------------------------------------------
-            # 1) Forward search until threshold is crossed
-            # --------------------------------------------------
-            candidate_found = False
-            prev_val = -np.inf  # will be set when candidate found
-
-            if val0 >= threshold:
-                candidate_found = True
-                prev_val = val0
-
-            if not candidate_found:
-                for _ in range(max_steps):
-                    if self.f2b_cancel_callback():
-                        self.move_and_update_gui_zaber_eye_lens_abs(z0)
-                        return z0, 0
-
-                    current_z = self.move_and_update_gui_zaber_eye_lens_rel(step)
-                    val = measure_value()
-
-                    if val > best_val:
-                        best_val = val
-                        best_z = current_z
-
-                    if val >= threshold:
-                        candidate_found = True
-                        prev_val = val
-                        break
-
-            if not candidate_found:
-                self.move_and_update_gui_zaber_eye_lens_abs(z0)
-                log.warning("Did not find a reflection plane")
-                return z0, 0
-
-            # --------------------------------------------------
-            # 2) Hill-climb while signal increases
-            # --------------------------------------------------
-            while True:
-                if self.f2b_cancel_callback():
-                    self.move_and_update_gui_zaber_eye_lens_abs(z0)
-                    return z0, 0
-
-                current_z = self.move_and_update_gui_zaber_eye_lens_rel(step_after)
-                val = measure_value()
-
-                if val > best_val:
-                    best_val = val
-                    best_z = current_z
-
-                # stop if not improving
-                if val <= prev_val:
-                    break
-
-                prev_val = val
-
-                # safety: don't exceed max search distance from start
-                if abs(current_z - z0) >= max_dist:
-                    break
-
-            # Move to best coarse position
-            self.move_and_update_gui_zaber_eye_lens_abs(best_z)
-
-            # --------------------------------------------------
-            # 3) Refinement: center vs ± half-step
-            # --------------------------------------------------
-            half_step = 0.5 * step_after
-            z_center = self.zaber_eye_lens.get_position()
-
-            z_left = z_center - half_step
-            self.move_and_update_gui_zaber_eye_lens_abs(z_left)
-            v_left = measure_value()
-
-            self.move_and_update_gui_zaber_eye_lens_abs(z_center)
-            v_center = measure_value()
-
-            z_right = z_center + half_step
-            self.move_and_update_gui_zaber_eye_lens_abs(z_right)
-            v_right = measure_value()
-
-            candidates = [
-                (z_left, v_left),
-                (z_center, v_center),
-                (z_right, v_right),
-            ]
-            z_best, v_best = max(candidates, key=lambda t: t[1])
-
-            self.move_and_update_gui_zaber_eye_lens_abs(z_best)
-            log.info(
-                f"Reflection plane found at {z_best:.2f} µm with value {v_best:.2f}"
-            )
-            return z_best, v_best
-
-        finally:
-            if opened and not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.close()
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""

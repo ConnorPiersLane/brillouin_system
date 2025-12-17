@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection
+from zaber_motion.ascii.axis import Axis
 
 
 
@@ -20,7 +21,7 @@ class ZaberEyeLens:
         devices = self.connection.detect_devices()
         if not devices:
             raise RuntimeError("No Zaber devices found.")
-        self.axis = devices[0].get_axis(axis_index)
+        self.axis: Axis = devices[0].get_axis(axis_index)
 
         # Guard state
         self._slew_guard_active = False

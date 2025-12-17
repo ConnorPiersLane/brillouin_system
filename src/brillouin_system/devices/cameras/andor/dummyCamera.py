@@ -42,6 +42,40 @@ class DummyCamera(BaseCamera):
     def get_camera_info_dataclass(self) -> AndorCameraInfo:
         return AndorCameraInfo(**self.get_camera_info())
 
+    def set_from_camera_info(self, info: AndorCameraInfo, do_set_temperature: bool = False):
+
+        if self.verbose:
+            print("[DummyCamera] Applying settings from AndorCameraInfo...")
+
+        # Flip
+        self.set_flip_image_horizontally(info.flip_image_horizontally)
+
+        # ROI + binning
+        x_start, x_end, y_start, y_end = info.roi
+        hbin, vbin = info.binning
+        self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
+        self.set_binning(hbin=hbin, vbin=vbin)
+
+        # Exposure + gain
+        self.set_exposure_time(info.exposure)
+        self.set_emccd_gain(int(info.gain))
+        self.set_fixed_pre_amp_mode(info.fixed_pre_amp_mode_index)
+
+
+        # VSS index
+        try:
+            self.set_vss_index(int(info.vss_speed))
+        except Exception:
+            if self.verbose:
+                print("[DummyCamera] Could not apply vss_speed; keeping existing VSS index.")
+
+        # Temperature (not simulated)
+        if do_set_temperature:
+            print(f"[DummyCamera] Temperature requested from info: {info.temperature} (dummy camera ignores this)")
+
+        if self.verbose:
+            print("[DummyCamera] Camera state restored from AndorCameraInfo.")
+
     def get_name(self) -> str:
         return "DummyCamera"
 
@@ -133,10 +167,14 @@ class DummyCamera(BaseCamera):
         return self._flip
 
     # NEW: Preamp mode
-    def set_pre_amp_mode(self, index: int):
+    def set_fixed_pre_amp_mode(self, index: int):
         self._pre_amp_mode = index
         if self.verbose:
             print(f"[DummyCamera] Preamp mode set to index {index}")
+
+
+    def get_fixed_pre_amp_mode(self) -> int:
+        return self._pre_amp_mode
 
     def get_pre_amp_mode(self) -> int:
         return self._pre_amp_mode
@@ -151,7 +189,6 @@ class DummyCamera(BaseCamera):
         return self._vss_index
 
     def set_from_config_file(self, config: AndorConfig) -> None:
-
         if self.verbose:
             print("[DummyCamera] Applying settings from config...")
 
@@ -171,15 +208,15 @@ class DummyCamera(BaseCamera):
             vbin=config.vbin
         )
 
-        self.set_pre_amp_mode(config.pre_amp_mode)
+        self.set_fixed_pre_amp_mode(config.pre_amp_mode)
         self.set_vss_index(config.vss_index)
-
 
         print(f'Temperature is {config.temperature}')
 
 
         if self.verbose:
             print("[IxonUltra] Configuration applied.")
+
 
     def get_exposure_dataclass(self) -> AndorExposure:
         return AndorExposure(

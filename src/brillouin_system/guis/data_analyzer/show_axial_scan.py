@@ -17,7 +17,7 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
     MeasuredStatistics
-#Todo: change displayed frame to subtracted
+
 
 class AxialScanViewer(QWidget):
     """GUI for visualizing and analyzing axial scan data."""
@@ -104,8 +104,11 @@ class AxialScanViewer(QWidget):
             f"Index: {self.current_index + 1} / {len(self.axial_scan.measurements)} | "
             f"Z pos: {mp.lens_zaber_position:.2f} µm"
         )
-
-        self.plot_frame(mp.frame_andor)
+        if self.axial_scan.system_state.is_do_bg_subtraction_active:
+            frame = mp.frame_andor - self.axial_scan.system_state.bg_image.median_image
+        else:
+            frame =mp.frame_andor
+        self.plot_frame(frame)
         self.plot_spectrum(self.current_index)
         self.plot_axial_scan()
 
@@ -229,13 +232,18 @@ class AxialScanViewer(QWidget):
     def print_statistics(self):
         self.calc.print_all_models()
         analyzer = SpectrumAnalyzer(self.calc)
-
         fit = self.analyzed_data.fitted_scan.fitted_spectras[self.current_index]
         photons = self.analyzed_data.fitted_scan.fitted_photon_counts[self.current_index]
+
+        if self.axial_scan.system_state.bg_image is None:
+            bg_frame_std = None
+        else:
+            bg_frame_std = self.axial_scan.system_state.bg_image.std_image,
+
         tpse = analyzer.theoretical_precision(
             fs=fit,
             photons=photons,
-            bg_frame_std=self.axial_scan.system_state.bg_image.std_image,
+            bg_frame_std=bg_frame_std,
             preamp_gain=self.axial_scan.system_state.andor_camera_info.preamp_gain,
             emccd_gain=self.axial_scan.system_state.andor_camera_info.gain
         )
@@ -297,7 +305,13 @@ class AxialScanViewer(QWidget):
     def print_measured_precision(ms: "MeasuredStatistics"):
         fmt = AxialScanViewer._fmt
         print("==== Measured Statistics ====")
-        print(f"Freq shifts (MHz): "
+        print(f"Mean Freq shifts (GHz): "
+              f"left={fmt(ms.freq_shift_left_peak_mean_ghz)}, "
+              f"right={fmt(ms.freq_shift_right_peak_mean_ghz)}, "
+              f"distance={fmt(ms.freq_shift_peak_distance_mean_ghz)}, "
+              f"dc={fmt(ms.freq_shift_dc_mean_ghz)}, "
+              f"centroid={fmt(ms.freq_shift_centroid_mean_ghz)}")
+        print(f"STD Freq shifts (MHz): "
               f"left={fmt(ms.freq_shift_left_peak_mhz_std)}, "
               f"right={fmt(ms.freq_shift_right_peak_mhz_std)}, "
               f"distance={fmt(ms.freq_shift_peak_distance_mhz_std)}, "
