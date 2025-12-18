@@ -309,7 +309,7 @@ class IxonUltra(BaseCamera):
         frame = self.cam.snap()
         if self.flip_image_horizontally:
             frame = np.fliplr(frame)
-        return frame, time.time()
+        return frame, 0#time.time()
 
     def get_frame_shape(self) -> tuple[int, int]:
         #with self._lock:
@@ -486,6 +486,37 @@ class IxonUltra(BaseCamera):
     def is_opened(self) -> bool:
         return self.cam is not None and self.cam.is_opened()
 
+    def start_streaming(self, buffer_size: int = 200):
+        self.cam.start_acquisition(mode="sequence", nframes=buffer_size)
+
+    def stop_streaming(self):
+        self.cam.stop_acquisition()
+
+    def get_frame_now(self):
+        """
+        Return the newest frame available *at the time of the call*.
+        Non-blocking; returns None if no new frame yet.
+        """
+        frame = self.cam.read_newest_image()
+        if frame is None:
+            return None
+
+        if self.flip_image_horizontally:
+            frame = np.fliplr(frame)
+        return frame
+
+    def get_latest_frame_poll(self):
+        rng = self.cam.get_new_images_range()
+        if rng is None or rng[0] == rng[1]:
+            return None
+
+        frame = self.cam.read_multiple_images(
+            rng=(rng[1] - 1, rng[1])
+        )[0]
+
+        if self.flip_image_horizontally:
+            frame = np.fliplr(frame)
+        return frame
 
     def close(self):
         #with self._lock:
