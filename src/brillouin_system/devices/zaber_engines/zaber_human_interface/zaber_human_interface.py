@@ -46,7 +46,7 @@ class ZaberHumanInterface:
             self.axis_map['z'].move_relative(dz, Units.LENGTH_MICROMETRES, wait_until_idle=False)
 
         # now wait for all available axes
-        for axis in ('x', 'x', 'z'):
+        for axis in ('x', 'y', 'z'):
             self.axis_map[axis].wait_until_idle()
 
     def move_abs(self, x: float = None, y: float = None, z: float = None):
@@ -59,7 +59,7 @@ class ZaberHumanInterface:
             self.axis_map['z'].move_absolute(z, Units.LENGTH_MICROMETRES, wait_until_idle=False)
 
         # now wait for all available axes
-        for axis in ('x', 'x', 'z'):
+        for axis in ('x', 'y', 'z'):
             self.axis_map[axis].wait_until_idle()
 
     def get_position(self) -> tuple[float, float, float]:
