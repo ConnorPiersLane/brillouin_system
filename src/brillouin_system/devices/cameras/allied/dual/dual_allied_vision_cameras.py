@@ -40,6 +40,11 @@ def _to_mono2d(a):
         a = a[..., 0]   # drop the singleton channel
     return a
 
+def _black_from_roi(cam):
+    w = cam.get_feature_by_name("Width").get()
+    h = cam.get_feature_by_name("Height").get()
+    return np.zeros((h, w), dtype=np.uint8)
+
 
 # --- Robust streaming handlers: always requeue in finally ---
 
@@ -47,8 +52,11 @@ def _handler0(cam, frame):
     try:
         if frame.get_status() != 0:
             print(f"Cam0: Incomplete frame: {frame.get_status()}!")
-        img = frame.as_numpy_ndarray().copy()  # deep copy to detach from Vimba buffer
-        _push(frame_q0, img)
+            _push(frame_q0, _black_from_roi(cam))
+            return
+        else:
+            img = frame.as_numpy_ndarray().copy()
+            _push(frame_q0, img)
     except Exception as e:
         print(f"Cam0 handler error: {e}")
     finally:
@@ -59,6 +67,8 @@ def _handler1(cam, frame):
     try:
         if frame.get_status() != 0:
             print(f"Cam1: Incomplete frame: {frame.get_status()}!")
+            _push(frame_q1, _black_from_roi(cam))
+            return
         else:
             img = frame.as_numpy_ndarray().copy()
             _push(frame_q1, img)
@@ -97,8 +107,8 @@ class DualAlliedVisionCameras(BaseDualCameras):
         id0: str = "DEV_000F315BC084",
         id1: str = "DEV_000F315BDC0C",
         *,
-        throughput_MBps_per_cam: float = 55.0,  # ~110 MB/s total budget across both on 1GbE
-        packet_delays: tuple[int | None, int | None] = (800, 1200),
+        throughput_MBps_per_cam: float = 45.0,  # ~90 MB/s total budget across both on 1GbE
+        packet_delays: tuple[int | None, int | None] = (1200, 2000),
         enable_ptp: bool = False,
         pixel_format = PixelFormat.Mono8,
     ):
@@ -243,7 +253,7 @@ class DualAlliedVisionCameras(BaseDualCameras):
 
 if __name__ == "__main__":
     cams = DualAlliedVisionCameras(
-        throughput_MBps_per_cam=55.0,      # ~13 fps each @ 2048x2048 Mono8 on 1GbE
+        throughput_MBps_per_cam=45.0,      # ~13 fps each @ 2048x2048 Mono8 on 1GbE
         packet_delays=(800, 1200),         # de-phase streams
         enable_ptp=False,                  # set True if you want shared timebase
     )
