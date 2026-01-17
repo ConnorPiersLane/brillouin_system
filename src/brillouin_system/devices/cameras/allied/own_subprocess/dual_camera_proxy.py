@@ -8,7 +8,7 @@ from brillouin_system.devices.cameras.allied.allied_config.allied_config import 
 from brillouin_system.helpers.frame_ipc_shared import ShmFrameSpec, ShmRing
 
 class DualCameraProxy:
-    def __init__(self, dtype="uint8", slots=8, use_dummy=False):
+    def __init__(self, dtype="uint8", slots=16, use_dummy=False):
         self.req_q = mp.Queue()
         self.evt_q = mp.Queue(maxsize=2)
         self.proc = None

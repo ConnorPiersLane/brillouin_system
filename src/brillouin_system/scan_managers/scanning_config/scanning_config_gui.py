@@ -155,8 +155,8 @@ class AxialScanningConfigDialog(QDialog):
     # ------------------------------------------------------------------ #
 
     def _set_fields(self, cfg: ScanningConfig) -> None:
-        self.inputs["exposure_time"].setText(str(cfg.exposure_time_for_reflection_finding))
-        self.inputs["gain"].setText(str(cfg.gain_for_reflection_finding))
+        self.inputs["exposure_time"].setText(str(cfg.exposure))
+        self.inputs["gain"].setText(str(cfg.gain))
         self.inputs["reflection_threshold_value"].setText(str(cfg.reflection_threshold_value))
         self.inputs["step_distance_um"].setText(str(cfg.step_distance_um_for_reflection_finding))
         self.inputs["max_distance_um"].setText(str(cfg.max_search_distance_um_for_reflection_finding))

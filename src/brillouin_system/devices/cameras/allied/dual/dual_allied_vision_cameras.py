@@ -251,6 +251,39 @@ class DualAlliedVisionCameras(BaseDualCameras):
         print("[DualCamera] Cameras closed.")
 
 
+    # ToDo: do trigger loop - finish this code and implement into pipeline (remove shmring for cameras)
+    def start_trigger_loop(self, hz=10):
+        self._run = True
+        def loop():
+            period = 1.0 / hz
+            next_t = time.time()
+            while self._run:
+                self.trigger_both()  # concurrent triggers :contentReference[oaicite:3]{index=3}
+                next_t += period
+                time.sleep(max(0.0, next_t - time.time()))
+        self._thread = threading.Thread(target=loop, daemon=True)
+        self._thread.start()
+
+    def stop_trigger_loop(self):
+        self._run = False
+        if hasattr(self, "_thread"):
+            self._thread.join(timeout=1.0)
+
+    def get_latest_from_queues(self):
+        f0 = f1 = None
+        try:
+            while True: f0 = frame_q0.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            while True: f1 = frame_q1.get_nowait()
+        except queue.Empty:
+            pass
+        return (None if f0 is None else _to_mono2d(f0),
+                None if f1 is None else _to_mono2d(f1))
+
+
+
 if __name__ == "__main__":
     cams = DualAlliedVisionCameras(
         throughput_MBps_per_cam=45.0,      # ~13 fps each @ 2048x2048 Mono8 on 1GbE

@@ -1,4 +1,6 @@
 import time
+from contextlib import contextmanager
+
 import numpy as np
 from collections import namedtuple
 
@@ -99,7 +101,7 @@ class IxonUltra(BaseCamera):
         # Controller Model: USB
         # Camera Name(Head Model): DU897_BV
         # Serial Number: 9303
-
+        self._is_streaming = False
         self.verbose: bool = verbose
 
         self.flip_image_horizontally: bool = flip_image_horizontally
@@ -487,15 +489,18 @@ class IxonUltra(BaseCamera):
         return self.cam is not None and self.cam.is_opened()
 
     def start_streaming(self, buffer_size: int = 200):
+        self._is_streaming = True
         self.cam.start_acquisition(mode="sequence", nframes=buffer_size)
 
     def stop_streaming(self):
         self.cam.stop_acquisition()
+        self._is_streaming = False
 
-    def get_frame_now(self):
+    def get_newest_streaming_image(self):
         """
-        Return the newest frame available *at the time of the call*.
-        Non-blocking; returns None if no new frame yet.
+        only when streaming
+        Return the newest frame available (non-blocking).
+        Returns None if no *new* frame since last call.
         """
         frame = self.cam.read_newest_image()
         if frame is None:
@@ -503,20 +508,32 @@ class IxonUltra(BaseCamera):
 
         if self.flip_image_horizontally:
             frame = np.fliplr(frame)
+
         return frame
 
-    def get_latest_frame_poll(self):
-        rng = self.cam.get_new_images_range()
-        if rng is None or rng[0] == rng[1]:
-            return None
+    def get_next_streaming_image(self, timeout_s: float = 5) -> np.ndarray | None:
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            frame = self.get_newest_streaming_image()
+            if frame is not None:
+                return frame
+            time.sleep(0.001)
+        raise RuntimeError("Camera Streaming timed out")
 
-        frame = self.cam.read_multiple_images(
-            rng=(rng[1] - 1, rng[1])
-        )[0]
+    @contextmanager
+    def streaming(self):
+        """
+        Safe streaming context manager.
+        """
+        already_streaming = self._is_streaming
+        if not already_streaming:
+            self.start_streaming()
 
-        if self.flip_image_horizontally:
-            frame = np.fliplr(frame)
-        return frame
+        try:
+            yield self
+        finally:
+            if not already_streaming and self._is_streaming:
+                self.stop_streaming()
 
     def close(self):
         #with self._lock:

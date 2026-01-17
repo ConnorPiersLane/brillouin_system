@@ -1,4 +1,6 @@
 import time
+from contextlib import contextmanager
+
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
@@ -13,7 +15,7 @@ class DummyCamera(BaseCamera):
         self.roi = (0, 160, 0, 20)
         self.binning = (1, 1)
         self.verbose = True
-
+        self._is_streaming = False
         # NEW ATTRIBUTES
         self._flip = False
         self._pre_amp_mode = 16
@@ -223,3 +225,35 @@ class DummyCamera(BaseCamera):
             exposure_time_s=self.get_exposure_time(),
             emccd_gain=self.get_emccd_gain()
         )
+
+    def start_streaming(self, buffer_size: int = 200):
+        self._is_streaming = True
+        print(f"Started Streaming: buffer {buffer_size}")
+
+    def stop_streaming(self):
+        self._is_streaming = False
+        print("Ended Streaming")
+
+    def get_newest_streaming_image(self):
+        """
+        only when streaming
+        Return the newest frame available (non-blocking).
+        Returns None if no *new* frame since last call.
+        """
+        return self.snap()
+
+
+    @contextmanager
+    def streaming(self):
+        """
+        Safe streaming context manager.
+        """
+        already_streaming = self._is_streaming
+        if not already_streaming:
+            self.start_streaming()
+
+        try:
+            yield self
+        finally:
+            if not already_streaming and self._is_streaming:
+                self.stop_streaming()

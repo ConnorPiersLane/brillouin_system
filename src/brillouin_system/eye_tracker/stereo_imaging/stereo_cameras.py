@@ -197,7 +197,6 @@ class StereoCameras:
 
     def triangulate_best(self, uvL, uvR, refine=True, max_iters=5, lm_lambda=1e-2, refine_thresh_px=0.5):
 
-
         X_lin = self.triangulate_linear(uvL, uvR)
         X_mid = self.triangulate_midpoint(uvL, uvR)
         rms_lin = self._rms(self._reproj_err(X_lin, uvL, uvR))

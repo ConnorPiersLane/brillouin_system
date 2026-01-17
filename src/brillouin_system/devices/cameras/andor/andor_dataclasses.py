@@ -42,6 +42,5 @@ class AndorCameraInfo:
     flip_image_horizontally: bool
     advanced_gain_option: bool
     vss_speed: float | int
-    vss_speed_index: int | None = None
     fixed_pre_amp_mode_index: int | None = None
 

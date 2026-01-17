@@ -16,6 +16,7 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
+from brillouin_system.scan_managers.reflection_finder import ReflectionFinder
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
 from brillouin_system.logging_utils.logging_setup import get_logger
@@ -73,8 +74,6 @@ class HiBackend:
         self.update_andor_config_settings(andor_config=self._andor_config)
 
         self._axial_scan_config: ScanningConfig = axial_scanning_config.get()
-        self._reflection_finding_bg: float | None = None
-        self._reflection_finding_cam_settings: AndorExposure | None = None
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
 
@@ -690,7 +689,14 @@ class HiBackend:
             log.info(f"[Calibration] Exception: {e}")
             return False
 
+    def find_reflection_plane(self):
+        reflection_finder = ReflectionFinder(camera=self.andor_camera, zaber_axis=self.zaber_eye_lens)
+        result = reflection_finder.find_reflection_plane(
+            exposure_time=self._axial_scan_config.exposure,
+            gain=self._axial_scan_config.gain,
+            n_sigma=self._axial_scan_config.reflection_threshold_value,
 
+        )
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""

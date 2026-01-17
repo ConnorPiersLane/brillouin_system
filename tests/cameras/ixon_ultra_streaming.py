@@ -21,7 +21,7 @@ def test_ixon_camera():
     cam.start_streaming(buffer_size=200)
 
     # warm up: get one frame so buffering is “live”
-    while cam.get_latest_frame_poll() is None:
+    while cam.get_newest_streaming_image() is None:
         pass
     n = 10
     t = np.empty(n, dtype=np.float64)
@@ -31,7 +31,7 @@ def test_ixon_camera():
         # wait until we actually get a frame (non-blocking poll)
         frame = None
         while frame is None:
-            frame = cam.get_latest_frame_poll()
+            frame = cam.get_newest_streaming_image()
 
         t[i] = time.perf_counter()
         if i == 0:

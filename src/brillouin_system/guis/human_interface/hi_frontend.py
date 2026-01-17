@@ -234,7 +234,6 @@ class HiFrontend(QWidget):
         self.update_fitting_configs_requested.connect(self.brillouin_signaller.update_fitting_configs)
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
-        self.take_bg_value_reflection_plane_request.connect(self.brillouin_signaller.delegate_take_and_store_bg_value_for_reflection_finding)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
 
         # Receiving signals
@@ -284,22 +283,25 @@ class HiFrontend(QWidget):
 
         # --- Eye tracker thread & controller ---
         if include_eye_tracking:
-            self.eye_thread = QThread(self)
-            self.eye_ctrl = EyeTrackerController(use_dummy=use_eye_tracker_dummy)  # or False
-            self.eye_ctrl.moveToThread(self.eye_thread)
+            self.start_eye_tracker()
 
-            # start/stop/shutdown
-            self.eye_thread.started.connect(self.eye_ctrl.start)
+    def start_eye_tracker(self):
+        self.eye_thread = QThread(self)
+        self.eye_ctrl = EyeTrackerController(use_dummy=use_eye_tracker_dummy)  # or False
+        self.eye_ctrl.moveToThread(self.eye_thread)
 
-            # frames into GUI
-            self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)
+        # start/stop/shutdown
+        self.eye_thread.started.connect(self.eye_ctrl.start)
 
-            # Sending signals
-            self.set_et_allied_configs.connect(self.eye_ctrl.proxy.set_allied_configs)
-            self.set_et_config.connect(self.eye_ctrl.send_config)
-            self.request_eye_shutdown.connect(self.eye_ctrl.shutdown)
+        # frames into GUI
+        self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)
 
-            self.eye_thread.start()
+        # Sending signals
+        self.set_et_allied_configs.connect(self.eye_ctrl.proxy.set_allied_configs)
+        self.set_et_config.connect(self.eye_ctrl.send_config)
+        self.request_eye_shutdown.connect(self.eye_ctrl.shutdown)
+
+        self.eye_thread.start()
 
     def _append_log_line(self, line: str):
         self.log_view.append(line)
@@ -631,17 +633,14 @@ class HiFrontend(QWidget):
         self.axial_settings_btn = QPushButton("Settings")
         self.axial_settings_btn.clicked.connect(self.open_axial_scan_settings_dialog)
 
-        self.take_bg_value_btn = QPushButton("Take BG Value")
-        self.take_bg_value_btn.clicked.connect(self.take_bg_value_for_finding_reflection_plane)
-
         self.find_reflection_plane_btn = QPushButton("Find Reflection Plane")
         self.find_reflection_plane_btn.clicked.connect(self.find_reflection_plane)
 
 
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.axial_settings_btn)
-        btn_row.addWidget(self.take_bg_value_btn)
-        btn_row.addWidget(self.find_reflection_plane_btn)
+        # btn_row.addWidget(self.take_bg_value_btn)
+        # btn_row.addWidget(self.find_reflection_plane_btn)
 
         btn_row.addStretch()
 
@@ -1808,27 +1807,12 @@ class HiFrontend(QWidget):
         self.eye_thread.quit()
         self.eye_thread.wait()
 
-    def restart_eye_tracker(self):
-        self.eye_thread = QThread(self)
-        self.eye_ctrl = EyeTrackerController(use_dummy=use_eye_tracker_dummy)
-        self.eye_ctrl.moveToThread(self.eye_thread)
-
-        # Reconnect signals
-        self.eye_thread.started.connect(self.eye_ctrl.start)
-        self.eye_ctrl.log_message.connect(self._append_log_line)
-        self.eye_ctrl.frames_ready.connect(self.on_eye_frames_ready)
-
-        # Start new thread
-        self.eye_thread.start()
-
     def on_restart_eye_clicked(self):
         # Close old eye tracker
         self.shutdown_eye_tracker()
         # Create fresh controller + thread
-        self.restart_eye_tracker()
+        self.start_eye_tracker()
 
-    def take_bg_value_for_finding_reflection_plane(self):
-        self.take_bg_value_reflection_plane_request.emit()
 
     def find_reflection_plane(self):
         self.find_reflection_plane_request.emit()

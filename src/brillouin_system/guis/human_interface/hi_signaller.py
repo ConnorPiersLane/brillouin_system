@@ -499,9 +499,6 @@ class HiSignaller(QObject):
         else:
             log.warning(f"Requested scan index {index} not found.")
 
-    @pyqtSlot()
-    def delegate_take_and_store_bg_value_for_reflection_finding(self):
-        self.backend.take_and_store_bg_value_for_reflection_finding()
 
     @pyqtSlot()
     def delegate_find_reflection_plane(self):

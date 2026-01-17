@@ -7,7 +7,7 @@ import time, traceback
 from brillouin_system.eye_tracker.eye_tracker import IMG_SIZE, EyeTrackerResultsForGui
 from brillouin_system.helpers.frame_ipc_shared import ShmRing, ShmFrameSpec
 
-SLOTS = 2
+SLOTS = 16
 DTYPE = "uint8"  # Must comply with eyetracker
 
 def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):

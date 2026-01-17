@@ -10,18 +10,18 @@ import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
 
+
 @dataclass
 class ScanningConfig:
     # ----------------------------
     # Find Reflection Settings
     # ----------------------------
-    exposure_time_for_reflection_finding: float = 0.05
-    gain_for_reflection_finding: int = 1   # <-- ADD THIS
-    reflection_threshold_value: float = 5000.0
-    step_distance_um_for_reflection_finding: int = 20
-    max_search_distance_um_for_reflection_finding: int = 2000
-    step_after_finding_reflection_um: int = 20
-    n_bg_images_for_reflection_finding: int = 10
+    exposure: float = 0.05
+    gain: int = 1
+    n_sigma: int = 6
+    speed_um_s: float = 1000,
+    max_search_distance_um: float = 2000,
+    n_bg_images: int = 10,
 
     # ----------------------------
     # Scan Settings
