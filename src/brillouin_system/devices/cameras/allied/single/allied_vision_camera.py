@@ -46,7 +46,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
     - ROI may be hardware-limited to full sensor size (2048x2048 in this test).
     """
 
-    def __init__(self, id="DEV_000F315BC084", pixel_format='Mono8'):
+    def __init__(self, id="DEV_000F315BC084", pixel_format='Mono8', mode="software"):
         print("[AVCamera] Connecting to Allied Vision Camera...")
         self.stack = ExitStack()
         self.vimba = self.stack.enter_context(Vimba.get_instance())
@@ -69,7 +69,99 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
 
         print(f"[AVCamera] ...Found camera: {self.camera.get_id()}")
         self.set_pixel_format(format_str=pixel_format)
-        self.set_freerun_mode()
+        # Make exposure deterministic; init() will also try-set safely
+        self.set_auto_exposure('Off')
+
+        # Configure once, in one place
+        self.init(mode=mode, exposure_us=8000)
+
+    def init(self, *, mode="software", exposure_us=8000, line="Line1",
+             activation="RisingEdge", debounce_us=None, limit_mbps=120):
+        cam = self.camera
+
+        # 0) Make sure we can change features even if someone left it streaming
+        for feat in ("AcquisitionStop",):
+            try:
+                cam.get_feature_by_name(feat).run()
+            except Exception:
+                pass
+
+        # Small helpers so we don't crash on models that lack a feature
+        def try_set(name, value):
+            try:
+                cam.get_feature_by_name(name).set(value)
+            except Exception:
+                pass
+
+        def try_run(name):
+            try:
+                f = cam.get_feature_by_name(name)
+                if hasattr(f, "run"):
+                    f.run()
+            except Exception:
+                pass
+
+        # 1) Trigger config (set, unlatch, set deps, relatch) — Viewer-style
+        try_set("TriggerSelector", "FrameStart")
+        try_set("TriggerMode", "Off")  # unlatch
+
+        if mode == "software":
+            try_set("TriggerSource", "Software")
+            # TriggerActivation not used for software; harmless if set
+        elif mode.lower() in ("line1", "hardware", "line"):
+            # Lines / IO
+            try_set("LineSelector", line)  # e.g., "Line1"
+            try_set("LineMode", "Input")
+            if debounce_us is not None:
+                try_set("LineDebouncerTime", int(debounce_us))
+            # Core trigger
+            try_set("TriggerSource", line)  # "Line1"
+            try_set("TriggerActivation", activation)  # "RisingEdge" or "FallingEdge"
+        elif mode == "freerun":
+            try_set("TriggerSource", "Software")  # irrelevant; we'll keep TriggerMode Off later
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+        try_set("AcquisitionMode", "Continuous")
+
+        # 2) Exposure/gain consistency (Viewer will quietly do this)
+        # Disable autos for deterministic triggering
+        try_set("ExposureAuto", "Off")
+        try_set("GainAuto", "Off")
+        # Exposure feature name differs across models: ExposureTimeAbs vs ExposureTime
+        for exp_name in ("ExposureTimeAbs", "ExposureTime"):
+            try:
+                cam.get_feature_by_name(exp_name).set(float(exposure_us))
+                break
+            except Exception:
+                continue
+
+        # If hardware-triggered, remove any frame-rate clamp
+        for feat in ("AcquisitionFrameRateEnable", "AcquisitionFrameRateMode"):
+            # Turn off the limiter when present, or set to "Basic" if it's a mode enum
+            try_set(feat, "Off")  # harmless if it's a bool or enum; try_set guards failures
+
+        # Finally (re)latch
+        if mode == "freerun":
+            # In freerun keep TriggerMode Off so frames free-run
+            try_set("TriggerMode", "Off")
+        else:
+            try_set("TriggerMode", "On")
+
+        # 3) Transport niceties (Viewer often does this)
+        # Adjust packet size if supported
+        try_run("GVSPAdjustPacketSize")
+        # Some models require enabling the limit mode first
+        try_set("DeviceLinkThroughputLimitMode", "On")
+        # limit_mbps is in MB/s-ish; SDKs vary on units — this is best-effort.
+        bytes_per_sec = int(limit_mbps * 1_000_000)
+        for name in ("DeviceLinkThroughputLimit", "StreamBytesPerSecond"):
+            try_set(name, bytes_per_sec)
+
+        # A couple of stream stability QoL tweaks (safe no-ops if unsupported)
+        try_set("StreamBufferHandlingMode", "NewestOnly")  # avoid backlog on bursty triggers
+        try_set("StreamBufferCountMode", "Manual")
+        try_set("StreamBufferCountManual", 8)
 
     def set_freerun_mode(self):
         try:
@@ -150,10 +242,10 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
 
     def set_roi(self, OffsetX, OffsetY, Width, Height):
         try:
-            self.camera.get_feature_by_name("OffsetX").set(OffsetX)
-            self.camera.get_feature_by_name("OffsetY").set(OffsetY)
             self.camera.get_feature_by_name("Width").set(Width)
             self.camera.get_feature_by_name("Height").set(Height)
+            self.camera.get_feature_by_name("OffsetX").set(OffsetX)
+            self.camera.get_feature_by_name("OffsetY").set(OffsetY)
             print(f"[AVCamera] ROI set to x:{OffsetX} y:{OffsetY} width:{Width} height:{Height}")
         except VimbaFeatureError as e:
             print(f"[AVCamera] Failed to set ROI: {e}")
@@ -290,7 +382,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
-            entries = feat.get_all_entry_names()
+            entries = feat._EnumFeature__entries
             return entries
         except Exception as e:
             print(f"[AVCamera] Failed to get available pixel formats: {e}")
@@ -316,9 +408,6 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         """
         try:
             feat = self.camera.get_feature_by_name("PixelFormat")
-            available = feat.get_all_entry_names()
-            if format_str not in available:
-                raise ValueError(f"'{format_str}' not in available formats: {available}")
             feat.set(format_str)
             print(f"[AVCamera] Pixel format set to {format_str}")
         except Exception as e:

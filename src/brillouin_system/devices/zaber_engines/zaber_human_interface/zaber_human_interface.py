@@ -1,10 +1,8 @@
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection
 
-
-from dataclasses import dataclass
-
-from brillouin_system.devices.zaber_engines.zaber_position import ZaberPosition
+from brillouin_system.logging_utils.logging_setup import get_logger
+log = get_logger(__name__)
 
 
 class ZaberHumanInterface:
@@ -48,7 +46,7 @@ class ZaberHumanInterface:
             self.axis_map['z'].move_relative(dz, Units.LENGTH_MICROMETRES, wait_until_idle=False)
 
         # now wait for all available axes
-        for axis in ('x', 'x', 'z'):
+        for axis in ('x', 'y', 'z'):
             self.axis_map[axis].wait_until_idle()
 
     def move_abs(self, x: float = None, y: float = None, z: float = None):
@@ -61,7 +59,7 @@ class ZaberHumanInterface:
             self.axis_map['z'].move_absolute(z, Units.LENGTH_MICROMETRES, wait_until_idle=False)
 
         # now wait for all available axes
-        for axis in ('x', 'x', 'z'):
+        for axis in ('x', 'y', 'z'):
             self.axis_map[axis].wait_until_idle()
 
     def get_position(self) -> tuple[float, float, float]:
@@ -88,7 +86,7 @@ class ZaberHumanInterfaceDummy:
             'z': 0.0
         }
         self.homed = False
-        print(f"[ZaberDummy] Initialized on port {port}, axis {axis_index}")
+        log.info(f"[ZaberDummy] Initialized on port {port}, axis {axis_index}")
 
         self.home()
         self.move_to_init_position()
@@ -97,7 +95,7 @@ class ZaberHumanInterfaceDummy:
         for axis in self._positions:
             self._positions[axis] = 0.0
         self.homed = True
-        print("[ZaberDummy] Homed. All positions reset to 0.0 µm")
+        log.info("[ZaberDummy] Homed. All positions reset to 0.0 µm")
 
     def move_to_init_position(self):
         self.move_abs(12e3, 10e3, 12e3)
@@ -105,38 +103,37 @@ class ZaberHumanInterfaceDummy:
     def move_rel(self, dx: float = None, dy: float = None, dz: float = None):
         if dx is not None:
             self._positions['x'] += dx
-            print(f"[ZaberDummy] Moving X relative → {dx:+.2f} µm (now {self._positions['x']:.2f})")
+            log.info(f"[ZaberDummy] Moving X relative → {dx:+.2f} µm")
         if dy is not None:
             self._positions['y'] += dy
-            print(f"[ZaberDummy] Moving Y relative → {dy:+.2f} µm (now {self._positions['y']:.2f})")
+            log.info(f"[ZaberDummy] Moving Y relative → {dy:+.2f} µm")
         if dz is not None:
             self._positions['z'] += dz
-            print(f"[ZaberDummy] Moving Z relative → {dz:+.2f} µm (now {self._positions['z']:.2f})")
+            log.info(f"[ZaberDummy] Moving Z relative → {dz:+.2f} µm")
 
-        print("[ZaberDummy] Relative move(s) completed.")
 
     def move_abs(self, x: float = None, y: float = None, z: float = None):
         if x is not None:
             self._positions['x'] = x
-            print(f"[ZaberDummy] Moving X absolute → {x:.2f} µm")
+            log.info(f"[ZaberDummy] Moving X absolute → {x:.2f} µm")
         if y is not None:
             self._positions['y'] = y
-            print(f"[ZaberDummy] Moving Y absolute → {y:.2f} µm")
+            log.info(f"[ZaberDummy] Moving Y absolute → {y:.2f} µm")
         if z is not None:
             self._positions['z'] = z
-            print(f"[ZaberDummy] Moving Z absolute → {z:.2f} µm")
+            log.info(f"[ZaberDummy] Moving Z absolute → {z:.2f} µm")
 
-        print("[ZaberDummy] Absolute move(s) completed.")
+        log.info("[ZaberDummy] Absolute move(s) completed.")
 
     def get_position(self) -> tuple[float, float, float]:
         x = self._positions['x']
         y = self._positions['y']
         z = self._positions['z']
-        print(f"[ZaberDummy] Current positions → X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
+        log.info(f"[ZaberDummy] Current positions → X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
         return x, y, z
 
     def close(self):
-        print(f"[ZaberDummy] Shutdown: port {self.port}, axis {self.axis_index}")
+        log.info(f"[ZaberDummy] Shutdown: port {self.port}, axis {self.axis_index}")
 
 
 if __name__ == "__main__":

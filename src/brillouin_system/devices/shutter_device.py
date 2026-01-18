@@ -121,9 +121,9 @@ class ShutterManager:
         self.objective.open()
 
     def shutdown_all(self):
+        self.sample.shutdown()
         self.objective.shutdown()
         self.reference.shutdown()
-        self.sample.shutdown()
         print("[ShutterController] All shutters shut down.")
 
 

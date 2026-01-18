@@ -1,5 +1,7 @@
 # baseCamera.py
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
+
 import numpy as np
 
 from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure, AndorCameraInfo
@@ -16,11 +18,15 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
+    def set_from_camera_info(self, info: AndorCameraInfo, do_set_temperature: bool = False):
+        pass
+
+    @abstractmethod
     def get_name(self) -> str:
         pass
 
     @abstractmethod
-    def snap(self) -> np.ndarray:
+    def snap(self) -> tuple[np.ndarray, float]:
         pass
 
     @abstractmethod
@@ -101,7 +107,11 @@ class BaseCamera(ABC):
         pass
 
     @abstractmethod
-    def set_pre_amp_mode(self, index: int):
+    def set_fixed_pre_amp_mode(self, index: int):
+        pass
+
+    @abstractmethod
+    def get_fixed_pre_amp_mode(self) -> int:
         pass
 
     @abstractmethod
@@ -124,3 +134,27 @@ class BaseCamera(ABC):
     def get_exposure_dataclass(self) -> AndorExposure:
         pass
 
+    @abstractmethod
+    def start_streaming(self, buffer_size: int = 200):
+        pass
+
+    @abstractmethod
+    def stop_streaming(self):
+        pass
+
+    @abstractmethod
+    def get_newest_streaming_image(self):
+        """
+        only when streaming
+        Return the newest frame available (non-blocking).
+        Returns None if no *new* frame since last call.
+        """
+        pass
+
+    @abstractmethod
+    def streaming(self) -> AbstractContextManager:
+        """
+        Return a context manager that starts streaming on enter
+        and stops streaming on exit.
+        """
+        pass

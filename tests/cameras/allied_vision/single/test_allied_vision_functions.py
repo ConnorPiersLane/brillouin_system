@@ -81,12 +81,14 @@ def main():
 
     print("\n=== Snap Test ===")
     cam.set_software_trigger()
+    cam.set_exposure(50000)
     frame = cam.snap()
     print("Captured frame object:", type(frame))
 
     print("\n=== Streaming Test ===")
     def on_frame(frame):
         print("Stream callback: got frame object", type(frame))
+        print(f"Status: {frame.get_status()}")
         # Stop stream after first callback
 
     cam.start_stream(on_frame, buffer_count=3)

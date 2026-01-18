@@ -15,8 +15,8 @@ class DummyDualCameras(BaseDualCameras):
 
     def __init__(self, id0="DUMMY0", id1="DUMMY1"):
         print("[DummyCamera] Initializing dummy cameras...")
-        self.left_id = id0
-        self.right_id = id1
+        self.left = id0
+        self.right = id1
 
         # Default shapes (will be overwritten by configs below)
         self._left_shape = (480, 640)    # (H, W)
@@ -25,8 +25,8 @@ class DummyDualCameras(BaseDualCameras):
         self._is_streaming = False
 
         # Try to load "left/right" first; fall back to known device IDs if needed
-        left_cfg = allied_config.get("left")
-        right_cfg = allied_config.get("right")
+        left_cfg = allied_config["left"].get()
+        right_cfg = allied_config["right"].get()
 
 
 

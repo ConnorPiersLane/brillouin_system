@@ -1,19 +1,19 @@
 [left]
 id = "DEV_000F315BC084"
-offset_x = 100
+offset_x = 500
 offset_y = 500
 width = 1000
-height = 500
-gain = 12
-exposure = 20000
+height = 1000
+gain = 0
+exposure = 192669
 gamma = 1.0
 
 [right]
 id = "DEV_000F315BC0A5"
-offset_x = 0
-offset_y = 0
-width = 1024
-height = 768
-gain = 21
-exposure = 73404
+offset_x = 500
+offset_y = 500
+width = 1000
+height = 1000
+gain = 0
+exposure = 165146
 gamma = 1.0

@@ -1,4 +1,6 @@
 import time
+from contextlib import contextmanager
+
 import numpy as np
 from collections import namedtuple
 
@@ -74,7 +76,7 @@ class IxonUltra(BaseCamera):
                  exposure_time = 0.21,
                  gain: int = 0,
                  advanced_gain_option: bool = False,
-                 amp_mode_index: int=18,
+                 fixed_amp_mode_index: int=18,
                  verbose: bool =True,
                  flip_image_horizontally: bool = False):
         """
@@ -92,14 +94,14 @@ class IxonUltra(BaseCamera):
             hbin (int): Horizontal binning factor (>= 1). Default is 1.
             gain (int): EMCCD gain (0 to 300 typically).
             advanced_gain_option (bool): Use advanced gain (>300). Default is False.
-            amp_mode_index: 0-20
+            fixed_amp_mode_index: 0-20
         """
 
         # TDeviceInfo(controller_model='USB', head_model='DU897_BV', serial_number=9303)
         # Controller Model: USB
         # Camera Name(Head Model): DU897_BV
         # Serial Number: 9303
-
+        self._is_streaming = False
         self.verbose: bool = verbose
 
         self.flip_image_horizontally: bool = flip_image_horizontally
@@ -114,12 +116,13 @@ class IxonUltra(BaseCamera):
         # Set shift speed:
         desired_speed_index = 4  # Slowest shift speed (3.3 μs)
         # Available VSSpeeds: [0.30000001192092896, 0.5, 0.8999999761581421, 1.7000000476837158, 3.299999952316284]
-        self.cam.set_vsspeed(desired_speed_index)
+        self.set_vss_index(desired_speed_index)
         print(f"[IxonUltra] VSSpeed Index: {self.cam.get_vsspeed()}")
         print(f"[IxonUltra] VSSpeed Period: {self.cam.get_vsspeed_period():.2f} μs")
 
-        self.set_pre_amp_mode(amp_mode_index)
-        print("[IxonUltra] Preamp index:", self.cam.get_preamp())
+        self._fixed_pre_amp_mode_index = None
+        self.set_fixed_pre_amp_mode(fixed_amp_mode_index)
+        print("[IxonUltra] (Current) Preamp index:", self.cam.get_preamp())
         print("[IxonUltra] Preamp mode", self.get_amp_mode())
         print("[IxonUltra] Preamp gain (e⁻/count):", self.get_preamp_gain())
 
@@ -149,11 +152,54 @@ class IxonUltra(BaseCamera):
             "temperature": self.cam.get_temperature(),
             "flip_image_horizontally": self.get_flip_image_horizontally(),
             "advanced_gain_option": self._advanced_gain,
-            "vss_speed": self.get_vss_index()
+            "vss_speed": self.get_vss_index(),
+            "fixed_pre_amp_mode_index": self._fixed_pre_amp_mode_index,
         }
 
     def get_camera_info_dataclass(self) -> AndorCameraInfo:
         return AndorCameraInfo(**self.get_camera_info())
+
+    def set_from_camera_info(
+            self,
+            info: AndorCameraInfo,
+            do_set_temperature: bool = False,
+    ) -> None:
+        """
+        Restore camera state from an AndorCameraInfo snapshot.
+
+        This is the inverse of get_camera_info().
+        """
+
+        if self.verbose:
+            print("[IxonUltra] Applying camera state from AndorCameraInfo...")
+
+        # ---- Simple flags ----
+        self._advanced_gain = info.advanced_gain_option
+        self.set_flip_image_horizontally(info.flip_image_horizontally)
+
+        # ---- ROI + binning ----
+        # Apply atomically if possible; fall back if needed
+        x_start, x_end, y_start, y_end = info.roi
+        hbin, vbin = info.binning
+
+        self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
+        self.set_binning(hbin=hbin, vbin=vbin)
+
+        # ---- Amplifier + vertical shift ----
+        self.set_fixed_pre_amp_mode(info.fixed_pre_amp_mode_index)
+        self.set_vss_index(info.vss_speed)
+
+        # ---- Exposure ----
+        self.set_exposure_time(info.exposure)
+        # ---- Gain (only meaningful in EM mode) ----
+        self.set_emccd_gain(info.gain, advanced=info.advanced_gain_option)
+
+        # ---- Temperature (slow, optional) ----
+        if do_set_temperature:
+            self.set_temperature(info.temperature)
+
+        if self.verbose:
+            print("[IxonUltra] Camera state restored from AndorCameraInfo.")
 
     def get_exposure_dataclass(self) -> AndorExposure:
         return AndorExposure(
@@ -177,30 +223,6 @@ class IxonUltra(BaseCamera):
     def set_verbose(self, verbose: bool) -> None:
         self.verbose = verbose
 
-    def _wait_for_cooling(self, target_temp: int | float=0, timeout: int=600):
-        start = time.time()
-        while time.time() - start < timeout:
-            status = self.cam.get_temperature_status()
-            temp = self.cam.get_temperature()
-            print(f"[IxonUltra] Cooling... Status: {status}, Temp: {temp:.2f} °C")
-            # if status == "stabilized":
-            #     print("[IxonUltra] Cooling stabilized.")
-            #     return
-            if temp < target_temp + 8:
-                print("[IxonUltra] Target Temperature reached")
-                return
-            time.sleep(10)
-        print("[IxonUltra] Warning: cooling did not stabilize within timeout.")
-
-    def _wait_for_warmup(self, target_temp=0, timeout=1200):
-        start = time.time()
-        while time.time() - start < timeout:
-            temp = self.cam.get_temperature()
-            print(f"[IxonUltra] Warming... Temp: {temp:.2f} °C")
-            if temp >= target_temp - 0.5:
-                return
-            time.sleep(10)
-        print("[IxonUltra] Warning: warm-up did not complete within timeout.")
 
     def set_exposure_time(self, seconds: float):
         #with self._lock:
@@ -222,7 +244,7 @@ class IxonUltra(BaseCamera):
         if gain == 1:
             gain = 0  # Avoid invalid value
 
-        if advanced:
+        if advanced and self.verbose:
             print("[IxonUltra Warning] Advanced gain mode enabled — sensor risk!")
 
         self.cam.set_EMCCD_gain(gain, advanced=advanced)
@@ -279,12 +301,17 @@ class IxonUltra(BaseCamera):
             hstart, hend, vstart, vend, hbin, vbin = self.cam.get_roi()
             return hbin, vbin
 
-    def snap(self) -> np.ndarray:
+    def snap(self) -> tuple[np.ndarray, float]:
+        """
+
+        Returns: frame, time.time()
+
+        """
         #with self._lock:
-            frame = self.cam.snap()
-            if self.flip_image_horizontally:
-                frame = np.fliplr(frame)
-            return frame
+        frame = self.cam.snap()
+        if self.flip_image_horizontally:
+            frame = np.fliplr(frame)
+        return frame, 0#time.time()
 
     def get_frame_shape(self) -> tuple[int, int]:
         #with self._lock:
@@ -308,9 +335,11 @@ class IxonUltra(BaseCamera):
 
 
     # ---- Preamp mode index ----
-    def set_pre_amp_mode(self, index: int):
+    def set_fixed_pre_amp_mode(self, index: int):
         if index not in self.FIXED_AMP_MODE_LOOKUP:
             raise ValueError(f"Invalid amp mode index: {index}")
+
+        self._fixed_pre_amp_mode_index = index
 
         mode = self.FIXED_AMP_MODE_LOOKUP[index]
 
@@ -333,6 +362,9 @@ class IxonUltra(BaseCamera):
 
         if self.verbose:
             print(f"[IxonUltra] Amp Mode set to index {index}: {self.get_amp_mode()}")
+
+    def get_fixed_pre_amp_mode(self) -> int:
+        return self._fixed_pre_amp_mode_index
 
     def get_amp_mode(self) -> object:
         """
@@ -399,39 +431,116 @@ class IxonUltra(BaseCamera):
             vbin=config.vbin
         )
 
-        self.set_pre_amp_mode(config.pre_amp_mode)
+        self.set_fixed_pre_amp_mode(config.pre_amp_mode)
         self.set_vss_index(config.vss_index)
 
-        if config.temperature == "off":
-            if not self.cam.get_temperature() > 0:
-                print("[IxonUltra] Warming up to 0°C before turning off cooler...")
-                self.cam.set_temperature(0, enable_cooler=True)
-                self._wait_for_warmup(target_temp=0)
-                print("[IxonUltra] Turning off cooler...")
-                self.cam.set_cooler(False)
-            else:
-                self.cam.set_cooler(False)
-        else:
-            self.cam.set_temperature(config.temperature, enable_cooler=True)
-            self._wait_for_cooling(target_temp=config.temperature)
-
+        self.set_temperature(temperature=config.temperature)
 
         if self.verbose:
             print("[IxonUltra] Configuration applied.")
 
+
+    def _wait_for_cooling(self, target_temp: int | float=0, timeout: int=600):
+        start = time.time()
+        while time.time() - start < timeout:
+            status = self.cam.get_temperature_status()
+            temp = self.cam.get_temperature()
+            print(f"[IxonUltra] Cooling... Status: {status}, Temp: {temp:.2f} °C")
+            # if status == "stabilized":
+            #     print("[IxonUltra] Cooling stabilized.")
+            #     return
+            if temp < target_temp + 8:
+                print("[IxonUltra] Target Temperature reached")
+                return
+            time.sleep(10)
+        print("[IxonUltra] Warning: cooling did not stabilize within timeout.")
+
+    def _wait_for_warmup(self, target_temp: int | float=15, timeout: int=1200):
+        start = time.time()
+        print(f"[IxonUltra] Warming up to {target_temp}°C...")
+        while time.time() - start < timeout:
+            temp = self.cam.get_temperature()
+            print(f"[IxonUltra] Warming... Temp: {temp:.2f} °C")
+            if temp >= target_temp - 2:
+                return
+            time.sleep(10)
+        print("[IxonUltra] Warning: warm-up did not complete within timeout.")
+
+    def set_temperature(self, temperature: float | str):
+        if temperature == "off":
+            target_temp = 15
+            if not self.cam.get_temperature() > target_temp:
+                print(f"[IxonUltra] Warming up to {target_temp}°C before turning off cooler...")
+                self.cam.set_temperature(target_temp, enable_cooler=True)
+                self._wait_for_warmup(target_temp=target_temp)
+                print("[IxonUltra] Turning off cooler...")
+                self.cam.set_cooler(False)
+            else:
+                self.cam.set_cooler(False)
+        elif temperature > self.cam.get_temperature():
+            self.cam.set_temperature(temperature, enable_cooler=True)
+            self._wait_for_warmup(target_temp=temperature)
+        else:
+            self.cam.set_temperature(temperature, enable_cooler=True)
+            self._wait_for_cooling(target_temp=temperature)
+
+
     def is_opened(self) -> bool:
         return self.cam is not None and self.cam.is_opened()
+
+    def start_streaming(self, buffer_size: int = 200):
+        self._is_streaming = True
+        self.cam.start_acquisition(mode="sequence", nframes=buffer_size)
+
+    def stop_streaming(self):
+        self.cam.stop_acquisition()
+        self._is_streaming = False
+
+    def get_newest_streaming_image(self):
+        """
+        only when streaming
+        Return the newest frame available (non-blocking).
+        Returns None if no *new* frame since last call.
+        """
+        frame = self.cam.read_newest_image()
+        if frame is None:
+            return None
+
+        if self.flip_image_horizontally:
+            frame = np.fliplr(frame)
+
+        return frame
+
+    def get_next_streaming_image(self, timeout_s: float = 5) -> np.ndarray | None:
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            frame = self.get_newest_streaming_image()
+            if frame is not None:
+                return frame
+            time.sleep(0.001)
+        raise RuntimeError("Camera Streaming timed out")
+
+    @contextmanager
+    def streaming(self):
+        """
+        Safe streaming context manager.
+        """
+        already_streaming = self._is_streaming
+        if not already_streaming:
+            self.start_streaming()
+
+        try:
+            yield self
+        finally:
+            if not already_streaming and self._is_streaming:
+                self.stop_streaming()
 
     def close(self):
         #with self._lock:
             if hasattr(self, "cam") and self.cam is not None and self.cam.is_opened():
                 try:
-                    if not self.cam.get_temperature() > 0:
-                        print("[IxonUltra] Warming up to 0°C before shutdown...")
-                        self.cam.set_temperature(0, enable_cooler=True)
-                        self._wait_for_warmup(target_temp=0)
-                        print("[IxonUltra] Turning off cooler...")
-                        self.cam.set_cooler(False)
+                    self.set_temperature(temperature="off")
+
                 except Exception as e:
                     print(f"[IxonUltra] Error during warmup shutdown: {e}")
                 self.close_shutter()

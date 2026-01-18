@@ -353,7 +353,7 @@ class EyeSceneRenderer:
 #
 # if __name__ == "__main__":
 #     demo_render_with_pose()
-
+# #
 if __name__ == "__main__":
     renderer = EyeSceneRenderer()
 

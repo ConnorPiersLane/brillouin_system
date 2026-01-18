@@ -1,0 +1,243 @@
+import os
+import time
+from dataclasses import dataclass
+
+import numpy as np
+
+from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
+from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
+from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig, eye_tracker_config
+from brillouin_system.eye_tracker.eye_tracker_helpers import scale_image, ensure_uint8, draw_ellipse_rgb, gray_to_rgb, \
+    make_black_image
+from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFitter
+from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
+from brillouin_system.eye_tracker.pupil_fitting.pupil_detector import PupilDetector
+from brillouin_system.eye_tracker.stereo_imaging.calibration_dataclasses import StereoCalibration
+from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
+from brillouin_system.eye_tracker.stereo_imaging.init_se3 import left_to_ref
+from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
+
+
+@dataclass
+class EyeTrackerSettings:
+    config: EyeTrackerConfig
+    stereo_calibration: StereoCalibration
+
+
+@dataclass
+class EyeTrackerRawData:
+    timestamp: float
+    left_img_original: np.ndarray
+    right_img_original: np.ndarray
+    pupil3D: Pupil3D | None
+
+@dataclass
+class EyeTrackerResultsForDiskSave:
+    settings: EyeTrackerSettings
+    rawdata: list[EyeTrackerRawData]
+
+@dataclass
+class EyeTrackerResultsForGui:
+    pupil3D: Pupil3D | None
+    cam_left_img: np.ndarray
+    cam_right_img: np.ndarray
+
+
+IMG_SIZE = (512, 512)
+ELLIPSE_OVERLAY_COLOR = (0, 255, 0)  # RGB: green
+ELLIPSE_OVERLAY_THICKNESS = 3
+
+
+
+class EyeTracker:
+    def __init__(self, use_dummy=False):
+
+        self._config: EyeTrackerConfig | None = None
+
+        self.pupil_detector = PupilDetector(stereo_cameras=stereo_cameras, left_to_ref=left_to_ref)
+        self.ellipse_fitter = EllipseFitter()
+
+        init_config = eye_tracker_config.get()
+        self.set_config(config=init_config)
+
+        self.dual_cam_proxy = DualCameraProxy(dtype="uint8", slots=8, use_dummy=use_dummy)
+        self.dual_cam_proxy.start()
+
+    def set_config(self, config: EyeTrackerConfig):
+        self._config = config
+
+        self.ellipse_fitter.set_config(
+            binary_threshold_left=config.binary_threshold_left,
+            binary_threshold_right=config.binary_threshold_right,
+            masking_radius_left=config.masking_radius_left,
+            masking_radius_right=config.masking_radius_right,
+            masking_center_left=config.masking_center_left,
+            masking_center_right=config.masking_center_right,
+            frame_to_be_returned=config.frame_returned,
+        )
+
+    def _get_settings(self) -> EyeTrackerSettings:
+        return EyeTrackerSettings(
+            config=self._config,
+            stereo_calibration=self.pupil_detector.stereo.st_cal,
+        )
+
+
+    def _get_frames(self) -> tuple[np.ndarray, np.ndarray, float]:
+        left_img, right_img, meta = self.dual_cam_proxy.get_frames()
+        return left_img, right_img, float(meta["ts"])  # ts from time.time()
+
+
+    def _get_ellipses(self, left_img: np.ndarray, right_img: np.ndarray) -> tuple[PupilEllipse, PupilEllipse]:
+        pupil_eL: PupilEllipse = self.ellipse_fitter.find_pupil_left(left_img)
+        pupil_eR: PupilEllipse = self.ellipse_fitter.find_pupil_right(right_img)
+        return pupil_eL, pupil_eR
+
+    def get_pupil3D(self, eL: Ellipse2D | None, eR: Ellipse2D | None) -> Pupil3D | None:
+        # return self.pupil_detector.triangulate_center_using_cones(eL=eL, eR=eR)
+        return self.pupil_detector.triangulate_center(eL=eL, eR=eR)
+
+    def _get_cam_imgs_for_display(self, pupil_eL: PupilEllipse, pupil_eR: PupilEllipse) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Return display-ready left and right images according to current config.
+
+        Parameters
+        ----------
+        pupil_eL, pupil_eR : objects from EllipseFitter
+            Contain .original_img, .binary_img, .floodfilled_img, etc.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            (left_img, right_img) scaled for display.
+        """
+
+        # select source images
+        left_img = pupil_eL.pupil_img
+        right_img = pupil_eR.pupil_img
+
+        # Convert to uint8
+        left_img = ensure_uint8(left_img)
+        right_img = ensure_uint8(right_img)
+
+        # Ensure RGB
+        left_img = gray_to_rgb(left_img)
+        right_img = gray_to_rgb(right_img)
+
+        if self._config.overlay_ellipse:
+            if pupil_eL.ellipse is not None:
+                left_img = draw_ellipse_rgb(img_rgb=left_img,
+                                           ellipse=pupil_eL.ellipse,
+                                           color_rgb = ELLIPSE_OVERLAY_COLOR,  # green
+                                           thickness = ELLIPSE_OVERLAY_THICKNESS, # int
+                                           )
+
+            if pupil_eR.ellipse is not None:
+                right_img = draw_ellipse_rgb(img_rgb=right_img,
+                                           ellipse=pupil_eR.ellipse,
+                                           color_rgb = ELLIPSE_OVERLAY_COLOR,  # green
+                                           thickness = ELLIPSE_OVERLAY_THICKNESS, # int
+                                           )
+
+
+
+        return left_img, right_img
+
+    # def _get_rendered_eye_image(self, pupil3D):
+    #     if pupil3D is None:
+    #         return make_black_image()
+    #
+    #     C, gaze = self._pose_from_pupil3D(pupil3D)
+    #     if C is None:
+    #         return make_black_image()
+    #
+    #     self.renderer.set_eye_pose(C, gaze)
+    #     return ensure_uint8(self.renderer.get_img())
+
+
+
+    # ---------------------------
+    # rate-limited saver
+    # ---------------------------
+
+
+    # def _pose_from_pupil3D(self, pupil3D: Pupil3D):
+    #     """
+    #     Convert Pupil3D (with .center_ref and .normal_ref) into a pose
+    #     for the renderer.
+    #     """
+    #     if pupil3D is None or pupil3D.center_ref is None:
+    #         return None, None
+    #
+    #     C = pupil3D.center_ref.astype(float)
+    #
+    #     if pupil3D.normal_ref is not None:
+    #         gaze = pupil3D.normal_ref.astype(float)
+    #         gaze /= np.linalg.norm(gaze) + 1e-9
+    #     else:
+    #         gaze = np.array([0.0, 0.0, 1.0])  # fallback
+    #
+    #     # Use renderer’s own geometry to push the cornea center slightly forward
+    #     cornea_forward_mm = (
+    #             self.renderer.parts["z_apex"] - self.renderer.parts["z_iris"]
+    #     )
+    #     C_cornea = C + gaze * cornea_forward_mm
+    #
+    #     return C_cornea, gaze
+
+    def get_eye_tracker_results_from_original_imgs(self,
+                                                   left_img: np.ndarray,
+                                                   right_img: np.ndarray) -> EyeTrackerResultsForGui:
+        # Ensure they are all rgb
+        if self._config.do_ellipse_fitting:
+            pupil_eL, pupil_eR = self._get_ellipses(left_img, right_img)
+            pupil_3D = self.get_pupil3D(pupil_eL.ellipse, pupil_eR.ellipse)
+            cam_left_img, cam_right_img = self._get_cam_imgs_for_display(pupil_eL, pupil_eR)
+
+        else:
+            pupil_3D=None
+            cam_left_img = gray_to_rgb(ensure_uint8(left_img))
+            cam_right_img = gray_to_rgb(ensure_uint8(right_img))
+
+
+        # Ensure all images are correctly scaled
+        # ensure correct scaling and rgb (for shared memory space) for GUI display
+        cam_left_img = scale_image(cam_left_img, IMG_SIZE)
+        cam_right_img = scale_image(cam_right_img, IMG_SIZE)
+
+        cam_left_img = ensure_uint8(cam_left_img)
+        cam_right_img = ensure_uint8(cam_right_img)
+
+
+
+        return EyeTrackerResultsForGui(
+            pupil3D = pupil_3D,
+            cam_left_img=cam_left_img,
+            cam_right_img=cam_right_img,
+        )
+
+    def get_results_for_gui(self) -> EyeTrackerResultsForGui:
+
+        try:
+            left_img, right_img, ts = self._get_frames()
+        except:
+            return EyeTrackerResultsForGui(
+                pupil3D=None,
+                cam_left_img=make_black_image(max_size=IMG_SIZE, channels=3),
+                cam_right_img=make_black_image(max_size=IMG_SIZE, channels=3),
+            )
+
+        # Ensure they are all rgb
+        et_results = self.get_eye_tracker_results_from_original_imgs(left_img=left_img, right_img=right_img)
+
+
+        return et_results
+
+    def set_allied_vision_configs(self, cfg_left: AlliedConfig, cfg_right: AlliedConfig):
+        self.dual_cam_proxy.set_configs(cfg_left=cfg_left, cfg_right=cfg_right)
+
+
+    def shutdown(self):
+        self.dual_cam_proxy.shutdown()

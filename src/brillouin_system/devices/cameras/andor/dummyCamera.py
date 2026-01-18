@@ -1,4 +1,6 @@
 import time
+from contextlib import contextmanager
+
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
@@ -13,7 +15,7 @@ class DummyCamera(BaseCamera):
         self.roi = (0, 160, 0, 20)
         self.binning = (1, 1)
         self.verbose = True
-
+        self._is_streaming = False
         # NEW ATTRIBUTES
         self._flip = False
         self._pre_amp_mode = 16
@@ -42,6 +44,40 @@ class DummyCamera(BaseCamera):
     def get_camera_info_dataclass(self) -> AndorCameraInfo:
         return AndorCameraInfo(**self.get_camera_info())
 
+    def set_from_camera_info(self, info: AndorCameraInfo, do_set_temperature: bool = False):
+
+        if self.verbose:
+            print("[DummyCamera] Applying settings from AndorCameraInfo...")
+
+        # Flip
+        self.set_flip_image_horizontally(info.flip_image_horizontally)
+
+        # ROI + binning
+        x_start, x_end, y_start, y_end = info.roi
+        hbin, vbin = info.binning
+        self.set_roi(x_start=x_start, x_end=x_end, y_start=y_start, y_end=y_end)
+        self.set_binning(hbin=hbin, vbin=vbin)
+
+        # Exposure + gain
+        self.set_exposure_time(info.exposure)
+        self.set_emccd_gain(int(info.gain))
+        self.set_fixed_pre_amp_mode(info.fixed_pre_amp_mode_index)
+
+
+        # VSS index
+        try:
+            self.set_vss_index(int(info.vss_speed))
+        except Exception:
+            if self.verbose:
+                print("[DummyCamera] Could not apply vss_speed; keeping existing VSS index.")
+
+        # Temperature (not simulated)
+        if do_set_temperature:
+            print(f"[DummyCamera] Temperature requested from info: {info.temperature} (dummy camera ignores this)")
+
+        if self.verbose:
+            print("[DummyCamera] Camera state restored from AndorCameraInfo.")
+
     def get_name(self) -> str:
         return "DummyCamera"
 
@@ -51,12 +87,12 @@ class DummyCamera(BaseCamera):
     def close_shutter(self):
         print("[DummyCamera] Shutter closed")
 
-    def snap(self) -> np.ndarray:
+    def snap(self) -> tuple[np.ndarray, float]:
         time.sleep(self.exposure_time)
         frame = self._generate_plastic_image()
         if self._flip:
             frame = np.fliplr(frame)
-        return frame
+        return frame, time.time()
 
     def _generate_plastic_image(self) -> np.ndarray:
         h, w = self.get_frame_shape()
@@ -133,10 +169,14 @@ class DummyCamera(BaseCamera):
         return self._flip
 
     # NEW: Preamp mode
-    def set_pre_amp_mode(self, index: int):
+    def set_fixed_pre_amp_mode(self, index: int):
         self._pre_amp_mode = index
         if self.verbose:
             print(f"[DummyCamera] Preamp mode set to index {index}")
+
+
+    def get_fixed_pre_amp_mode(self) -> int:
+        return self._pre_amp_mode
 
     def get_pre_amp_mode(self) -> int:
         return self._pre_amp_mode
@@ -151,7 +191,6 @@ class DummyCamera(BaseCamera):
         return self._vss_index
 
     def set_from_config_file(self, config: AndorConfig) -> None:
-
         if self.verbose:
             print("[DummyCamera] Applying settings from config...")
 
@@ -171,9 +210,8 @@ class DummyCamera(BaseCamera):
             vbin=config.vbin
         )
 
-        self.set_pre_amp_mode(config.pre_amp_mode)
+        self.set_fixed_pre_amp_mode(config.pre_amp_mode)
         self.set_vss_index(config.vss_index)
-
 
         print(f'Temperature is {config.temperature}')
 
@@ -181,8 +219,41 @@ class DummyCamera(BaseCamera):
         if self.verbose:
             print("[IxonUltra] Configuration applied.")
 
+
     def get_exposure_dataclass(self) -> AndorExposure:
         return AndorExposure(
             exposure_time_s=self.get_exposure_time(),
             emccd_gain=self.get_emccd_gain()
         )
+
+    def start_streaming(self, buffer_size: int = 200):
+        self._is_streaming = True
+        print(f"Started Streaming: buffer {buffer_size}")
+
+    def stop_streaming(self):
+        self._is_streaming = False
+        print("Ended Streaming")
+
+    def get_newest_streaming_image(self):
+        """
+        only when streaming
+        Return the newest frame available (non-blocking).
+        Returns None if no *new* frame since last call.
+        """
+        return self.snap()
+
+
+    @contextmanager
+    def streaming(self):
+        """
+        Safe streaming context manager.
+        """
+        already_streaming = self._is_streaming
+        if not already_streaming:
+            self.start_streaming()
+
+        try:
+            yield self
+        finally:
+            if not already_streaming and self._is_streaming:
+                self.stop_streaming()

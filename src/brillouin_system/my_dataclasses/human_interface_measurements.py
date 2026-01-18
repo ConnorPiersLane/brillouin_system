@@ -4,6 +4,7 @@ import numpy as np
 
 from brillouin_system.calibration.calibration import CalibrationCalculator, CalibrationPolyfitParameters
 from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -16,23 +17,30 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 # -------------- Request for Scan --------------
 @dataclass
-class RequestAxialScan:
+class RequestAxialStepScan:
     id: str
     n_measurements: int
     step_size_um: float
+    find_reflection_plane: bool | None = None
+    eye_tracker_results: EyeTrackerResults | None = None
 
+@dataclass
+class RequestAxialContScan:
+    id: str
+    speed_um_s: float
+    find_reflection_plane: bool | None = None
+    eye_tracker_results: EyeTrackerResults | None = None
 # -------------- Scan Result --------------
 
 @dataclass
 class MeasurementPoint:
     frame_andor: np.ndarray  # Original frame, not subtracted
     lens_zaber_position: float
-    frame_left_allied: np.ndarray | None = None
-    frame_right_allied: np.ndarray | None = None
+    # frame_left_allied: np.ndarray | None = None
+    # frame_right_allied: np.ndarray | None = None
+    time_stamp: float | None = None
 
-@dataclass
-class EyeLocation:
-    index: int = 0
+
 
 @dataclass
 class AxialScan:
@@ -41,7 +49,8 @@ class AxialScan:
     measurements: list[MeasurementPoint]
     system_state: SystemState
     calibration_params: CalibrationPolyfitParameters | None
-    eye_location: None | EyeLocation = None
+    scan_speed_um_s: float | None = None
+    eye_tracker_results: EyeTrackerResults | None = None
 
 # -------------- Scan Fitting --------------
 
@@ -126,8 +135,8 @@ def analyze_axial_scan(fitted_scan: FittedAxialScan) -> AnalysedAxialScan:
             freq_shift_left_peak_ghz=None,
             freq_shift_right_peak_ghz=None,
             freq_shift_peak_distance_ghz=None,
-            fwhm_left_peak_ghz=None,
-            fwhm_right_peak_ghz=None,
+            hwhm_left_peak_ghz=None,
+            hwhm_right_peak_ghz=None,
         )
 
         for _ in fitted_scan.fitted_spectras:

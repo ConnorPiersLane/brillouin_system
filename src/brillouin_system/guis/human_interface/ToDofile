@@ -1,0 +1,7 @@
+Step and scan
+
+0. Logging -> save logging to file
+1. Remove unused calibration fitting (models and peaks)
+2. add total distance to axial step scan
+3. let the step laser position start at z0
+4. Calibration Linear -> maybe lookup better

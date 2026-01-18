@@ -27,6 +27,11 @@ class TheoreticalPeakStdError:
 @dataclass
 class MeasuredStatistics:
     """ All Values in MHz, MHz², or -"""
+    freq_shift_left_peak_mean_ghz: float
+    freq_shift_right_peak_mean_ghz: float
+    freq_shift_peak_distance_mean_ghz: float
+    freq_shift_dc_mean_ghz: float
+    freq_shift_centroid_mean_ghz: float
     freq_shift_left_peak_mhz_std: float
     freq_shift_right_peak_mhz_std: float
     freq_shift_peak_distance_mhz_std: float
@@ -47,8 +52,8 @@ class SpectrumAnalyzer:
                 freq_shift_left_peak_ghz=None,
                 freq_shift_right_peak_ghz=None,
                 freq_shift_peak_distance_ghz=None,
-                fwhm_left_peak_ghz=None,
-                fwhm_right_peak_ghz=None,
+                hwhm_left_peak_ghz=None,
+                hwhm_right_peak_ghz=None,
                 freq_shift_dc_ghz=None,
                 freq_shift_centroid_ghz=None,
             )
@@ -63,7 +68,7 @@ class SpectrumAnalyzer:
             freq_shift_peak_distance_ghz=float(
                 self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance)
             ),
-            fwhm_left_peak_ghz=float(
+            hwhm_left_peak_ghz=float(
                 abs(
                     self.calibration_calculator.df_left_peak(
                         fitting.left_peak_center_px,
@@ -71,7 +76,7 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
-            fwhm_right_peak_ghz=float(
+            hwhm_right_peak_ghz=float(
                 abs(
                     self.calibration_calculator.df_right_peak(
                         fitting.right_peak_center_px,
@@ -100,7 +105,7 @@ class SpectrumAnalyzer:
 
         # All values are in GHz, as this is a distance approx for the spectrometer
         # Lorentzian Profile, approximate std with fwhm
-        s_l, s_r = analyzed_spec.fwhm_left_peak_ghz, analyzed_spec.fwhm_right_peak_ghz
+        s_l, s_r = analyzed_spec.hwhm_left_peak_ghz, analyzed_spec.hwhm_right_peak_ghz
 
         a_l = self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1)
         a_r = self.calibration_calculator.df_left_peak(px=fs.right_peak_center_px, dpx=1)
@@ -108,7 +113,10 @@ class SpectrumAnalyzer:
         N_l = photons.left_peak_photons
         N_r = photons.right_peak_photons
 
-        b_counts_l, b_counts_r = get_b_values(std_image=bg_frame_std, fit=fs)
+        if bg_frame_std is None:
+            b_counts_l, b_counts_r = 0, 0
+        else:
+            b_counts_l, b_counts_r = get_b_values(std_image=bg_frame_std, fit=fs)
         b_l = count_to_electrons(b_counts_l, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
         b_r = count_to_electrons(b_counts_r, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
 
@@ -145,6 +153,13 @@ class SpectrumAnalyzer:
         dc_shifts = [s.freq_shift_dc_ghz for s in shifts if s.freq_shift_dc_ghz is not None]
         centroid_shifts = [s.freq_shift_centroid_ghz for s in shifts if s.freq_shift_centroid_ghz is not None]
 
+        # Mean values
+        freq_shift_left_peak_mean_ghz = float(np.mean(left_shifts)) if len(left_shifts) > 1 else None
+        freq_shift_right_peak_mean_ghz = float(np.mean(right_shifts)) if len(right_shifts) > 1 else None
+        freq_shift_peak_distance_mean_ghz = float(np.mean(dist_shifts)) if len(dist_shifts) > 1 else None
+        freq_shift_dc_mean_ghz = float(np.mean(dc_shifts)) if len(dc_shifts) > 1 else None
+        freq_shift_centroid_mean_ghz = float(np.mean(centroid_shifts)) if len(centroid_shifts) > 1 else None
+
         # --- Std devs in MHz ---
         freq_shift_left_peak_std_mhz = float(np.std(left_shifts, ddof=1) * 1e3) if len(left_shifts) > 1 else None
         freq_shift_right_peak_std_mhz = float(np.std(right_shifts, ddof=1) * 1e3) if len(right_shifts) > 1 else None
@@ -164,6 +179,11 @@ class SpectrumAnalyzer:
                 )
 
         return MeasuredStatistics(
+            freq_shift_left_peak_mean_ghz = freq_shift_left_peak_mean_ghz,
+            freq_shift_right_peak_mean_ghz = freq_shift_right_peak_mean_ghz,
+            freq_shift_peak_distance_mean_ghz = freq_shift_peak_distance_mean_ghz,
+            freq_shift_dc_mean_ghz = freq_shift_dc_mean_ghz,
+            freq_shift_centroid_mean_ghz = freq_shift_centroid_mean_ghz,
             freq_shift_left_peak_mhz_std=freq_shift_left_peak_std_mhz,
             freq_shift_right_peak_mhz_std=freq_shift_right_peak_std_mhz,
             freq_shift_peak_distance_mhz_std=freq_shift_peak_distance_std_mhz,
