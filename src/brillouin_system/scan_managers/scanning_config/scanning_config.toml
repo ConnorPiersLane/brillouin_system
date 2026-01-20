@@ -1,8 +1,9 @@
 [axial_scanning]
-exposure = 0.05
-gain = 100
-n_sigma = 4
-speed_um_s = 200.0
-max_search_distance_um = 2000.0
-n_bg_images = 10
-max_scan_distance_um = 2000
+exposure_time_for_reflection_finding = 0.05
+gain_for_reflection_finding = 3
+reflection_threshold_value = 5000.0
+step_distance_um_for_reflection_finding = 10
+max_search_distance_um_for_reflection_finding = 3000
+step_after_finding_reflection_um = 10
+n_bg_images_for_reflection_finding = 10
+max_scan_distance_um = 3000

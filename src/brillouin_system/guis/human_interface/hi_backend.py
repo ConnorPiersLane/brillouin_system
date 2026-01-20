@@ -691,20 +691,12 @@ class HiBackend:
 
     def find_reflection_plane(self):
         reflection_finder = ReflectionFinder(camera=self.andor_camera, zaber_axis=self.zaber_eye_lens)
-        z0 = self.zaber_eye_lens.get_position()
         result = reflection_finder.find_reflection_plane(
             exposure_time=self._axial_scan_config.exposure,
             gain=self._axial_scan_config.gain,
-            n_sigma=self._axial_scan_config.n_sigma,
-            speed_um_s=self._axial_scan_config.speed_um_s,
-            max_search_distance_um=self._axial_scan_config.max_search_distance_um,
-            n_bg_images = self._axial_scan_config.n_bg_images,
-        )
-        if result.found:
-            self.move_and_update_gui_zaber_eye_lens_abs(result.z_um)
-        else:
-            self.move_and_update_gui_zaber_eye_lens_abs(z0)
+            n_sigma=self._axial_scan_config.reflection_threshold_value,
 
+        )
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""
