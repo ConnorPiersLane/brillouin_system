@@ -24,110 +24,84 @@ from brillouin_system.scan_managers.scanning_config.scanning_config import (
 
 
 class AxialScanningConfigDialog(QDialog):
+    """
+    Pattern matches AndorConfigDialog:
+      - Apply updates in-memory config, then calls a provided callback
+      - Save updates in-memory config, writes TOML (optionally also calls callback)
+    """
+
     def __init__(
         self,
         cfg_holder: ThreadSafeConfig | None = None,
-        on_apply=None,
+        on_apply=None,   # <-- callback: on_apply(ScanningConfig)
         parent=None,
     ):
-        """
-        cfg_holder:
-            ThreadSafeConfig[AxialScanningConfig]. If None, the global
-            `axial_scanning_config` is used.
-
-        on_apply:
-            Optional callback taking a single AxialScanningConfig, called
-            after cfg_holder has been updated (but before saving).
-        """
         super().__init__(parent)
         self.setWindowTitle("Axial Scanning Configuration")
+        self.setMinimumSize(360, 320)
 
         self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
 
-        self.inputs: dict[str, object] = {}
+        self.inputs: dict[str, QLineEdit] = {}
 
         layout = QVBoxLayout()
-        layout.addWidget(self._group_find_reflection(self.inputs))
-        layout.addWidget(self._group_scan_settings(self.inputs))
+        layout.addWidget(self._group_find_reflection())
+        layout.addWidget(self._group_scan_settings())
         layout.addLayout(self._buttons())
         self.setLayout(layout)
 
-        self._load()
+        self.load_values()
 
     # ------------------------------------------------------------------ #
-    # UI construction
+    # UI
     # ------------------------------------------------------------------ #
 
-    def _group_find_reflection(self, inputs: dict) -> QGroupBox:
+    def _add_row(self, layout: QVBoxLayout, label: str, key: str, widget: QLineEdit) -> None:
+        self.inputs[key] = widget
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        row.addWidget(widget, 1)
+        layout.addLayout(row)
+
+    def _group_find_reflection(self) -> QGroupBox:
         g = QGroupBox("Find Reflection Settings")
         v = QVBoxLayout()
 
-        def add_row(label: str, widget: QLineEdit):
-            h = QHBoxLayout()
-            h.addWidget(QLabel(label))
-            h.addWidget(widget, 1)
-            v.addLayout(h)
-
-        # Exposure time
         le_exposure = QLineEdit()
-        le_exposure.setValidator(QDoubleValidator(0.0, 1e6, 6))
-        inputs["exposure_time"] = le_exposure
-        add_row("Exposure time [s]", le_exposure)
+        le_exposure.setValidator(QDoubleValidator(0.0, 1e9, 6))
+        self._add_row(v, "Exposure [s]", "exposure", le_exposure)
 
         le_gain = QLineEdit()
-        le_gain.setValidator(QDoubleValidator(0.0, 1e6, 6))
-        inputs["gain"] = le_gain
-        add_row("Gain", le_gain)
+        le_gain.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "Gain", "gain", le_gain)
 
-        # Threshold value
-        le_thresh = QLineEdit()
-        le_thresh.setValidator(QDoubleValidator(0.0, 1e18, 6))
-        inputs["reflection_threshold_value"] = le_thresh
-        add_row("Reflection threshold", le_thresh)
+        le_n_sigma = QLineEdit()
+        le_n_sigma.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "N Sigma", "n_sigma", le_n_sigma)
 
-        # Step distance [um]
-        le_step = QLineEdit()
-        le_step.setValidator(QIntValidator(0, 10_000_000))
-        inputs["step_distance_um"] = le_step
-        add_row("Step distance [um]", le_step)
+        le_speed = QLineEdit()
+        le_speed.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Speed [µm/s]", "speed_um_s", le_speed)
 
-        # Max distance [um]
-        le_max_dist = QLineEdit()
-        le_max_dist.setValidator(QIntValidator(0, 10_000_000))
-        inputs["max_distance_um"] = le_max_dist
-        add_row("Max distance [um]", le_max_dist)
+        le_max_search = QLineEdit()
+        le_max_search.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Max search distance [µm]", "max_search_distance_um", le_max_search)
 
-        # Step after finding Reflection [um]
-        le_step_after = QLineEdit()
-        le_step_after.setValidator(QIntValidator(0, 10_000_000))
-        inputs["step_after_finding_reflection_um"] = le_step_after
-        add_row("Step after finding Reflection [um]", le_step_after)
-
-        # N BG Images
         le_n_bg = QLineEdit()
         le_n_bg.setValidator(QIntValidator(0, 1_000_000))
-        inputs["n_bg_images"] = le_n_bg
-        add_row("N BG Images", le_n_bg)
+        self._add_row(v, "N BG images", "n_bg_images", le_n_bg)
 
         g.setLayout(v)
         return g
 
-    def _group_scan_settings(self, inputs: dict) -> QGroupBox:
+    def _group_scan_settings(self) -> QGroupBox:
         g = QGroupBox("Scan Settings")
         v = QVBoxLayout()
 
-        def add_row(label: str, widget: QLineEdit):
-            h = QHBoxLayout()
-            h.addWidget(QLabel(label))
-            h.addWidget(widget, 1)
-            v.addLayout(h)
-
-        # Max Scan Dista [um].
         le_max_scan = QLineEdit()
         le_max_scan.setValidator(QIntValidator(0, 10_000_000))
-        inputs["max_scan_distance_um"] = le_max_scan
-        add_row("Max Scan Dista [um].", le_max_scan)
+        self._add_row(v, "Max scan distance [µm]", "max_scan_distance_um", le_max_scan)
 
         g.setLayout(v)
         return g
@@ -136,10 +110,10 @@ class AxialScanningConfigDialog(QDialog):
         h = QHBoxLayout()
 
         apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self.apply)
+        apply_btn.clicked.connect(self.apply_settings)  # <-- andor-like
 
         save_btn = QPushButton("Save")
-        save_btn.clicked.connect(self.save)
+        save_btn.clicked.connect(self.save_config)
 
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
@@ -151,83 +125,86 @@ class AxialScanningConfigDialog(QDialog):
         return h
 
     # ------------------------------------------------------------------ #
-    # Data <-> UI
+    # Data <-> UI (andor-like naming)
     # ------------------------------------------------------------------ #
 
-    def _set_fields(self, cfg: ScanningConfig) -> None:
-        self.inputs["exposure_time"].setText(str(cfg.exposure))
+    def load_values(self) -> None:
+        cfg: ScanningConfig = self.cfg_holder.get()
+        self.inputs["exposure"].setText(str(cfg.exposure))
         self.inputs["gain"].setText(str(cfg.gain))
-        self.inputs["reflection_threshold_value"].setText(str(cfg.reflection_threshold_value))
-        self.inputs["step_distance_um"].setText(str(cfg.step_distance_um_for_reflection_finding))
-        self.inputs["max_distance_um"].setText(str(cfg.max_search_distance_um_for_reflection_finding))
-        self.inputs["step_after_finding_reflection_um"].setText(
-            str(cfg.step_after_finding_reflection_um)
-        )
-        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images_for_reflection_finding))
+        self.inputs["n_sigma"].setText(str(cfg.n_sigma))
+        self.inputs["speed_um_s"].setText(str(cfg.speed_um_s))
+        self.inputs["max_search_distance_um"].setText(str(cfg.max_search_distance_um))
+        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images))
         self.inputs["max_scan_distance_um"].setText(str(cfg.max_scan_distance_um))
 
-    def _collect(self) -> dict[str, int]:
-        def _intval(key: str, default: int) -> int:
-            text = self.inputs[key].text()
-            return int(text) if text else default
+    def _update_config_from_inputs(self) -> None:
+        """
+        Mirrors AndorConfigDialog._update_config_from_inputs():
+        - Parse widgets
+        - Update ThreadSafeConfig via .update(...)
+        """
+        def _req_text(key: str) -> str:
+            # Keep behavior strict (like Andor: int(...) directly)
+            return self.inputs[key].text().strip()
 
-        def _floatval(key: str, default: float) -> float:
-            text = self.inputs[key].text()
-            return float(text) if text else default
-
-        return {
-            "exposure_time_for_reflection_finding": _floatval("exposure_time", 0.05),
-            "gain_for_reflection_finding": _intval("gain", 1),  # <-- ADD
-            "reflection_threshold_value": _floatval("reflection_threshold_value", 5000.0),
-            "step_distance_um_for_reflection_finding": _intval("step_distance_um", 20),
-            "max_search_distance_um_for_reflection_finding": _intval("max_distance_um", 2000),
-            "step_after_finding_reflection_um": _intval("step_after_finding_reflection_um", 20),
-            "n_bg_images_for_reflection_finding": _intval("n_bg_images", 10),
-            "max_scan_distance_um": _intval("max_scan_distance_um", 2000),
-        }
-
-    def _load(self) -> None:
-        cfg = self.cfg_holder.get()
-        self._set_fields(cfg)
+        self.cfg_holder.update(
+            exposure=float(_req_text("exposure")),
+            gain=int(_req_text("gain")),
+            n_sigma=int(_req_text("n_sigma")),
+            speed_um_s=float(_req_text("speed_um_s")),
+            max_search_distance_um=float(_req_text("max_search_distance_um")),
+            n_bg_images=int(_req_text("n_bg_images")),
+            max_scan_distance_um=int(_req_text("max_scan_distance_um")),
+        )
 
     # ------------------------------------------------------------------ #
-    # Actions
+    # Actions (andor-like)
     # ------------------------------------------------------------------ #
 
-    def apply(self) -> None:
-        """Apply settings to in-memory config (but do not save TOML)."""
+    def apply_settings(self) -> None:
+        """
+        Andor-style Apply:
+          - Update in-memory config
+          - Call callback with the updated config (so caller can 'send it')
+        """
         try:
-            kwargs = self._collect()
-            self.cfg_holder.update(**kwargs)
+            self._update_config_from_inputs()
 
-            if self.on_apply:
+            if callable(self.on_apply):
                 self.on_apply(self.cfg_holder.get())
 
-            QMessageBox.information(self, "Applied", "Settings applied (not saved).")
+            print("[Axial Scanning Config] Settings applied.")
         except Exception as e:
-            QMessageBox.critical(self, "Apply Error", f"Failed to apply config:\n{e}")
+            QMessageBox.critical(self, "Apply Error", f"Failed to apply settings:\n{e}")
 
-    def save(self) -> None:
-        """Apply then persist to TOML."""
+    def save_config(self) -> None:
+        """
+        Save:
+          - Update in-memory config
+          - Persist to TOML
+          - (Optional) call callback too (common in hardware UIs)
+        """
         try:
-            self.apply()
+            self._update_config_from_inputs()
             save_config_section(AXIAL_SCANNING_TOML_PATH, "axial_scanning", self.cfg_holder)
-            QMessageBox.information(
-                self,
-                "Saved",
-                f"Saved to {AXIAL_SCANNING_TOML_PATH.name}.",
-            )
+
+            if callable(self.on_apply):
+                self.on_apply(self.cfg_holder.get())
+
+            print("[Axial Scanning Config] Settings saved.")
         except Exception as e:
-            QMessageBox.critical(self, "Save Error", f"Failed to save:\n{e}")
+            QMessageBox.critical(self, "Save Error", f"Failed to save settings:\n{e}")
 
 
 if __name__ == "__main__":
     import sys
 
-    holder = ThreadSafeConfig(
-        load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning")
-    )
+    def example_send_to_system(cfg: ScanningConfig):
+        print("[Function Call] Config updated:\n", cfg)
+
+    holder = ThreadSafeConfig(load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning"))
+
     app = QApplication(sys.argv)
-    dlg = AxialScanningConfigDialog(cfg_holder=holder)
-    dlg.show()
-    sys.exit(app.exec_())
+    dlg = AxialScanningConfigDialog(cfg_holder=holder, on_apply=example_send_to_system)
+    dlg.exec_()

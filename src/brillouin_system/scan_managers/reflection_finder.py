@@ -102,22 +102,24 @@ class ReflectionFinder:
 
                 # --- Start guarded slewing ---
                 z0 = float(self.zaber_lens.get_position())
-                t_start = time.monotonic()
 
                 self.zaber_lens.start_slewing(speed_um_per_s=speed_um_s)
 
                 try:
                     while True:
                         # --- Stop condition 2: travelled distance (guard likely stopped already) ---
-
+                        z = float(self.zaber_lens.get_position())
+                        if abs(z - z0) >= abs(max_search_distance_um):
+                            self.zaber_lens.stop_slewing()
+                            return ReflectionFindingResult(found=False, z_um=None)
                         # --- Read next frame (may be None) ---
                         frame_value = self.get_frame_value()
-                        z = float(self.zaber_lens.get_position())
+
                         # --- Detection ---
                         if frame_value > threshold:
+                            self.zaber_lens.stop_slewing()
                             return ReflectionFindingResult(found=True, z_um=z)
-                        if abs(z - z0) >= abs(max_search_distance_um):
-                            return ReflectionFindingResult(found=False, z_um=None)
+
 
                 finally:
                     # Always stop slewing when leaving the function

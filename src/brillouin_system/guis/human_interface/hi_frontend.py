@@ -640,7 +640,7 @@ class HiFrontend(QWidget):
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.axial_settings_btn)
         # btn_row.addWidget(self.take_bg_value_btn)
-        # btn_row.addWidget(self.find_reflection_plane_btn)
+        btn_row.addWidget(self.find_reflection_plane_btn)
 
         btn_row.addStretch()
 
