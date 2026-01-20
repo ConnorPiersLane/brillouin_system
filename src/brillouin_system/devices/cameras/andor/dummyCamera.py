@@ -8,6 +8,9 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import Ando
 from .andor_dataclasses import AndorExposure, AndorCameraInfo
 from .baseCamera import BaseCamera
 
+
+
+
 class DummyCamera(BaseCamera):
     def __init__(self):
         self.exposure_time = 0.3
@@ -20,6 +23,7 @@ class DummyCamera(BaseCamera):
         self._flip = False
         self._pre_amp_mode = 16
         self._vss_index = 4
+        self._streaming_img_count = 0
 
         if self.verbose:
             print("[DummyCamera] initialized")
