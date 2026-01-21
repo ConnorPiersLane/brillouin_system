@@ -106,9 +106,10 @@ class ReflectionFinder:
                 self.zaber_lens.start_slewing(speed_um_per_s=speed_um_s)
                 t1 = time.monotonic()
                 try:
+                    start_time = time.monotonic()
                     while True:
-                        # Todo: add stop button, add timeout
-                        # --- Stop condition 2: travelled distance (guard likely stopped already) ---
+                        if time.monotonic() - start_time >= 10.0:
+                            return ReflectionFindingResult(found=False, z_um=None)
 
                         # --- Read next frame (may be None) ---
                         z1 = float(self.zaber_lens.get_position())
