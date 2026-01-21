@@ -74,7 +74,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
+include_eye_tracking = False
 use_eye_tracker_dummy = True
 
 # put this near your imports (top of file)
@@ -640,7 +640,7 @@ class HiFrontend(QWidget):
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.axial_settings_btn)
         # btn_row.addWidget(self.take_bg_value_btn)
-        # btn_row.addWidget(self.find_reflection_plane_btn)
+        btn_row.addWidget(self.find_reflection_plane_btn)
 
         btn_row.addStretch()
 

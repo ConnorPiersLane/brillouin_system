@@ -10,7 +10,6 @@ import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
 
-
 @dataclass
 class ScanningConfig:
     # ----------------------------
@@ -19,9 +18,9 @@ class ScanningConfig:
     exposure: float = 0.05
     gain: int = 1
     n_sigma: int = 6
-    speed_um_s: float = 1000,
-    max_search_distance_um: float = 2000,
-    n_bg_images: int = 10,
+    speed_um_s: float = 1000
+    max_search_distance_um: float = 2000
+    n_bg_images: int = 10
 
     # ----------------------------
     # Scan Settings
@@ -29,32 +28,21 @@ class ScanningConfig:
     max_scan_distance_um: int = 2000
 
 
-# Path to the TOML config file
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
 
 
 def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
-    """
-    Convert TOML section to AxialScanningConfig kwargs.
-
-    Filters unknown keys so older TOML files (or copied templates) still load.
-    """
     allowed = set(ScanningConfig.__dataclass_fields__.keys())
     return {k: v for k, v in raw.items() if k in allowed}
 
 
 def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
-    """Convert an AxialScanningConfig instance to a simple dict for TOML."""
     return asdict(cfg)
 
 
 def load_axial_scanning_config(
     path: Path, section: str = "axial_scanning"
 ) -> ScanningConfig:
-    """
-    Load AxialScanningConfig from a TOML file section.
-    If the section is missing, fall back to dataclass defaults.
-    """
     try:
         with path.open("rb") as f:
             data = tomli.load(f)
@@ -62,14 +50,10 @@ def load_axial_scanning_config(
     except FileNotFoundError:
         raw = {}
 
-    kwargs = _toml_to_kwargs(raw)
-    return ScanningConfig(**kwargs)
+    return ScanningConfig(**_toml_to_kwargs(raw))
 
 
 def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> None:
-    """
-    Persist a ThreadSafeConfig[AxialScanningConfig] section back to TOML.
-    """
     try:
         with path.open("rb") as f:
             data = tomli.load(f)
@@ -82,7 +66,6 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> N
         tomli_w.dump(data, f)
 
 
-# Single global configuration instance, loaded from TOML at import time
 axial_scanning_config = ThreadSafeConfig(
     load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning")
 )
