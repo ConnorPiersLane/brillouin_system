@@ -803,22 +803,49 @@ class HiFrontend(QWidget):
         self.eye_vb = []
         self.eye_img = []
 
-        for i in range(4):
-            if i in (2,):  # example: go to next row after second image
+        # NEW: store bottom-row plots
+        self.eye_bottom_plots = []
+
+        for i in range(6):
+            if i in (2, 4):
                 self.eye_glw.ci.nextRow()
 
-            vb = pg.ViewBox(lockAspect=True, enableMenu=False)
-            vb.invertY(True)
-            img = pg.ImageItem(autoDownsample=True)
-            vb.addItem(img)
-            vb.setBorder((80, 80, 80))
+            row = i // 2
+            col = i % 2
 
-            self.eye_glw.ci.addItem(vb, row=i // 2, col=i % 2)
+            # Top 2 rows (0..3): keep your existing "image in a ViewBox"
+            if i < 4:
+                vb = pg.ViewBox(lockAspect=True, enableMenu=False)
+                vb.invertY(True)
+                img = pg.ImageItem(autoDownsample=True)
+                vb.addItem(img)
+                vb.setBorder((80, 80, 80))
 
-            self.eye_vb.append(vb)
-            self.eye_img.append(img)
+                self.eye_glw.ci.addItem(vb, row=row, col=col)
+                self.eye_vb.append(vb)
+                self.eye_img.append(img)
 
-        self._init_laser_position_map()
+            # Bottom row (4..5): make them true 1D plots with axes
+            else:
+                p = self.eye_glw.ci.addPlot(row=row, col=col)
+                p.showGrid(x=True, y=False, alpha=0.2)
+                p.setLabel("bottom", "Distance (mm)")
+                p.hideAxis("left")
+                p.setYRange(-1, 1, padding=0.0)
+                p.setXRange(-3.0, 10.0, padding=0.0)
+                p.getViewBox().setBorder((80, 80, 80))
+                p.setMenuEnabled(False)
+
+                self.eye_bottom_plots.append(p)
+
+        # Make last row smaller (row index 2)
+        grid = self.eye_glw.ci.layout
+        grid.setRowStretchFactor(0, 6)
+        grid.setRowStretchFactor(1, 6)
+        grid.setRowStretchFactor(2, 1)
+
+        self._init_laser_position_map()  # laser map uses self.eye_vb[2] :contentReference[oaicite:1]{index=1}
+        self._init_cornea_distance_plot()  # NEW
 
         layout = QVBoxLayout()
         layout.addWidget(self.eye_glw)
@@ -826,6 +853,39 @@ class HiFrontend(QWidget):
         group.setMinimumWidth(800)
         group.setMinimumHeight(800)
         return group
+
+    def _init_cornea_distance_plot(self):
+        """
+        Bottom-left plot (index 0 in self.eye_bottom_plots):
+          - Laser dot at x=0
+          - Grey band indicating cornea region [dc, dc+thickness]
+        """
+        if not getattr(self, "eye_bottom_plots", None):
+            return
+
+        self.cornea_plot = self.eye_bottom_plots[0]  # bottom-left
+        # If you want bottom-right too, use self.eye_bottom_plots[1]
+
+        # Laser marker at x=0
+        self.laser_1d_dot = pg.ScatterPlotItem(
+            [0.0], [0.0],
+            size=10,
+            brush=pg.mkBrush("r"),
+            pen=pg.mkPen("r")
+        )
+        self.cornea_plot.addItem(self.laser_1d_dot)
+
+        # Cornea band (defaults for now)
+        self.cornea_thickness_mm = 0.5
+        dc_mm = 2.0
+        self.cornea_band = pg.LinearRegionItem(
+            values=(dc_mm, dc_mm + self.cornea_thickness_mm),
+            orientation=pg.LinearRegionItem.Vertical,
+            movable=False,
+            brush=pg.mkBrush(150, 150, 150, 80),
+            pen=pg.mkPen(150, 150, 150, 200),
+        )
+        self.cornea_plot.addItem(self.cornea_band)
 
     def create_show_scan_results(self):
         """
@@ -1791,13 +1851,35 @@ class HiFrontend(QWidget):
         laser_position = self.last_eye_tracker_results.laser_position
         if laser_position is not None:
             self.update_laser_position_cartesian(x=laser_position[0], y=laser_position[1])
-            self.update_laser_position_text_eye_tracker(x=laser_position[0],
-                                                        y=laser_position[1],
-                                                        z=laser_position[2],
-                                                        dc=self.last_eye_tracker_results.delta_laser_corner)
+            self.update_laser_position_text_eye_tracker(
+                x=laser_position[0],
+                y=laser_position[1],
+                z=laser_position[2],
+                dc=self.last_eye_tracker_results.delta_laser_corner
+            )
+
+            self._update_cornea_band(self.last_eye_tracker_results.delta_laser_corner)
+
         else:
             self.clear_laser_position()
             self.update_laser_position_text_eye_tracker(None, None, None, None)
+
+            # IMPORTANT: also hide cornea when laser_position missing
+            self._update_cornea_band(None)
+
+    def _update_cornea_band(self, dc_um):
+        # If plot isn't initialized yet, do nothing
+        if not hasattr(self, "cornea_band"):
+            return
+
+        if dc_um is None:
+            self.cornea_band.setVisible(False)
+            return
+
+        # dc is in µm -> convert to mm
+        dc_mm = float(dc_um) / 1e3
+        self.cornea_band.setRegion((dc_mm, dc_mm + self.cornea_thickness_mm))
+        self.cornea_band.setVisible(True)
 
     # ---- Fitting button (placeholder) ----
 
