@@ -75,7 +75,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = True
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -1864,19 +1864,6 @@ class HiFrontend(QWidget):
             f"Δc = {tdc}"
         )
 
-    # def update_laser_position_polar(self, r: float, theta_deg: float):
-    #     """
-    #     Update the laser position using polar coordinates (radius, degrees).
-    #     0° = +X axis, 90° = +Y axis, etc.
-    #     """
-    #     theta = np.deg2rad(theta_deg)
-    #     x = r * np.cos(theta)
-    #     y = r * np.sin(theta)
-    #     self.update_laser_position_cartesian(x, y)
-
-
-
-
 
     @QtCore.pyqtSlot(object, object, dict)
     def on_eye_frames_ready(self, left, right, meta):
@@ -1933,17 +1920,15 @@ class HiFrontend(QWidget):
             time.sleep(0.01)
         return None
 
-    def _update_cornea_band(self, dc_um):
+    def _update_cornea_band(self, dc_mm):
         # If plot isn't initialized yet, do nothing
         if not hasattr(self, "cornea_band"):
             return
 
-        if dc_um is None:
+        if dc_mm is None:
             self.cornea_band.setVisible(False)
             return
 
-        # dc is in µm -> convert to mm
-        dc_mm = float(dc_um) / 1e3
         self.cornea_band.setRegion((dc_mm, dc_mm + self.cornea_thickness_mm))
         self.cornea_band.setVisible(True)
 
@@ -1983,7 +1968,7 @@ class HiFrontend(QWidget):
             # SIGN NOTE:
             # If moving the stage +X makes the laser move -X,
             # change emit(dx_um) -> emit(-dx_um) (same for Y).
-            self.move_zaber_stage_x_requested.emit(dx_um)
+            self.move_zaber_stage_x_requested.emit(-dx_um)
             self.move_zaber_stage_y_requested.emit(dy_um)
 
         except Exception as e:
@@ -2000,12 +1985,11 @@ class HiFrontend(QWidget):
                 log.warning("[Zaber Z Δc] No recent eye-tracker result (or laser_position None).")
                 return
 
-            dc_um = res.delta_laser_corner
-            if dc_um is None:
+            dc_current_mm = res.delta_laser_corner
+            if dc_current_mm is None:
                 log.warning("[Zaber Z Δc] delta_laser_corner is None; cannot compute Z move.")
                 return
 
-            dc_current_mm = float(dc_um) / 1e3
             dc_target_mm = float(self.dc_input.text())
 
             dz_mm = dc_target_mm - dc_current_mm
@@ -2015,7 +1999,7 @@ class HiFrontend(QWidget):
                      dc_current_mm, dc_target_mm, dz_mm)
 
             # Same sign caveat as XY: if moving +Z increases Δc or decreases it depends on your geometry.
-            self.move_zaber_stage_z_requested.emit(dz_um)
+            self.move_zaber_stage_z_requested.emit(-dz_um)
 
         except Exception as e:
             log.exception(f"[Zaber Z Δc] Invalid input or update error: {e}")

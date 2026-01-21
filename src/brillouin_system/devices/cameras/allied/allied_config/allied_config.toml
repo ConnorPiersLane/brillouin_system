@@ -4,9 +4,9 @@ offset_x = 500
 offset_y = 500
 width = 1000
 height = 1000
-gain = 0
-exposure = 192669
-gamma = 1.0
+gain = 7
+exposure = 201843
+gamma = 1.01
 
 [right]
 id = "DEV_000F315BC0A5"
@@ -14,6 +14,6 @@ offset_x = 500
 offset_y = 500
 width = 1000
 height = 1000
-gain = 0
-exposure = 165146
+gain = 7
+exposure = 214075
 gamma = 1.0
