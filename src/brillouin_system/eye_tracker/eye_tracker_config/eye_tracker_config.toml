@@ -1,16 +1,15 @@
 [eye_tracker]
 binary_threshold_left = 40
 binary_threshold_right = 40
+
+fill_n_vetical_dark_pixels_left = 10
+fill_n_vetical_dark_pixels_right = 10
+
 masking_radius_left = 400
 masking_radius_right = 400
-masking_center_left = [
-    0,
-    0,
-]
-masking_center_right = [
-    0,
-    0,
-]
+masking_center_left = [0, 0]
+masking_center_right = [0, 0]
+
 do_ellipse_fitting = true
 overlay_ellipse = true
 frame_returned = "binary"

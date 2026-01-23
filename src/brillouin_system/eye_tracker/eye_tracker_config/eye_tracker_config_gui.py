@@ -14,10 +14,8 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QCheckBox,
     QComboBox,
-    QFileDialog,
 )
 from PyQt5.QtGui import QIntValidator
-
 
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import (
     EyeTrackerConfig,
@@ -48,7 +46,6 @@ class EyeTrackerConfigDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Eye Tracker Configuration")
 
-        # Store the ThreadSafeConfig, not the raw dataclass
         self.cfg_holder: ThreadSafeConfig = cfg_holder or eye_tracker_config
         self.on_apply = on_apply
 
@@ -75,7 +72,6 @@ class EyeTrackerConfigDialog(QDialog):
             h.addWidget(widget, 1)
             v.addLayout(h)
 
-
         # Thresholds
         le_left_thr = QLineEdit()
         le_left_thr.setValidator(QIntValidator(0, 255))
@@ -86,6 +82,17 @@ class EyeTrackerConfigDialog(QDialog):
         le_right_thr.setValidator(QIntValidator(0, 255))
         inputs["binary_threshold_right"] = le_right_thr
         add_row("Binary threshold (right)", le_right_thr)
+
+        # NEW: fill_n_vetical_dark_pixels
+        le_fill_left = QLineEdit()
+        le_fill_left.setValidator(QIntValidator(0, 10000))
+        inputs["fill_n_vetical_dark_pixels_left"] = le_fill_left
+        add_row("Fill N vertical dark pixels (left)", le_fill_left)
+
+        le_fill_right = QLineEdit()
+        le_fill_right.setValidator(QIntValidator(0, 10000))
+        inputs["fill_n_vetical_dark_pixels_right"] = le_fill_right
+        add_row("Fill N vertical dark pixels (right)", le_fill_right)
 
         # Masking radii
         le_mask_left = QLineEdit()
@@ -98,7 +105,7 @@ class EyeTrackerConfigDialog(QDialog):
         inputs["masking_radius_right"] = le_mask_right
         add_row("Masking radius (right)", le_mask_right)
 
-        # --- Masking center (left) cx, cy ---
+        # Masking center (left) cx, cy
         le_mask_center_left_cx = QLineEdit()
         le_mask_center_left_cx.setValidator(QIntValidator(-5000, 5000))
         inputs["masking_center_left_cx"] = le_mask_center_left_cx
@@ -113,7 +120,7 @@ class EyeTrackerConfigDialog(QDialog):
         row_left_center.addWidget(le_mask_center_left_cy)
         v.addLayout(row_left_center)
 
-        # --- Masking center (right) cx, cy ---
+        # Masking center (right) cx, cy
         le_mask_center_right_cx = QLineEdit()
         le_mask_center_right_cx.setValidator(QIntValidator(-5000, 5000))
         inputs["masking_center_right_cx"] = le_mask_center_right_cx
@@ -127,7 +134,6 @@ class EyeTrackerConfigDialog(QDialog):
         row_right_center.addWidget(le_mask_center_right_cx)
         row_right_center.addWidget(le_mask_center_right_cy)
         v.addLayout(row_right_center)
-
 
         # Ellipse fitting / overlay
         de = QCheckBox("Run ellipse fitting")
@@ -171,10 +177,17 @@ class EyeTrackerConfigDialog(QDialog):
     # ------------------------------------------------------------------ #
 
     def _set_fields(self, cfg: EyeTrackerConfig):
-
         # Thresholds
         self.inputs["binary_threshold_left"].setText(str(cfg.binary_threshold_left))
         self.inputs["binary_threshold_right"].setText(str(cfg.binary_threshold_right))
+
+        # NEW: fill
+        self.inputs["fill_n_vetical_dark_pixels_left"].setText(
+            str(cfg.fill_n_vetical_dark_pixels_left)
+        )
+        self.inputs["fill_n_vetical_dark_pixels_right"].setText(
+            str(cfg.fill_n_vetical_dark_pixels_right)
+        )
 
         # Masking
         self.inputs["masking_radius_left"].setText(str(cfg.masking_radius_left))
@@ -185,10 +198,8 @@ class EyeTrackerConfigDialog(QDialog):
 
         self.inputs["masking_center_left_cx"].setText(str(lcx))
         self.inputs["masking_center_left_cy"].setText(str(lcy))
-
         self.inputs["masking_center_right_cx"].setText(str(rcx))
         self.inputs["masking_center_right_cy"].setText(str(rcy))
-
 
         # Ellipse fitting
         self.inputs["do_ellipse_fitting"].setChecked(bool(cfg.do_ellipse_fitting))
@@ -203,7 +214,6 @@ class EyeTrackerConfigDialog(QDialog):
         self.inputs["frame_returned"].setCurrentIndex(idx)
 
     def _collect(self) -> dict:
-        # Helper to read an int with fallback
         def _intval(key: str, default: int) -> int:
             text = self.inputs[key].text()
             return int(text) if text else default
@@ -211,16 +221,24 @@ class EyeTrackerConfigDialog(QDialog):
         return {
             "binary_threshold_left": _intval("binary_threshold_left", 20),
             "binary_threshold_right": _intval("binary_threshold_right", 20),
+
+            # NEW: fill defaults
+            "fill_n_vetical_dark_pixels_left": _intval("fill_n_vetical_dark_pixels_left", 10),
+            "fill_n_vetical_dark_pixels_right": _intval("fill_n_vetical_dark_pixels_right", 10),
+
             "masking_radius_left": _intval("masking_radius_left", 500),
             "masking_radius_right": _intval("masking_radius_right", 500),
+
+            # Fixed defaults to match dataclass (0,0)
             "masking_center_left": (
-                _intval("masking_center_left_cx", 500),
+                _intval("masking_center_left_cx", 0),
                 _intval("masking_center_left_cy", 0),
             ),
             "masking_center_right": (
-                _intval("masking_center_right_cx", 500),
+                _intval("masking_center_right_cx", 0),
                 _intval("masking_center_right_cy", 0),
             ),
+
             "do_ellipse_fitting": bool(self.inputs["do_ellipse_fitting"].isChecked()),
             "overlay_ellipse": bool(self.inputs["overlay_ellipse"].isChecked()),
             "frame_returned": self.inputs["frame_returned"].currentText(),
@@ -239,11 +257,9 @@ class EyeTrackerConfigDialog(QDialog):
         """Apply settings to in-memory config (but do not save TOML)."""
         try:
             kwargs = self._collect()
-            # ThreadSafeConfig.update(**kwargs)
             self.cfg_holder.update(**kwargs)
 
             if self.on_apply:
-                # Pass the updated EyeTrackerConfig instance
                 self.on_apply(self.cfg_holder.get())
 
             QMessageBox.information(self, "Applied", "Settings applied (not saved).")
@@ -251,19 +267,11 @@ class EyeTrackerConfigDialog(QDialog):
             QMessageBox.critical(self, "Apply Error", f"Failed to apply config:\n{e}")
 
     def save(self):
-        """
-        Apply then persist to TOML.
-        This mirrors the Allied config pattern: we call save_config_section
-        with the ThreadSafeConfig.
-        """
+        """Apply then persist to TOML."""
         try:
             self.apply()
             save_config_section(PUPIL_FIT_TOML_PATH, "eye_tracker", self.cfg_holder)
-            QMessageBox.information(
-                self,
-                "Saved",
-                f"Saved to {PUPIL_FIT_TOML_PATH.name}.",
-            )
+            QMessageBox.information(self, "Saved", f"Saved to {PUPIL_FIT_TOML_PATH.name}.")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save:\n{e}")
 
@@ -271,10 +279,7 @@ class EyeTrackerConfigDialog(QDialog):
 if __name__ == "__main__":
     import sys
 
-    # Load existing config and wrap in ThreadSafeConfig
-    holder = ThreadSafeConfig(
-        load_eye_tracker_config(PUPIL_FIT_TOML_PATH, "eye_tracker")
-    )
+    holder = ThreadSafeConfig(load_eye_tracker_config(PUPIL_FIT_TOML_PATH, "eye_tracker"))
     app = QApplication(sys.argv)
     dlg = EyeTrackerConfigDialog(cfg_holder=holder)
     dlg.show()

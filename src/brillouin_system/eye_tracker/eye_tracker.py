@@ -71,6 +71,8 @@ class EyeTracker:
         self.ellipse_fitter.set_config(
             binary_threshold_left=config.binary_threshold_left,
             binary_threshold_right=config.binary_threshold_right,
+            fill_n_vetical_dark_pixels_left=config.fill_n_vetical_dark_pixels_left,
+            fill_n_vetical_dark_pixels_right=config.fill_n_vetical_dark_pixels_right,
             masking_radius_left=config.masking_radius_left,
             masking_radius_right=config.masking_radius_right,
             masking_center_left=config.masking_center_left,
