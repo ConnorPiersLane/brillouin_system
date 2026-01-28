@@ -95,7 +95,7 @@ class SpectrumAnalyzer:
 
     def theoretical_precision(self, fs: FittedSpectrum,
                               photons: PhotonsCounts,
-                              bg_frame_std,
+                              bg_frame_std: np.ndarray,
                               preamp_gain: int | float,
                               emccd_gain: int | float,
                               ):
@@ -116,7 +116,7 @@ class SpectrumAnalyzer:
         if bg_frame_std is None:
             b_counts_l, b_counts_r = 0, 0
         else:
-            b_counts_l, b_counts_r = get_b_values(std_image=bg_frame_std, fit=fs)
+            b_counts_l, b_counts_r = get_b_values(std_img=bg_frame_std, fit=fs)
         b_l = count_to_electrons(b_counts_l, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
         b_r = count_to_electrons(b_counts_r, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
 
