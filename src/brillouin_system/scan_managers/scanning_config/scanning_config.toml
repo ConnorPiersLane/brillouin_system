@@ -1,6 +1,6 @@
 [axial_scanning]
 exposure = 0.05
-gain = 100
+gain = 200
 n_sigma = 4
 speed_um_s = 200.0
 max_search_distance_um = 2000.0
