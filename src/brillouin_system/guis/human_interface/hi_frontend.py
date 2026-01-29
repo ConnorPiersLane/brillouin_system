@@ -71,8 +71,12 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
+#todo: liimit laser postion path
+#todo: make z position via lens
 
-use_backend_dummy = True
+
+
+use_backend_dummy = False
 # Eye Tracking
 include_eye_tracking = True
 use_eye_tracker_dummy = False
