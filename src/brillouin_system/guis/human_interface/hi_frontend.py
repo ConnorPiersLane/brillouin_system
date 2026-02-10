@@ -73,7 +73,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 #todo: liimit laser postion path
 #todo: make z position via lens
-
+#todo: improve print statements when looking for plane
 
 
 use_backend_dummy = False
