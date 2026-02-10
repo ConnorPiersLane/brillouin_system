@@ -500,6 +500,7 @@ class HiBackend:
             log.warning('In Reference Mode: Change to Sample Mode for continuous scanning')
             return
 
+
         lens_x0 = self.zaber_eye_lens.get_position()
         speed = request_axial_scan.speed_um_s
         max_distance = self._axial_scan_config.max_scan_distance_um
@@ -699,6 +700,7 @@ class HiBackend:
             speed_um_s=self._axial_scan_config.speed_um_s,
             max_search_distance_um=self._axial_scan_config.max_search_distance_um,
             n_bg_images = self._axial_scan_config.n_bg_images,
+            cancel_cb=self.f2b_cancel_callback,
         )
         if result.found:
             self.move_and_update_gui_zaber_eye_lens_abs(result.z_um)

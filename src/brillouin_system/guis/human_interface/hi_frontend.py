@@ -71,11 +71,15 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
+#todo: liimit laser postion path
+#todo: make z position via lens
 
-use_backend_dummy = True
+
+
+use_backend_dummy = False
 # Eye Tracking
-include_eye_tracking = False
-use_eye_tracker_dummy = True
+include_eye_tracking = True
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -96,10 +100,10 @@ def create_backend(use_dummy: bool) -> HiBackend:
             camera=DummyCamera(),
             shutter_manager=ShutterManagerDummy('human_interface'),
             microwave=MicrowaveDummy(),
-            zaber_eye_lens=ZaberEyeLensDummy(),
-            zaber_hi=ZaberHumanInterfaceDummy(),
-            # zaber_eye_lens=ZaberEyeLens(),
-            # zaber_hi=ZaberHumanInterface(),
+            # zaber_eye_lens=ZaberEyeLensDummy(),
+            # zaber_hi=ZaberHumanInterfaceDummy(),
+            zaber_eye_lens=ZaberEyeLens(),
+            zaber_hi=ZaberHumanInterface(),
             is_sample_illumination_continuous=True
         )
 
@@ -177,6 +181,7 @@ class HiFrontend(QWidget):
 
         self.laser_focus_position: RigCoord | None = None
         self.last_eye_tracker_results: EyeTrackerResults | None = None
+        self._last_eye_update_monotonic = 0.0
         self._andor_exposure_time: float | None = None
 
         # --- Create log_view early so logging can safely use it ---
@@ -1122,6 +1127,54 @@ class HiFrontend(QWidget):
         self.y_down_btn.clicked.connect(
             lambda: self.move_zaber_stage_y_requested.emit(-float(self.y_step_input.text())))
 
+
+        # ----------------------------
+        # NEW: Move laser to (R, phi) using eye tracking (ABSOLUTE target)
+        # ----------------------------
+        self.xy_r_input = QLineEdit("0.0")
+        self.xy_r_input.setFixedWidth(60)
+        self.xy_r_input.setValidator(QDoubleValidator(-1000.0, 1000.0, 4))  # mm
+
+        self.xy_phi_input = QLineEdit("0.0")
+        self.xy_phi_input.setFixedWidth(60)
+        self.xy_phi_input.setValidator(QDoubleValidator(-3600.0, 3600.0, 3))  # deg
+
+        self.xy_move_btn = QPushButton("Move XY")
+        self.xy_move_btn.setFixedWidth(70)
+        self.xy_move_btn.clicked.connect(self.on_move_xy_polar_clicked)
+
+        xy_row = QHBoxLayout()
+        xy_row.addWidget(QLabel("R [mm]:"))
+        xy_row.addWidget(self.xy_r_input)
+        xy_row.addSpacing(6)
+        xy_row.addWidget(QLabel("phi [deg]:"))
+        xy_row.addWidget(self.xy_phi_input)
+        xy_row.addSpacing(6)
+        xy_row.addWidget(self.xy_move_btn)
+        xy_row.addStretch()
+
+        layout.addRow(xy_row)
+
+        # ----------------------------
+        # NEW: Move Z to reach Δc target (uses current Δc from eye tracking)
+        # ----------------------------
+        self.dc_input = QLineEdit("2.0")
+        self.dc_input.setFixedWidth(60)
+        self.dc_input.setValidator(QDoubleValidator(-1000.0, 1000.0, 4))  # mm
+
+        self.dc_move_btn = QPushButton("Move Z")
+        self.dc_move_btn.setFixedWidth(70)
+        self.dc_move_btn.clicked.connect(self.on_move_z_by_dc_clicked)
+
+        dc_row = QHBoxLayout()
+        dc_row.addWidget(QLabel("Δc [mm]:"))
+        dc_row.addWidget(self.dc_input)
+        dc_row.addSpacing(6)
+        dc_row.addWidget(self.dc_move_btn)
+        dc_row.addStretch()
+
+        layout.addRow(dc_row)
+
         group.setLayout(layout)
         return group
 
@@ -1815,19 +1868,6 @@ class HiFrontend(QWidget):
             f"Δc = {tdc}"
         )
 
-    # def update_laser_position_polar(self, r: float, theta_deg: float):
-    #     """
-    #     Update the laser position using polar coordinates (radius, degrees).
-    #     0° = +X axis, 90° = +Y axis, etc.
-    #     """
-    #     theta = np.deg2rad(theta_deg)
-    #     x = r * np.cos(theta)
-    #     y = r * np.sin(theta)
-    #     self.update_laser_position_cartesian(x, y)
-
-
-
-
 
     @QtCore.pyqtSlot(object, object, dict)
     def on_eye_frames_ready(self, left, right, meta):
@@ -1842,6 +1882,7 @@ class HiFrontend(QWidget):
         # pyqtgraph's ImageItem can handle 3-channel images, but a safe option is
         # to convert to grayscale for now:
 
+        self._last_eye_update_monotonic = time.monotonic()
         self.eye_img[0].setImage(left, autoLevels=True)
         self.eye_img[1].setImage(right, autoLevels=True)
 
@@ -1867,19 +1908,105 @@ class HiFrontend(QWidget):
             # IMPORTANT: also hide cornea when laser_position missing
             self._update_cornea_band(None)
 
-    def _update_cornea_band(self, dc_um):
+    def _wait_for_eye_result(self, timeout_s: float = 1, max_age_s: float = 0.5) -> EyeTrackerResults | None:
+        """
+        Wait (briefly) for a recent EyeTrackerResults with a valid laser_position.
+        max_age_s: how recent the result must be.
+        """
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            r = self.last_eye_tracker_results
+            if r is not None and r.laser_position is not None:
+                age = time.monotonic() - self._last_eye_update_monotonic
+                if age <= max_age_s:
+                    return r
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.01)
+        return None
+
+    def _update_cornea_band(self, dc_mm):
         # If plot isn't initialized yet, do nothing
         if not hasattr(self, "cornea_band"):
             return
 
-        if dc_um is None:
+        if dc_mm is None:
             self.cornea_band.setVisible(False)
             return
 
-        # dc is in µm -> convert to mm
-        dc_mm = float(dc_um) / 1e3
         self.cornea_band.setRegion((dc_mm, dc_mm + self.cornea_thickness_mm))
         self.cornea_band.setVisible(True)
+
+
+    def on_move_xy_polar_clicked(self):
+        """
+        Move stage so the laser ends up at (R, phi) in laser coordinates.
+        R [mm], phi [deg] describe the ABSOLUTE desired laser position.
+        """
+        try:
+            res = self._wait_for_eye_result(timeout_s=0.8, max_age_s=0.3)
+            if res is None:
+                log.warning("[Zaber XY Polar] No recent eye-tracker result.")
+                return
+
+            x_laser = float(res.laser_position[0])
+            y_laser = float(res.laser_position[1])
+
+            r_mm = float(self.xy_r_input.text())
+            phi_deg = float(self.xy_phi_input.text())
+
+            phi = np.deg2rad(phi_deg)
+            x_target = r_mm * np.cos(phi)
+            y_target = r_mm * np.sin(phi)
+
+            dx_laser = x_target - x_laser
+            dy_laser = y_target - y_laser
+
+            dx_um = dx_laser * 1000.0
+            dy_um = dy_laser * 1000.0
+
+            log.info(
+                "[Zaber XY Polar] laser=(%.3f, %.3f) -> target=(%.3f, %.3f) mm | Δ=(%.3f, %.3f) mm",
+                x_laser, y_laser, x_target, y_target, dx_laser, dy_laser
+            )
+
+            # SIGN NOTE:
+            # If moving the stage +X makes the laser move -X,
+            # change emit(dx_um) -> emit(-dx_um) (same for Y).
+            self.move_zaber_stage_x_requested.emit(-dx_um)
+            self.move_zaber_stage_y_requested.emit(dy_um)
+
+        except Exception as e:
+            log.exception(f"[Zaber XY Polar] Failed: {e}")
+
+    def on_move_z_by_dc_clicked(self):
+        """
+        Move Z so that Δc reaches the user-specified value (in mm).
+        Uses current Δc from eye tracking (delta_laser_corner, assumed µm).
+        """
+        try:
+            res = self._wait_for_eye_result(timeout_s=0.8, max_age_s=0.3)
+            if res is None:
+                log.warning("[Zaber Z Δc] No recent eye-tracker result (or laser_position None).")
+                return
+
+            dc_current_mm = res.delta_laser_corner
+            if dc_current_mm is None:
+                log.warning("[Zaber Z Δc] delta_laser_corner is None; cannot compute Z move.")
+                return
+
+            dc_target_mm = float(self.dc_input.text())
+
+            dz_mm = dc_target_mm - dc_current_mm
+            dz_um = dz_mm * 1000.0
+
+            log.info("[Zaber Z Δc] dc_current=%.3fmm target=%.3fmm -> dz=%.3fmm",
+                     dc_current_mm, dc_target_mm, dz_mm)
+
+            # Same sign caveat as XY: if moving +Z increases Δc or decreases it depends on your geometry.
+            self.move_zaber_stage_z_requested.emit(-dz_um)
+
+        except Exception as e:
+            log.exception(f"[Zaber Z Δc] Invalid input or update error: {e}")
 
     # ---- Fitting button (placeholder) ----
 

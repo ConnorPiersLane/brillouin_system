@@ -8,6 +8,7 @@ from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFit
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import (
     find_pupil_ellipse_with_flooding, PupilImgType, extract_roi, make_img_black_outside_ring_around_center
 )
+from brillouin_system.eye_tracker.pupil_fitting.fill_vertical_gaps import fill_vertical_gaps_binary_fast
 
 
 def floodfill_and_show(path: str, threshold: int = 20):
@@ -65,11 +66,13 @@ def floodfill_and_show(path: str, threshold: int = 20):
     for stype, _title in stages:
         img = make_img_black_outside_ring_around_center(img=img,
                                                           ring_radius=300,
-                                                          center=(200,100),
+                                                          center=(0,0),
                                                           make_copy=False)
         r = find_pupil_ellipse_with_flooding(
             img, threshold=threshold, frame_to_be_returned=stype
         )
+        if stype == PupilImgType.FLOODFILLED:
+            r.pupil_img=fill_vertical_gaps_binary_fast(r.pupil_img, n_vertical_pixels=10)
         images.append((r.pupil_img, _title))
 
     # 4) Build final visualization with ellipse drawn on ORIGINAL (for clarity)
@@ -101,6 +104,8 @@ def floodfill_and_show(path: str, threshold: int = 20):
     return ellipse_params
 
 
+
+
 if __name__ == "__main__":
-    params = floodfill_and_show("left/pair_0001_left.png", threshold=12)
+    params = floodfill_and_show("right/connor2.png", threshold=30)
     print("Ellipse:", params)

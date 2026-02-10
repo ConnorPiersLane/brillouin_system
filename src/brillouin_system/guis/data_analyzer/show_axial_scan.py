@@ -238,7 +238,7 @@ class AxialScanViewer(QWidget):
         if self.axial_scan.system_state.bg_image is None:
             bg_frame_std = None
         else:
-            bg_frame_std = self.axial_scan.system_state.bg_image.std_image,
+            bg_frame_std = self.axial_scan.system_state.bg_image.std_image
 
         tpse = analyzer.theoretical_precision(
             fs=fit,

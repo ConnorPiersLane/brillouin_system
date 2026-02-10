@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
 from enum import Enum, auto
 
+from brillouin_system.eye_tracker.pupil_fitting.fill_vertical_gaps import fill_vertical_gaps_binary_fast
+
 
 class PupilImgType(Enum):
     """Stages of the pupil detection pipeline."""
@@ -191,6 +193,7 @@ def make_img_black_outside_ring_around_center(img: np.ndarray,
 def find_pupil_ellipse_with_flooding(
     img: np.ndarray,
     threshold: int = 20,
+    fill_n_vetical_dark_pixels: int = 0,
     frame_to_be_returned: PupilImgType = PupilImgType.ORIGINAL
 ) -> PupilEllipse:
     """
@@ -215,6 +218,10 @@ def find_pupil_ellipse_with_flooding(
     # cv2.floodFill(bw, mask, (0, h - 1), 128)
     # cv2.floodFill(bw, mask, (w - 1, h - 1), 128)
     bw[bw == 128] = 0  # remove background marked by 128
+
+    # Step 2.2: Fill gaps (eye lashes might be in the way)
+    if fill_n_vetical_dark_pixels != 0:
+        bw = fill_vertical_gaps_binary_fast(img=bw, n_vertical_pixels=fill_n_vetical_dark_pixels, make_copy=False)
 
     # Step 3: Keep largest connected component
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bw, connectivity=8, ltype=cv2.CV_32S)

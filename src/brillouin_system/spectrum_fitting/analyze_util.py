@@ -4,7 +4,7 @@ import math
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import sline_from_frame_config
 
 
-def get_b_values(std_image, fit, k: float = 2.0) -> tuple[float | None, float | None] | None:
+def get_b_values(std_img, fit, k: float = 2.0) -> tuple[float | None, float | None] | None:
     """
     Estimate b (background-noise std per binned pixel) near left/right peaks.
 
@@ -14,9 +14,7 @@ def get_b_values(std_image, fit, k: float = 2.0) -> tuple[float | None, float | 
 
     Parameters
     ----------
-        Provides selected_rows and pixel offsets (same as for sline extraction).
-    bg_stats : ImageStatistics
-        Contains .std_image (per-pixel std across background frames).
+    std_img: np.ndarray
     fit : FittedSpectrum
         Result of spectrum fitting (provides peak centers & widths).
     k : float
@@ -30,12 +28,11 @@ def get_b_values(std_image, fit, k: float = 2.0) -> tuple[float | None, float | 
     """
 
     # --- Validate inputs ---
-    if std_image is None:
+    if std_img is None:
         return None
     if not fit.is_success:
         return None, None
 
-    std_img = std_image
     H, W = std_img.shape
 
     # --- Select rows (same as in get_px_sline_from_image) ---

@@ -3,11 +3,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import time
+from typing import Optional, Callable
 
 import numpy as np
 
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+from brillouin_system.logging_utils.logging_setup import get_logger
 
 
 @dataclass
@@ -23,7 +25,7 @@ ANDROR_CAM_SETTINGS ={
     "fixed_pre_amp_mode_index": 0,
 }
 
-
+log = get_logger(__name__)
 
 
 class ReflectionFinder:
@@ -83,6 +85,7 @@ class ReflectionFinder:
             speed_um_s: float = 1000,
             max_search_distance_um: float = 2000,
             n_bg_images: int = 10,
+            cancel_cb: Optional[Callable[[], bool]] = None,
     ) -> ReflectionFindingResult:
         """
         Slew Z while monitoring streaming images until reflection detected.
@@ -103,12 +106,16 @@ class ReflectionFinder:
                 # --- Start guarded slewing ---
                 z0 = float(self.zaber_lens.get_position())
 
-                self.zaber_lens.start_slewing(speed_um_per_s=speed_um_s)
+                self.zaber_lens.start_slewing_guarded(speed_um_per_s=speed_um_s, max_distance_um=max_search_distance_um)
                 t1 = time.monotonic()
                 try:
                     start_time = time.monotonic()
                     while True:
-                        if time.monotonic() - start_time >= 10.0:
+                        if cancel_cb and cancel_cb():
+                            log.info(f"[Axial Scan] Cancelled at {self.zaber_lens.get_position()} um")
+                            return ReflectionFindingResult(found=False, z_um=None)
+
+                        if time.monotonic() - start_time >= max_search_distance_um / speed_um_s:
                             return ReflectionFindingResult(found=False, z_um=None)
 
                         # --- Read next frame (may be None) ---

@@ -31,9 +31,10 @@ class EllipseFitter:
     def __init__(self) -> None:
         self._binary_threshold_left: int = 20
         self._binary_threshold_right: int = 20
-
         self._masking_radius_left: int = 500
         self._masking_radius_right: int = 500
+        self._fill_n_vetical_dark_pixels_left: int = 0
+        self._fill_n_vetical_dark_pixels_right: int = 0
         self._masking_center_left: tuple[int, int] = (0, 0)
         self._masking_center_right: tuple[int, int] = (0, 0)
         self._frame_to_be_returned: PupilImgType = PupilImgType.ORIGINAL
@@ -42,6 +43,8 @@ class EllipseFitter:
             self,
             binary_threshold_left: int,
             binary_threshold_right: int,
+            fill_n_vetical_dark_pixels_left: int,
+            fill_n_vetical_dark_pixels_right: int,
             masking_radius_left: int,
             masking_radius_right: int,
             masking_center_left: tuple[int, int],
@@ -56,6 +59,9 @@ class EllipseFitter:
 
         self._binary_threshold_left = binary_threshold_left
         self._binary_threshold_right = binary_threshold_right
+
+        self._fill_n_vetical_dark_pixels_left = fill_n_vetical_dark_pixels_left
+        self._fill_n_vetical_dark_pixels_right = fill_n_vetical_dark_pixels_right
 
         self._masking_radius_left = masking_radius_left
         self._masking_radius_right = masking_radius_right
@@ -78,6 +84,7 @@ class EllipseFitter:
 
         return find_pupil_ellipse_with_flooding(img=image,
                                                 threshold=self._binary_threshold_left,
+                                                fill_n_vetical_dark_pixels=self._fill_n_vetical_dark_pixels_left,
                                                 frame_to_be_returned=self._frame_to_be_returned)
 
 
@@ -92,5 +99,6 @@ class EllipseFitter:
 
         return find_pupil_ellipse_with_flooding(img=image,
                                                 threshold=self._binary_threshold_right,
+                                                fill_n_vetical_dark_pixels=self._fill_n_vetical_dark_pixels_right,
                                                 frame_to_be_returned=self._frame_to_be_returned)
 
