@@ -406,6 +406,7 @@ class HiBackend:
     def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan):
 
         lens_x0 = self.zaber_eye_lens.get_position()
+        lens_x0_original = lens_x0
         all_results = []
 
         if self.is_reference_mode:
@@ -481,7 +482,7 @@ class HiBackend:
                     self.shutter_manager.sample.close()
 
         # Move lens back to original position
-        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0_original)
 
         self._i_axial_scans += 1
 
