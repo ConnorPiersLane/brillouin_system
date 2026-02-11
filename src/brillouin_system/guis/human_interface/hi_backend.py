@@ -429,26 +429,30 @@ class HiBackend:
                 )
 
         else:
+
             dx = request_axial_scan.step_size_um
 
             log.info(f"[Axial Scan] Starting: {request_axial_scan.n_measurements} steps, "
                   f"step size: {request_axial_scan.step_size_um} µm, "
                   f"ID: {request_axial_scan.id}")
 
+            if request_axial_scan.find_reflection_plane:
+                self.find_reflection_plane()
+                lens_x0 = self.zaber_eye_lens.get_position()
+
             try:
                 if not self.is_sample_illumination_continuous:
                     self.shutter_manager.sample.open()
 
-                # First frame at starting position:
-                frame, ts = self._get_andor_camera_snap()
-                self.display_spectrum(frame=frame)
-                all_results.append(
-                    MeasurementPoint(
-                        frame_andor=frame,
-                        lens_zaber_position=lens_x0,
-                        time_stamp=ts)
-                )
-
+                # # First frame at starting position:
+                # frame, ts = self._get_andor_camera_snap()
+                # self.display_spectrum(frame=frame)
+                # all_results.append(
+                #     MeasurementPoint(
+                #         frame_andor=frame,
+                #         lens_zaber_position=lens_x0,
+                #         time_stamp=ts)
+                # )
 
                 for i in range(request_axial_scan.n_measurements):
                     if self.f2b_cancel_callback():
@@ -458,7 +462,7 @@ class HiBackend:
 
                     log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
                     self.zaber_eye_lens.move_rel(dx)
-                    zaber_pos = self.zaber_eye_lens.get_position()
+                    zaber_pos = round(self.zaber_eye_lens.get_position() - lens_x0)
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
                     frame, ts = self._get_andor_camera_snap()

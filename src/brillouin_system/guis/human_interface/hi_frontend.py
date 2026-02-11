@@ -76,9 +76,9 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 #todo: improve print statements when looking for plane
 
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
+include_eye_tracking = False
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -100,10 +100,10 @@ def create_backend(use_dummy: bool) -> HiBackend:
             camera=DummyCamera(),
             shutter_manager=ShutterManagerDummy('human_interface'),
             microwave=MicrowaveDummy(),
-            # zaber_eye_lens=ZaberEyeLensDummy(),
-            # zaber_hi=ZaberHumanInterfaceDummy(),
-            zaber_eye_lens=ZaberEyeLens(),
-            zaber_hi=ZaberHumanInterface(),
+            zaber_eye_lens=ZaberEyeLensDummy(),
+            zaber_hi=ZaberHumanInterfaceDummy(),
+            # zaber_eye_lens=ZaberEyeLens(),
+            # zaber_hi=ZaberHumanInterface(),
             is_sample_illumination_continuous=True
         )
 
@@ -2003,7 +2003,8 @@ class HiFrontend(QWidget):
                      dc_current_mm, dc_target_mm, dz_mm)
 
             # Same sign caveat as XY: if moving +Z increases Δc or decreases it depends on your geometry.
-            self.move_zaber_stage_z_requested.emit(-dz_um)
+            # self.move_zaber_stage_z_requested.emit(-dz_um)
+            self.move_zaber_eye_lens_requested.emit(-dz_um)
 
         except Exception as e:
             log.exception(f"[Zaber Z Δc] Invalid input or update error: {e}")

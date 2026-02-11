@@ -130,7 +130,7 @@ class AxialScanViewer(QWidget):
             self.ax_spec.plot(fit.x_pixels[fit.mask_for_fitting], fit.sline[fit.mask_for_fitting], 'r.', label="Used")
             self.ax_spec.plot(fit.x_fit_refined, fit.y_fit_refined, 'r--', label="Fit")
 
-        self.ax_spec.set_title(f"Spectrum at Z = {self.axial_scan.measurements[idx].lens_zaber_position:.2f} µm")
+        self.ax_spec.set_title(f"Spectrum at Z = {round(self.axial_scan.measurements[idx].lens_zaber_position)} µm")
         self.ax_spec.set_xlabel("Pixel (X)")
         self.ax_spec.set_ylabel("Intensity (Σ Y)")
         self.ax_spec.legend()

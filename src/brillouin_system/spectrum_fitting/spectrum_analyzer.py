@@ -84,11 +84,11 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
-            freq_shift_dc_ghz=self.calibration_calculator.freq_DC_model(
-                D=fitting.inter_peak_distance,
-                C=(fitting.right_peak_center_px+fitting.left_peak_center_px)/2,
-            ),
-            freq_shift_centroid_ghz=self.calibration_calculator.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2)
+            # freq_shift_dc_ghz=self.calibration_calculator.freq_DC_model(
+            #     D=fitting.inter_peak_distance,
+            #     C=(fitting.right_peak_center_px+fitting.left_peak_center_px)/2,
+            # ),
+            # freq_shift_centroid_ghz=self.calibration_calculator.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2)
 
         )
 
