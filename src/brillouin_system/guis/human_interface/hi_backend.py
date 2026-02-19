@@ -12,10 +12,12 @@ from brillouin_system.calibration.config.calibration_config import CalibrationCo
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
+from brillouin_system.devices.ni.ni6008 import NI6008
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
+from brillouin_system.scan_managers.ni_reflection_finder import ReflectionFinderNI
 from brillouin_system.scan_managers.reflection_finder import ReflectionFinder
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
@@ -84,6 +86,8 @@ class HiBackend:
         self.zaber_eye_lens = zaber_eye_lens
         self.zaber_hi = zaber_hi
 
+        # DAQ
+        self.daq = NI6008()
 
         # State
         self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
@@ -696,15 +700,13 @@ class HiBackend:
             return False
 
     def find_reflection_plane(self):
-        reflection_finder = ReflectionFinder(camera=self.andor_camera, zaber_axis=self.zaber_eye_lens)
+        reflection_finder = ReflectionFinderNI(daq=self.daq, zaber_axis=self.zaber_eye_lens)
         z0 = self.zaber_eye_lens.get_position()
         result = reflection_finder.find_reflection_plane(
-            exposure_time=self._axial_scan_config.exposure,
-            gain=self._axial_scan_config.gain,
             n_sigma=self._axial_scan_config.n_sigma,
             speed_um_s=self._axial_scan_config.speed_um_s,
             max_search_distance_um=self._axial_scan_config.max_search_distance_um,
-            n_bg_images = self._axial_scan_config.n_bg_images,
+            n_bg_samples = self._axial_scan_config.n_bg_images,
             cancel_cb=self.f2b_cancel_callback,
         )
         if result.found:

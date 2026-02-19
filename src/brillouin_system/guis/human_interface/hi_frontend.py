@@ -76,7 +76,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 #todo: improve print statements when looking for plane
 
 
-use_backend_dummy = True
+use_backend_dummy = False
 # Eye Tracking
 include_eye_tracking = False
 use_eye_tracker_dummy = False
@@ -109,16 +109,17 @@ def create_backend(use_dummy: bool) -> HiBackend:
 
     else:
         backend = HiBackend(
-            camera=IxonUltra(
-                index = 0,
-                temperature = "off",
-                fan_mode = "full",
-                x_start = 40, x_end  = 120,
-                y_start= 300, y_end  = 315,
-                vbin= 1, hbin  = 1,
-                verbose = True,
-                advanced_gain_option=False
-            ),
+            # camera=IxonUltra(
+            #     index = 0,
+            #     temperature = "off",
+            #     fan_mode = "full",
+            #     x_start = 40, x_end  = 120,
+            #     y_start= 300, y_end  = 315,
+            #     vbin= 1, hbin  = 1,
+            #     verbose = True,
+            #     advanced_gain_option=False
+            # ),
+            camera=DummyCamera(),
             shutter_manager=ShutterManager('human_interface'),
             microwave=Microwave(),
             zaber_eye_lens=ZaberEyeLens(),

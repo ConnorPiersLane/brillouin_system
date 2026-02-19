@@ -78,18 +78,24 @@ class ReflectionFinderNI:
                         return ReflectionFindingResult(found=False, z_um=None)
 
                     # --- detection (short slice so we can keep checking cancel/distance) ---
+
                     v = self.daq.read_value(timeout_s=0.01)
                     if v > threshold:
-                        z_hit = float(self.zaber_lens.get_position())
                         hits += 1
+                        if hits == 1:
+                            self.zaber_lens.stop_slewing()
+                            z_hit = self.zaber_lens.get_position()
                     else:
                         hits = 0
 
                     if hits >= n_hits:
+                        self.zaber_lens.stop_slewing()
                         return ReflectionFindingResult(
                             found=True,
                             z_um=z_hit,
                         )
+
+
 
             finally:
                 self.zaber_lens.stop_slewing()

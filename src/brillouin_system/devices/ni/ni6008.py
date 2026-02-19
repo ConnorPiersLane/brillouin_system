@@ -97,7 +97,7 @@ class NI6008:
         if self._task is None:
             raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
         v = self._task.read(number_of_samples_per_channel=1, timeout=float(timeout_s))
-        return float(v)
+        return v[0]
 
     def read_block(self, n_samples: int, *, timeout_s: Optional[float] = None) -> list[float]:
         """Read N samples as a list[float]."""
@@ -108,11 +108,10 @@ class NI6008:
             return []
 
         if timeout_s is None:
-            # enough time to acquire the samples + margin
             timeout_s = max(1.0, n / self.sample_rate_hz + 0.5)
 
         data = self._task.read(number_of_samples_per_channel=n, timeout=float(timeout_s))
-        # For 1 channel, DAQmx returns list[float] when n>1
+
         return [float(x) for x in data]
 
 
@@ -124,3 +123,4 @@ if __name__ == "__main__":
         vals = ni.read_block(100)
         print(f"Read {len(vals)} samples:")
         print(vals)
+        print(ni.read_value())
