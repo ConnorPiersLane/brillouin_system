@@ -43,7 +43,8 @@ class ReflectionFinderNI:
             # new knobs:
             refine: bool = True,
             refine_speed_um_s: float = 100.0,
-            backoff_um: float | None = None,  # if None, computed from speed
+            refine_backstep_um: float = 100.0,
+            backoff_um = 0,  # if None, computed from speed
 
     ) -> ReflectionFindingResult:
 
@@ -102,7 +103,7 @@ class ReflectionFinderNI:
             if backoff_um is None:
                 backoff_um = max(20.0, speed_um_s * 0.1)  # 100 ms of travel, min 20 µm
 
-            z_back = z_hit - backoff_um
+            z_back = z_hit - refine_backstep_um
             self.zaber_lens.move_abs(z_back)
             self.daq.flush()
 
@@ -115,6 +116,6 @@ class ReflectionFinderNI:
             found2, z_refined = run_scan(refine_speed_um_s, refine_dist)
             if not found2:
                 # fallback: return the coarse hit if refine fails
-                return ReflectionFindingResult(found=True, z_um=z_hit)
+                return ReflectionFindingResult(found=True, z_um=z_hit-backoff_um)
 
-            return ReflectionFindingResult(found=True, z_um=z_refined)
+            return ReflectionFindingResult(found=True, z_um=z_refined-backoff_um)
