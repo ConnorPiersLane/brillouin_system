@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import tomli
 import tomli_w
@@ -21,6 +21,11 @@ class ScanningConfig:
     n_bg_samples: int = 10
     n_hits: int = 1
 
+    # refinement behavior
+    refine: bool = True
+    refine_speed_um_s: float = 100.0
+    backoff_um: Optional[float] = None  # if None, computed from speed
+
 
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
 
@@ -31,12 +36,26 @@ def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
-    return asdict(cfg)
+    """
+    Convert dataclass to a TOML-ready dict.
+
+    - If backoff_um is None, omit it from TOML (keeps TOML clean/valid).
+    """
+    d: dict[str, Any] = {
+        "n_sigma": cfg.n_sigma,
+        "speed_um_s": cfg.speed_um_s,
+        "max_search_distance_um": cfg.max_search_distance_um,
+        "n_bg_samples": cfg.n_bg_samples,
+        "n_hits": cfg.n_hits,
+        "refine": bool(cfg.refine),
+        "refine_speed_um_s": cfg.refine_speed_um_s,
+    }
+    if cfg.backoff_um is not None:
+        d["backoff_um"] = float(cfg.backoff_um)
+    return d
 
 
-def load_axial_scanning_config(
-    path: Path, section: str = "axial_scanning"
-) -> ScanningConfig:
+def load_axial_scanning_config(path: Path, section: str = "axial_scanning") -> ScanningConfig:
     try:
         with path.open("rb") as f:
             data = tomli.load(f)
@@ -54,7 +73,8 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> N
     except FileNotFoundError:
         data = {}
 
-    data[section] = _dataclass_to_toml_dict(config.get_raw())
+    cfg: ScanningConfig = config.get_raw()
+    data[section] = _dataclass_to_toml_dict(cfg)
 
     with path.open("wb") as f:
         tomli_w.dump(data, f)
