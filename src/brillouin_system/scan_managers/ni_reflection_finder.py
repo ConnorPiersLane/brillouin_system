@@ -31,67 +31,95 @@ class ReflectionFinderNI:
         self.zaber_lens: ZaberEyeLens = zaber_axis
 
     def find_reflection_plane(
-        self,
-        *,
-        n_sigma: int = 5,
-        speed_um_s: float = 1000.0,
-        max_search_distance_um: float = 2000.0,
-        n_bg_samples: int = 500,
-        n_hits: int = 2,                  # require N consecutive hits (spike/noise robustness)
-        cancel_cb: Optional[Callable[[], bool]] = None,
+            self,
+            *,
+            n_sigma: int = 6,
+            speed_um_s: float = 1000.0,
+            max_search_distance_um: float = 2000.0,
+            n_bg_samples: int = 500,
+            n_hits: int = 2,
+            cancel_cb: Optional[Callable[[], bool]] = None,
+
+            # new knobs:
+            refine: bool = True,
+            refine_speed_um_s: float = 100.0,
+            backoff_um: float | None = None,  # if None, computed from speed
+            read_timeout_s: float = 0.002,  # smaller = less overshoot (if DAQ supports it)
     ) -> ReflectionFindingResult:
 
         z0 = self.zaber_lens.get_position()
 
         with self.daq.streaming():
-            # --- background (for choosing threshold) ---
             xs = self.daq.read_block(int(n_bg_samples))
             bg_mean = sum(xs) / len(xs)
             bg_std = (sum((x - bg_mean) ** 2 for x in xs) / len(xs)) ** 0.5
-
-            # For delta mode, threshold is in "volts above baseline"
             threshold = float(bg_mean + n_sigma * bg_std)
 
-            max_search_time = max_search_distance_um / speed_um_s
+            def run_scan(scan_speed: float, scan_dist: float) -> tuple[bool, float | None]:
+                max_search_time = scan_dist / scan_speed
+                self.zaber_lens.start_slewing_guarded(
+                    speed_um_per_s=float(scan_speed),
+                    max_distance_um=float(scan_dist),
+                )
+                t_start = time.monotonic()
+                hits = 0
 
-            # --- start guarded slewing ---
-            self.zaber_lens.start_slewing_guarded(
-                speed_um_per_s=float(speed_um_s),
-                max_distance_um=float(max_search_distance_um),
-            )
+                try:
+                    while True:
+                        if cancel_cb and cancel_cb():
+                            return False, None
 
-            t_start = time.monotonic()
-            hits = 0
+                        if (time.monotonic() - t_start) >= max_search_time:
+                            return False, None
 
-            try:
-                while True:
-                    if cancel_cb and cancel_cb():
-                        log.info(f"[ReflectionFinderNI] Cancelled at {self.zaber_lens.get_position()} um")
-                        self.zaber_lens.move_abs(z0)
-                        return ReflectionFindingResult(found=False, z_um=None)
+                        v = self.daq.read_value(timeout_s=read_timeout_s)
+                        if v > threshold:
+                            hits += 1
+                        else:
+                            hits = 0
 
-                    # time-based bailout
-                    if (time.monotonic() - t_start) >= max_search_time:
-                        log.info(f"[ReflectionFinderNI] Timeout at {self.zaber_lens.get_position()} um")
-                        self.zaber_lens.move_abs(z0)
-                        return ReflectionFindingResult(found=False, z_um=None)
-
-                    # --- detection (short slice so we can keep checking cancel/distance) ---
-
-                    v = self.daq.read_value(timeout_s=0.01)
-                    if v > threshold:
-                        hits += 1
-                    else:
-                        hits = 0
-
-                    if hits >= n_hits:
-                        self.zaber_lens.stop_slewing()
-                        return ReflectionFindingResult(
-                            found=True,
-                            z_um=self.zaber_lens.get_position(),
-                        )
+                        if hits >= n_hits:
+                            # stop as soon as we decide it’s real
+                            self.zaber_lens.stop_slewing()
+                            return True, self.zaber_lens.get_position()
+                finally:
+                    self.zaber_lens.stop_slewing()
 
 
 
-            finally:
-                self.zaber_lens.stop_slewing()
+            # --- pass 1: fast scan to detect vicinity ---
+            found, z_hit = run_scan(speed_um_s, max_search_distance_um)
+            if not found:
+                self.zaber_lens.move_abs(z0)
+                return ReflectionFindingResult(found=False, z_um=None)
+
+            if not refine:
+                return ReflectionFindingResult(found=True, z_um=z_hit)
+
+            # --- pass 2: backoff and rescan slowly for accurate plane ---
+            # Choose a backoff big enough to cover detection + stop latency.
+            # Rule of thumb: 50–200 ms worth of motion, depending on system.
+
+            if backoff_um is None:
+                backoff_um = max(20.0, speed_um_s * 0.1)  # 100 ms of travel, min 20 µm
+
+            z_back = z_hit - backoff_um
+            self.zaber_lens.move_abs(z_back)
+            def flush(seconds: float = 0.3):
+                n = int(self.daq.sample_rate_hz * seconds)
+                _ = self.daq.read_block(n)
+
+            flush(0.3)
+
+            # Slow scan forward a short distance (backoff + margin)
+            refine_dist = backoff_um + 50.0
+            print(f"zhit:{z_hit}")
+            print(f"z_back:{z_back}")
+            print(f"backoff_um:{backoff_um}")
+            time.sleep(1.1)
+            found2, z_refined = run_scan(refine_speed_um_s, refine_dist)
+            if not found2:
+                # fallback: return the coarse hit if refine fails
+                return ReflectionFindingResult(found=True, z_um=z_hit)
+
+            return ReflectionFindingResult(found=True, z_um=z_refined)

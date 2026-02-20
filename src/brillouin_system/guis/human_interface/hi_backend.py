@@ -78,16 +78,17 @@ class HiBackend:
             daq = NIDummy()
 
         else:
-            camera=IxonUltra(
-                index = 0,
-                temperature = "off",
-                fan_mode = "full",
-                x_start = 40, x_end  = 120,
-                y_start= 300, y_end  = 315,
-                vbin= 1, hbin  = 1,
-                verbose = True,
-                advanced_gain_option=False
-            )
+            # camera=IxonUltra(
+            #     index = 0,
+            #     temperature = "off",
+            #     fan_mode = "full",
+            #     x_start = 40, x_end  = 120,
+            #     y_start= 300, y_end  = 315,
+            #     vbin= 1, hbin  = 1,
+            #     verbose = True,
+            #     advanced_gain_option=False
+            # )
+            camera = DummyCamera()
             shutter_manager=ShutterManager('human_interface')
             microwave=Microwave()
             zaber_eye_lens=ZaberEyeLens()
@@ -689,6 +690,7 @@ class HiBackend:
             speed_um_s=self._axial_scan_config.speed_um_s,
             max_search_distance_um=self._axial_scan_config.max_search_distance_um,
             n_bg_samples = self._axial_scan_config.n_bg_samples,
+            n_hits=self._axial_scan_config.n_hits,
             cancel_cb=self.f2b_cancel_callback,
         )
         if result.found:
