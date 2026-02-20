@@ -33,7 +33,7 @@ class AxialScanningConfigDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Axial Scanning Configuration")
-        self.setMinimumSize(380, 360)
+        self.setMinimumSize(380, 390)
 
         self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
@@ -98,6 +98,11 @@ class AxialScanningConfigDialog(QDialog):
         le_refine_speed.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "Refine speed [µm/s]", "refine_speed_um_s", le_refine_speed)
 
+        le_refine_backstep = QLineEdit()
+        le_refine_backstep.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Refine backstep [µm]", "refine_backstep_um", le_refine_backstep)
+
+        # --- backoff options ---
         le_backoff = QLineEdit()
         le_backoff.setValidator(QDoubleValidator(0.0, 1e12, 6))
         le_backoff.setPlaceholderText("leave blank for auto")
@@ -138,6 +143,7 @@ class AxialScanningConfigDialog(QDialog):
 
         self.checks["refine"].setChecked(bool(cfg.refine))
         self.inputs["refine_speed_um_s"].setText(str(cfg.refine_speed_um_s))
+        self.inputs["refine_backstep_um"].setText(str(cfg.refine_backstep_um))
 
         # blank means None/auto
         self.inputs["backoff_um"].setText("" if cfg.backoff_um is None else str(cfg.backoff_um))
@@ -158,6 +164,8 @@ class AxialScanningConfigDialog(QDialog):
 
             refine=bool(self.checks["refine"].isChecked()),
             refine_speed_um_s=float(_req("refine_speed_um_s")),
+            refine_backstep_um=float(_req("refine_backstep_um")),
+
             backoff_um=backoff_val,
         )
 

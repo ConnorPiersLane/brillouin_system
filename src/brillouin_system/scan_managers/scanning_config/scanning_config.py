@@ -22,9 +22,12 @@ class ScanningConfig:
     n_hits: int = 1
 
     # refinement behavior
-    refine: bool = True
+    refine: bool = False
     refine_speed_um_s: float = 100.0
-    backoff_um: Optional[float] = None  # if None, computed from speed
+    refine_backstep_um: float = 200.0
+
+    # backoff behavior
+    backoff_um: Optional[float] = 200.0  # set None if you want "auto"
 
 
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
@@ -39,7 +42,8 @@ def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
     """
     Convert dataclass to a TOML-ready dict.
 
-    - If backoff_um is None, omit it from TOML (keeps TOML clean/valid).
+    NOTE: tomli_w can write floats/ints/bools, but not Python None.
+    If backoff_um is None, we omit it from TOML.
     """
     d: dict[str, Any] = {
         "n_sigma": cfg.n_sigma,
@@ -48,7 +52,8 @@ def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
         "n_bg_samples": cfg.n_bg_samples,
         "n_hits": cfg.n_hits,
         "refine": bool(cfg.refine),
-        "refine_speed_um_s": cfg.refine_speed_um_s,
+        "refine_speed_um_s": float(cfg.refine_speed_um_s),
+        "refine_backstep_um": float(cfg.refine_backstep_um),
     }
     if cfg.backoff_um is not None:
         d["backoff_um"] = float(cfg.backoff_um)

@@ -6,4 +6,5 @@ n_bg_samples = 10
 n_hits = 1
 refine = false
 refine_speed_um_s = 100.0
+refine_backstep_um = 200.0
 backoff_um = 200.0
