@@ -114,6 +114,28 @@ class NI6008:
 
         return [float(x) for x in data]
 
+    def flush(self, *, seconds: float = 0.0, max_reads: int = 50) -> int:
+        """
+        Drain unread samples from the DAQmx buffer.
+
+        seconds > 0: also discard ~seconds worth of *new* samples after the buffer is empty,
+        so the next read reflects the current moment.
+        Returns: total samples discarded.
+        """
+        if self._task is None:
+            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
+
+        total = 0
+
+        # 1) Drain what's already buffered (available immediately)
+        for _ in range(max_reads):
+            avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
+            if avail <= 0:
+                break
+            data = self._task.read(number_of_samples_per_channel=avail, timeout=0.0)
+            total += len(data)
+
+        return total
 
 
 if __name__ == "__main__":
@@ -124,3 +146,4 @@ if __name__ == "__main__":
         print(f"Read {len(vals)} samples:")
         print(vals)
         print(ni.read_value())
+        print(ni.flush())
