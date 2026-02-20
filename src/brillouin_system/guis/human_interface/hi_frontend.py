@@ -10,7 +10,6 @@ from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrac
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config_gui import \
     AxialScanningConfigDialog
-from brillouin_system.logging_utils import logging_setup
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt
