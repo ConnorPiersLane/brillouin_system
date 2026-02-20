@@ -692,6 +692,9 @@ class HiBackend:
             n_bg_samples = self._axial_scan_config.n_bg_samples,
             n_hits=self._axial_scan_config.n_hits,
             cancel_cb=self.f2b_cancel_callback,
+            refine=self._axial_scan_config.refine,
+            refine_speed_um_s=self._axial_scan_config.refine_speed_um_s,
+            backoff_um=self._axial_scan_config.backoff_um,
         )
         if result.found:
             self.move_and_update_gui_zaber_eye_lens_abs(result.z_um)

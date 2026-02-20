@@ -82,6 +82,8 @@ class NIDummy:
             time.sleep(dt)
         return out
 
+    def flush(self) -> int:
+        return 0
 
 if __name__ == "__main__":
     ni = NIDummy(sample_rate_hz=1000, noise_std=0.02, step_probability_per_sample=1e-3, seed=0)

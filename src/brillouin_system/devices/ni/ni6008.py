@@ -114,7 +114,7 @@ class NI6008:
 
         return [float(x) for x in data]
 
-    def flush(self, *, seconds: float = 0.0, max_reads: int = 50) -> int:
+    def flush(self, *, max_reads: int = 50) -> int:
         """
         Drain unread samples from the DAQmx buffer.
 
