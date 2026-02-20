@@ -11,7 +11,7 @@ from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestAxialContScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
 log = get_logger(__name__)
@@ -69,9 +69,9 @@ class HiSignaller(QObject):
     eye_tracking_result_ready = pyqtSignal(object)
 
 
-    def __init__(self, manager: HiBackend):
+    def __init__(self, backend: HiBackend):
         super().__init__()
-        self.backend = manager
+        self.backend = backend
         self._running = False
         self._thread_active = False
         self._camera_shutter_open = True
@@ -466,30 +466,6 @@ class HiSignaller(QObject):
             self.update_system_state(new_state=old_state)
             self.restart_live_view_when_ready()
 
-    @pyqtSlot(object)
-    def take_axial_cont_scan(self, request_axial_scan: RequestAxialContScan):
-        """
-        Generates a series of ZaberPositions using the given axis, n, and step,
-        then takes measurements and updates the GUI accordingly.
-        """
-        if self.backend.calibration_poly_fit_params is None:
-            self.send_message_to_user('Warning', "No Calibration available. Run Calibration first.")
-            return
-        if self.backend.is_reference_mode:
-            self.send_message_to_user('Warning', "System in Calibration Mode. Switch to Measurement mode first")
-            return
-
-        old_state = self.system_state
-        self.stop_live_view()
-        self.update_system_state(new_state=SystemState.BUSY)
-        QCoreApplication.processEvents()
-
-        try:
-            self.backend.take_axial_cont_scan(request_axial_scan)
-            self.update_stored_axial_scans()
-        finally:
-            self.update_system_state(new_state=old_state)
-            self.restart_live_view_when_ready()
 
     @pyqtSlot(int)
     def handle_request_axial_scan_data(self, index: int):

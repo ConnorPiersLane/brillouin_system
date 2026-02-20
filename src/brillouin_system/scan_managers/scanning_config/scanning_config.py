@@ -13,19 +13,13 @@ from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 @dataclass
 class ScanningConfig:
     # ----------------------------
-    # Find Reflection Settings
+    # Axial Scanning
     # ----------------------------
-    exposure: float = 0.05
-    gain: int = 1
-    n_sigma: int = 6
-    speed_um_s: float = 1000
-    max_search_distance_um: float = 2000
-    n_bg_images: int = 10
-
-    # ----------------------------
-    # Scan Settings
-    # ----------------------------
-    max_scan_distance_um: int = 2000
+    n_sigma: int = 10
+    speed_um_s: float = 5000.0
+    max_search_distance_um: float = 5000.0
+    n_bg_samples: int = 10
+    n_hits: int = 1
 
 
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"

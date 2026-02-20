@@ -6,19 +6,19 @@ from typing import Callable
 
 import numpy as np
 
-from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure
+
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import andor_frame_config, AndorConfig
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
+from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
-from brillouin_system.devices.ni.ni6008 import NI6008
+
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
 from brillouin_system.scan_managers.ni_reflection_finder import ReflectionFinderNI
-from brillouin_system.scan_managers.reflection_finder import ReflectionFinder
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
 from brillouin_system.logging_utils.logging_setup import get_logger
@@ -26,7 +26,7 @@ from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, MeasurementPoint, \
-    AxialScan, RequestAxialContScan
+    AxialScan
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
@@ -58,12 +58,7 @@ class HiBackend:
 
 
     def __init__(self,
-                 camera: BaseCamera | DummyCamera,
-                 shutter_manager: ShutterManager | ShutterManagerDummy,
-                 microwave: Microwave | MicrowaveDummy,
-                 zaber_eye_lens: None | ZaberEyeLens | ZaberEyeLensDummy = None,
-                 zaber_hi: None | ZaberHumanInterface | ZaberHumanInterfaceDummy = None,
-                 is_sample_illumination_continuous: bool = False,
+                 use_dummy: bool = True
                  ):
 
 
@@ -71,7 +66,36 @@ class HiBackend:
         self.spectrum_fitter = SpectrumFitter()
 
         # Devices
-        self.andor_camera: BaseCamera | DummyCamera = camera
+        if use_dummy:
+            camera=DummyCamera()
+            shutter_manager=ShutterManagerDummy('human_interface')
+            microwave=MicrowaveDummy()
+            zaber_eye_lens=ZaberEyeLensDummy()
+            zaber_hi=ZaberHumanInterfaceDummy()
+            # zaber_eye_lens=ZaberEyeLens()
+            # zaber_hi=ZaberHumanInterface()
+            from brillouin_system.devices.ni.ni_dummy import NIDummy
+            daq = NIDummy()
+
+        else:
+            camera=IxonUltra(
+                index = 0,
+                temperature = "off",
+                fan_mode = "full",
+                x_start = 40, x_end  = 120,
+                y_start= 300, y_end  = 315,
+                vbin= 1, hbin  = 1,
+                verbose = True,
+                advanced_gain_option=False
+            )
+            shutter_manager=ShutterManager('human_interface')
+            microwave=Microwave()
+            zaber_eye_lens=ZaberEyeLens()
+            zaber_hi=ZaberHumanInterface()
+            from brillouin_system.devices.ni.ni6008 import NI6008
+            daq = NI6008()
+
+        self.andor_camera: BaseCamera | DummyCamera | IxonUltra = camera
         self._andor_config: AndorConfig = andor_frame_config.get()
         self.update_andor_config_settings(andor_config=self._andor_config)
 
@@ -87,10 +111,10 @@ class HiBackend:
         self.zaber_hi = zaber_hi
 
         # DAQ
-        self.daq = NI6008()
+        self.daq = daq
 
         # State
-        self.is_sample_illumination_continuous: bool = is_sample_illumination_continuous
+        self.is_sample_illumination_continuous: bool = True
         self.is_reference_mode: bool = False
         self.do_background_subtraction: bool = False
         self.do_live_fitting = False
@@ -502,48 +526,6 @@ class HiBackend:
         self.axial_scan_dict[axial_scan.i] = axial_scan
 
 
-
-    def take_axial_cont_scan(self, request_axial_scan: RequestAxialContScan):
-
-        if self.is_reference_mode:
-            log.warning('In Reference Mode: Change to Sample Mode for continuous scanning')
-            return
-
-
-        lens_x0 = self.zaber_eye_lens.get_position()
-        speed = request_axial_scan.speed_um_s
-        max_distance = self._axial_scan_config.max_scan_distance_um
-        max_time = max_distance / speed
-
-        log.info(f"[Axial Scan] Starting scan...")
-        self.zaber_eye_lens.start_slewing_guarded(speed_um_per_s=speed,
-                                                  max_distance_um=max_distance)
-        frame, ts = self.get_andor_frame(timeout=max_time)
-        self.zaber_eye_lens.stop_slewing()
-        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
-
-
-        self.display_spectrum(frame=frame)
-
-        mp =MeasurementPoint(
-                        frame_andor=frame,
-                        lens_zaber_position=lens_x0,
-                        time_stamp=ts)
-
-        self._i_axial_scans += 1
-
-        axial_scan = AxialScan(
-            i=self._i_axial_scans,
-            id=request_axial_scan.id,
-            measurements=[mp],
-            system_state=self.get_current_system_state(),
-            calibration_params=self.calibration_poly_fit_params,
-            eye_tracker_results=request_axial_scan.eye_tracker_results,
-            scan_speed_um_s= speed
-        )
-        self.axial_scan_dict[axial_scan.i] = axial_scan
-
-
     def display_spectrum(self, frame):
         if self.do_background_subtraction:
             frame_with_sub_bg = self.subtract_background(frame)
@@ -706,7 +688,7 @@ class HiBackend:
             n_sigma=self._axial_scan_config.n_sigma,
             speed_um_s=self._axial_scan_config.speed_um_s,
             max_search_distance_um=self._axial_scan_config.max_search_distance_um,
-            n_bg_samples = self._axial_scan_config.n_bg_images,
+            n_bg_samples = self._axial_scan_config.n_bg_samples,
             cancel_cb=self.f2b_cancel_callback,
         )
         if result.found:

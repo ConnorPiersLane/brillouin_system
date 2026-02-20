@@ -42,7 +42,6 @@ class ReflectionFinderNI:
     ) -> ReflectionFindingResult:
 
         z0 = self.zaber_lens.get_position()
-        z_hit = z0
 
         with self.daq.streaming():
             # --- background (for choosing threshold) ---
@@ -82,9 +81,6 @@ class ReflectionFinderNI:
                     v = self.daq.read_value(timeout_s=0.01)
                     if v > threshold:
                         hits += 1
-                        if hits == 1:
-                            self.zaber_lens.stop_slewing()
-                            z_hit = self.zaber_lens.get_position()
                     else:
                         hits = 0
 
@@ -92,7 +88,7 @@ class ReflectionFinderNI:
                         self.zaber_lens.stop_slewing()
                         return ReflectionFindingResult(
                             found=True,
-                            z_um=z_hit,
+                            z_um=self.zaber_lens.get_position(),
                         )
 
 

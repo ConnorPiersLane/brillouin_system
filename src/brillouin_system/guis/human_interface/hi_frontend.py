@@ -47,23 +47,13 @@ from brillouin_system.calibration.config.calibration_config_gui import Calibrati
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
-from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
-from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
-    ZaberHumanInterfaceDummy
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
-from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
-# from brillouin_system.devices.cameras.mako.allied_vision_camera import AlliedVisionCamera
-from brillouin_system.devices.microwave_device import MicrowaveDummy, Microwave
-from brillouin_system.devices.shutter_device import ShutterManagerDummy, ShutterManager
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan, \
-    RequestAxialContScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan
 from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
     CalibrationImageDialog, CalibrationData, CalibrationCalculator
-
-from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy, ZaberEyeLens
 
 ###
 # Add other guis
@@ -76,7 +66,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 #todo: improve print statements when looking for plane
 
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = False
 use_eye_tracker_dummy = False
@@ -92,41 +82,6 @@ class NotifyingViewBox(pg.ViewBox):
         if ev.isFinish():
             self.userScaled.emit()
 
-
-def create_backend(use_dummy: bool) -> HiBackend:
-    # Testing
-    if use_dummy:
-        backend = HiBackend(
-            camera=DummyCamera(),
-            shutter_manager=ShutterManagerDummy('human_interface'),
-            microwave=MicrowaveDummy(),
-            zaber_eye_lens=ZaberEyeLensDummy(),
-            zaber_hi=ZaberHumanInterfaceDummy(),
-            # zaber_eye_lens=ZaberEyeLens(),
-            # zaber_hi=ZaberHumanInterface(),
-            is_sample_illumination_continuous=True
-        )
-
-    else:
-        backend = HiBackend(
-            # camera=IxonUltra(
-            #     index = 0,
-            #     temperature = "off",
-            #     fan_mode = "full",
-            #     x_start = 40, x_end  = 120,
-            #     y_start= 300, y_end  = 315,
-            #     vbin= 1, hbin  = 1,
-            #     verbose = True,
-            #     advanced_gain_option=False
-            # ),
-            camera=DummyCamera(),
-            shutter_manager=ShutterManager('human_interface'),
-            microwave=Microwave(),
-            zaber_eye_lens=ZaberEyeLens(),
-            zaber_hi=ZaberHumanInterface(),
-            is_sample_illumination_continuous=True
-        )
-    return backend
 
 class HiFrontend(QWidget):
 
@@ -150,7 +105,6 @@ class HiFrontend(QWidget):
 
     run_calibration_requested = pyqtSignal()
     take_axial_step_scan_requested = pyqtSignal(object)
-    take_axial_cont_scan_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
@@ -206,7 +160,7 @@ class HiFrontend(QWidget):
 
         self.setWindowTitle("Brillouin Viewer (Live)")
 
-        self.brillouin_signaller = HiSignaller(manager=create_backend(use_backend_dummy))
+        self.brillouin_signaller = HiSignaller(backend=HiBackend(use_backend_dummy))
         self.brillouin_signaller_thread = QThread()
         self.brillouin_signaller.moveToThread(self.brillouin_signaller_thread)
 
@@ -230,7 +184,6 @@ class HiFrontend(QWidget):
 
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
         self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
-        self.take_axial_cont_scan_requested.connect(self.brillouin_signaller.take_axial_cont_scan)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
@@ -343,7 +296,6 @@ class HiFrontend(QWidget):
 
         axial_column = QVBoxLayout()
         axial_column.addWidget(self.create_take_axial_scan_group())
-        axial_column.addWidget(self.create_axial_scan_cont_group())
 
         zaber_movement_and_scan_layout.addLayout(axial_column)
         middle_column_layout.addLayout(zaber_movement_and_scan_layout)
@@ -694,57 +646,6 @@ class HiFrontend(QWidget):
         group.setLayout(layout)
         return group
 
-    def create_axial_scan_cont_group(self):
-        """
-        Continuous axial scan widget.
-
-        Uses Andor exposure time ("Exp. Time (s)") and speed (µm/s) to compute:
-            Scanned Dist (µm) = speed * exposure_time
-
-        User still specifies:
-            - ID
-            - Max Dist (µm)
-        """
-        group = QGroupBox("Axial Scan Cont.")
-        layout = QFormLayout()
-
-        # ID (similar to step scan)
-        self.axial_cont_id_input = QLineEdit()
-        self.axial_cont_id_input.setFixedWidth(80)
-
-        # Speed (µm/s)
-        self.axial_cont_speed_input = QLineEdit("500")
-        self.axial_cont_speed_input.setFixedWidth(80)
-        self.axial_cont_speed_input.textChanged.connect(self.update_axial_cont_distance)
-
-        # Computed scanned distance (read-only)
-        self.axial_cont_scanned_dist_label = QLabel("0.00 µm")
-        self.axial_cont_scanned_dist_label.setFixedWidth(80)
-
-
-        layout.addRow("ID:", self.axial_cont_id_input)
-        layout.addRow("Speed (µm/s):", self.axial_cont_speed_input)
-        layout.addRow("Scanned Dist (µm):", self.axial_cont_scanned_dist_label)
-
-        # Button (no backend wiring yet)
-        self.axial_cont_btn = QPushButton("Scan")
-        self.axial_cont_btn.clicked.connect(lambda: self.take_axial_cont_scan(find_reflection_plane=False))
-
-        self.axial_cont_btn2 = QPushButton("Find -> Scan")  # <-- name/text as you like
-        self.axial_cont_btn2.clicked.connect(lambda: self.take_axial_cont_scan(find_reflection_plane=True))
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.axial_cont_btn)
-        btn_row.addWidget(self.axial_cont_btn2)
-        btn_row.addStretch()
-
-        layout.addRow(btn_row)
-
-        group.setLayout(layout)
-
-        # Initialize the scanned distance from current exposure & speed
-
-        return group
 
     def update_axial_step_distance(self):
         """
@@ -766,28 +667,6 @@ class HiFrontend(QWidget):
             # If parsing fails, show a neutral placeholder
             self.axial_steps_scanned_dist_label.setText("—")
 
-    def update_axial_cont_distance(self):
-        """
-        Compute Scanned Dist (µm) = speed (µm/s) * exposure_time (s, from Andor)
-        and update the label in the Axial Scan Cont. group.
-        """
-        # If the continuous scan widgets aren't created yet, just ignore
-        if not hasattr(self, "axial_cont_scanned_dist_label"):
-            return
-
-        try:
-            # Speed (µm/s) from Axial Scan Cont.
-            speed_str = self.axial_cont_speed_input.text().strip()
-            speed = float(speed_str) if speed_str else 0.0
-
-            # Exposure time (s) from Andor camera group
-            exposure_s = self._andor_exposure_time if self._andor_exposure_time else 0.0
-
-            dist_um = speed * exposure_s
-            self.axial_cont_scanned_dist_label.setText(f"{dist_um:.2f} µm")
-        except Exception:
-            # If parsing fails, show a neutral placeholder
-            self.axial_cont_scanned_dist_label.setText("—")
 
 
     def create_log_group(self):
@@ -1464,7 +1343,6 @@ class HiFrontend(QWidget):
 
     def populate_camera_ui(self, settings: dict):
         self._andor_exposure_time = settings["exposure"]
-        self.update_axial_cont_distance()
         self.exposure_input.setText(str(self._andor_exposure_time))
         self.gain_input.setText(str(settings["gain"]))
 
@@ -1666,27 +1544,6 @@ class HiFrontend(QWidget):
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
-    def take_axial_cont_scan(self, find_reflection_plane: bool = False):
-        try:
-            id_str = self.axial_cont_id_input.text().strip()
-            speed = float(self.axial_cont_speed_input.text())
-
-            # Log info
-            log.info(
-                f"[Brillouin Viewer] Axial Continuous Scan Request | ID: {id_str} with {speed}µm/s")
-
-
-            request = RequestAxialContScan(
-                id=id_str,
-                speed_um_s=speed,
-                find_reflection_plane=find_reflection_plane,
-                eye_tracker_results=self.last_eye_tracker_results,
-            )
-
-            self.take_axial_cont_scan_requested.emit(request)
-
-        except Exception as e:
-            log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
     def clear_measurements(self):
         self._stored_measurements.clear()
@@ -2005,6 +1862,7 @@ class HiFrontend(QWidget):
 
             # Same sign caveat as XY: if moving +Z increases Δc or decreases it depends on your geometry.
             # self.move_zaber_stage_z_requested.emit(-dz_um)
+            dz_um = max(-1000, min(dz_um, 1000))
             self.move_zaber_eye_lens_requested.emit(-dz_um)
 
         except Exception as e:
