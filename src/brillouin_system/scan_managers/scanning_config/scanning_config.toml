@@ -1,10 +1,10 @@
 [axial_scanning]
-n_sigma = 10
+n_sigma = 4
 speed_um_s = 5000.0
-max_search_distance_um = 5000.0
+max_search_distance_um = 2000.0
 n_bg_samples = 10
 n_hits = 1
-refine = false
-refine_speed_um_s = 100.0
+refine = true
+refine_speed_um_s = 500.0
+backoff_um = 30.0
 refine_backstep_um = 200.0
-backoff_um = 200.0

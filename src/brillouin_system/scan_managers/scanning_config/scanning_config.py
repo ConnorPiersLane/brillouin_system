@@ -53,10 +53,9 @@ def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
         "n_hits": cfg.n_hits,
         "refine": bool(cfg.refine),
         "refine_speed_um_s": float(cfg.refine_speed_um_s),
+        "backoff_um": float(cfg.backoff_um),
         "refine_backstep_um": float(cfg.refine_backstep_um),
     }
-    if cfg.backoff_um is not None:
-        d["backoff_um"] = float(cfg.backoff_um)
     return d
 
 

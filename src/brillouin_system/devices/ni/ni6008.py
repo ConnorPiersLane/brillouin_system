@@ -114,7 +114,7 @@ class NI6008:
 
         return [float(x) for x in data]
 
-    def flush(self, *, max_reads: int = 50) -> int:
+    def flush(self, *, seconds: float = 0.0, max_reads: int = 50) -> int:
         """
         Drain unread samples from the DAQmx buffer.
 
@@ -133,6 +133,12 @@ class NI6008:
             if avail <= 0:
                 break
             data = self._task.read(number_of_samples_per_channel=avail, timeout=0.0)
+            total += len(data)
+
+        # 2) Optionally discard some fresh time-slice too
+        if seconds > 0:
+            n = max(1, int(self.sample_rate_hz * float(seconds)))
+            data = self._task.read(number_of_samples_per_channel=n, timeout=max(1.0, seconds + 0.2))
             total += len(data)
 
         return total

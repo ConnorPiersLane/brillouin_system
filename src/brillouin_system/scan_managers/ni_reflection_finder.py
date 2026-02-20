@@ -44,7 +44,7 @@ class ReflectionFinderNI:
             refine: bool = True,
             refine_speed_um_s: float = 100.0,
             refine_backstep_um: float = 100.0,
-            backoff_um = 0,  # if None, computed from speed
+            backoff_um: float = 0,  # if None, computed from speed
 
     ) -> ReflectionFindingResult:
 
@@ -100,19 +100,19 @@ class ReflectionFinderNI:
             # Choose a backoff big enough to cover detection + stop latency.
             # Rule of thumb: 50–200 ms worth of motion, depending on system.
 
-            if backoff_um is None:
-                backoff_um = max(20.0, speed_um_s * 0.1)  # 100 ms of travel, min 20 µm
+            if refine_backstep_um is None:
+                refine_backstep_um = max(20.0, speed_um_s * 0.1)  # 100 ms of travel, min 20 µm
 
             z_back = z_hit - refine_backstep_um
             self.zaber_lens.move_abs(z_back)
-            self.daq.flush()
+
+            def flush(seconds: float = 0.3):
+                n = int(self.daq.sample_rate_hz * seconds)
+                _ = self.daq.read_block(n)
+            flush(0.3)  # throw away old samples
 
             # Slow scan forward a short distance (backoff + margin)
-            refine_dist = backoff_um + 50.0
-            print(f"zhit:{z_hit}")
-            print(f"z_back:{z_back}")
-            print(f"backoff_um:{backoff_um}")
-            time.sleep(1.1)
+            refine_dist = refine_backstep_um + 50.0
             found2, z_refined = run_scan(refine_speed_um_s, refine_dist)
             if not found2:
                 # fallback: return the coarse hit if refine fails

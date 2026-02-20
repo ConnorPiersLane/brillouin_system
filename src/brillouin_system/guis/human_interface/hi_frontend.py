@@ -67,7 +67,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = False
 # Eye Tracking
-include_eye_tracking = False
+include_eye_tracking = True
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -1861,7 +1861,7 @@ class HiFrontend(QWidget):
 
             # Same sign caveat as XY: if moving +Z increases Δc or decreases it depends on your geometry.
             # self.move_zaber_stage_z_requested.emit(-dz_um)
-            dz_um = max(-1000, min(dz_um, 1000))
+            dz_um = max(-1000, int(min(dz_um, 1000)))
             self.move_zaber_eye_lens_requested.emit(-dz_um)
 
         except Exception as e:
