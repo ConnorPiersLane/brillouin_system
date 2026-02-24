@@ -75,7 +75,7 @@ class NI6008:
             task.timing.cfg_samp_clk_timing(
                 rate=self.sample_rate_hz,
                 sample_mode=AcquisitionType.CONTINUOUS,
-                samps_per_chan=10,
+                samps_per_chan=1000,
             )
 
             task.start()
@@ -98,6 +98,27 @@ class NI6008:
             raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
         v = self._task.read(number_of_samples_per_channel=1, timeout=float(timeout_s))
         return v[0]
+
+    def read_latest(self, *, timeout_s: float = 0.05, max_chunk: int = 200) -> float:
+        """
+        Return the most recent sample available, discarding older buffered samples.
+        - If there is backlog, read up to max_chunk and return the last one.
+        - If no backlog, block for 1 sample (up to timeout_s).
+        """
+        if self._task is None:
+            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
+
+        avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
+
+        if avail > 0:
+            n = min(avail, int(max_chunk))
+            data = self._task.read(number_of_samples_per_channel=n, timeout=0.0)
+            return float(data[-1])
+
+        # Nothing queued; wait briefly for a fresh sample
+        data = self._task.read(number_of_samples_per_channel=1, timeout=float(timeout_s))
+        return float(data[0])
+
 
     def read_block(self, n_samples: int, *, timeout_s: Optional[float] = None) -> list[float]:
         """Read N samples as a list[float]."""

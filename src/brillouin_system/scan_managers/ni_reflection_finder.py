@@ -72,7 +72,7 @@ class ReflectionFinderNI:
 
                         if (time.monotonic() - t_start) >= max_search_time:
                             return False, None
-                        v = self.daq.read_value(timeout_s=0.01)
+                        v = self.daq.read_latest(timeout_s=0.01)
                         if v > threshold:
                             hits += 1
                         else:
@@ -106,10 +106,7 @@ class ReflectionFinderNI:
             z_back = z_hit - refine_backstep_um
             self.zaber_lens.move_abs(z_back)
 
-            def flush(seconds: float = 0.3):
-                n = int(self.daq.sample_rate_hz * seconds)
-                _ = self.daq.read_block(n)
-            flush(0.3)  # throw away old samples
+            self.daq.flush(seconds=0.05)
 
             # Slow scan forward a short distance (backoff + margin)
             refine_dist = refine_backstep_um + 50.0
