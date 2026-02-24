@@ -475,10 +475,21 @@ class HiSignaller(QObject):
         else:
             log.warning(f"Requested scan index {index} not found.")
 
-
     @pyqtSlot()
     def delegate_find_reflection_plane(self):
-        self.backend.find_reflection_plane()
+        old_state = self.system_state
+        was_running = self._running  # remember if live view was on
+
+        self.stop_live_view()
+        self.update_system_state(new_state=SystemState.BUSY)
+        QCoreApplication.processEvents()
+
+        try:
+            self.backend.find_reflection_plane()
+        finally:
+            self.update_system_state(new_state=old_state)
+            if was_running:
+                self.restart_live_view_when_ready()
 
 
     @pyqtSlot()

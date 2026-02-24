@@ -60,14 +60,10 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
-#todo: liimit laser postion path
-#todo: make z position via lens
-#todo: improve print statements when looking for plane
 
-
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
+include_eye_tracking = False
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -563,9 +559,11 @@ class HiFrontend(QWidget):
         btn_row2 = QHBoxLayout()
         self.btn_restart_eye = QPushButton("ReStart")
         self.btn_close_eye = QPushButton("Shutdown")
+        self.btn_print_pos = QPushButton("Print Pos.")
 
         btn_row2.addWidget(self.btn_restart_eye)
         btn_row2.addWidget(self.btn_close_eye)
+        btn_row2.addWidget(self.btn_print_pos)
         btn_row2.addStretch()
 
         # put the row into a real layout and set it on the group
@@ -580,6 +578,7 @@ class HiFrontend(QWidget):
         self.btn_eye_tracking.clicked.connect(self.open_eye_tracker_config_dialog)
         self.btn_restart_eye.clicked.connect(self.on_restart_eye_clicked)
         self.btn_close_eye.clicked.connect(self.shutdown_eye_tracker)
+        self.btn_print_pos.clicked.connect(self.on_print_pos_clicked)
 
         return group
 
@@ -1725,6 +1724,31 @@ class HiFrontend(QWidget):
             f"Δc = {tdc}"
         )
 
+    def on_print_pos_clicked(self):
+        res = getattr(self, "last_eye_tracker_results", None)
+        if res is None:
+            log.info("Print Eye Position requested: No eye-tracker results")
+            return
+
+        laser_position = getattr(res, "laser_position", None)
+        if laser_position is None:
+            log.info("Print Eye Position requested: No Position Available")
+            return
+
+        x = float(laser_position[0])
+        y = float(laser_position[1])
+        z = float(laser_position[2])
+        dc = getattr(res, "delta_laser_corner", None)
+
+        def fmt(v):
+            return f"{v:6.3f}" if v is not None else " " * 6
+
+        log.info(
+            "Eye Position requested: "
+            f"X={fmt(x)}  Y={fmt(y)}  Z={fmt(z)}  ΔCorner={fmt(dc)}"
+        )
+
+
 
     @QtCore.pyqtSlot(object, object, dict)
     def on_eye_frames_ready(self, left, right, meta):
@@ -1793,7 +1817,6 @@ class HiFrontend(QWidget):
         self.cornea_band.setRegion((dc_mm, dc_mm + self.cornea_thickness_mm))
         self.cornea_band.setVisible(True)
 
-
     def on_move_xy_polar_clicked(self):
         """
         Move stage so the laser ends up at (R, phi) in laser coordinates.
@@ -1821,10 +1844,17 @@ class HiFrontend(QWidget):
             dx_um = dx_laser * 1000.0
             dy_um = dy_laser * 1000.0
 
-            log.info(
-                "[Zaber XY Polar] laser=(%.3f, %.3f) -> target=(%.3f, %.3f) mm | Δ=(%.3f, %.3f) mm",
-                x_laser, y_laser, x_target, y_target, dx_laser, dy_laser
-            )
+            # Limit move to max 3.5 mm
+            max_move_um = 3500.0
+            move_mag_um = float(np.hypot(dx_um, dy_um))
+            if move_mag_um > max_move_um:
+                scale = max_move_um / move_mag_um
+                dx_um *= scale
+                dy_um *= scale
+                log.warning(
+                    f"[Zaber XY Polar] Requested move {move_mag_um / 1000:.3f} mm exceeds "
+                    f"limit 3.5 mm. Clamping to 3.5 mm (scale={scale:.3f})."
+                )
 
             # SIGN NOTE:
             # If moving the stage +X makes the laser move -X,
@@ -1837,13 +1867,13 @@ class HiFrontend(QWidget):
 
     def on_move_z_by_dc_clicked(self):
         """
-        Move Z so that Δc reaches the user-specified value (in mm).
-        Uses current Δc from eye tracking (delta_laser_corner, assumed µm).
+        Move eye-lens Z so that Δc reaches the user-specified value (mm).
+        Assumes res.delta_laser_corner is in mm.
         """
         try:
             res = self._wait_for_eye_result(timeout_s=0.8, max_age_s=0.3)
             if res is None:
-                log.warning("[Zaber Z Δc] No recent eye-tracker result (or laser_position None).")
+                log.warning("[Zaber Z Δc] No recent eye-tracker result.")
                 return
 
             dc_current_mm = res.delta_laser_corner
@@ -1852,16 +1882,19 @@ class HiFrontend(QWidget):
                 return
 
             dc_target_mm = float(self.dc_input.text())
-
-            dz_mm = dc_target_mm - dc_current_mm
+            dz_mm = dc_target_mm - float(dc_current_mm)
             dz_um = dz_mm * 1000.0
 
-            log.info("[Zaber Z Δc] dc_current=%.3fmm target=%.3fmm -> dz=%.3fmm",
-                     dc_current_mm, dc_target_mm, dz_mm)
+            # Limit movement (pick your limit)
+            max_move_um = 2000  # 2 mm
+            dz_um = float(np.clip(dz_um, -max_move_um, max_move_um))
 
-            # Same sign caveat as XY: if moving +Z increases Δc or decreases it depends on your geometry.
-            # self.move_zaber_stage_z_requested.emit(-dz_um)
-            dz_um = max(-1000, int(min(dz_um, 1000)))
+            log.info(
+                "[Zaber Z Δc] dc_current=%.3f mm target=%.3f mm -> dz=%.3f mm (clamped to %.3f mm)",
+                dc_current_mm, dc_target_mm, dz_um / 1000.0, max_move_um / 1000.0,
+            )
+
+            # Sign may need flipping depending on geometry
             self.move_zaber_eye_lens_requested.emit(-dz_um)
 
         except Exception as e:

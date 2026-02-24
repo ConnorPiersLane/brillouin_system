@@ -684,6 +684,9 @@ class HiBackend:
             return False
 
     def find_reflection_plane(self):
+        if self.is_reference_mode:
+            log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
+
         reflection_finder = ReflectionFinderNI(daq=self.daq, zaber_axis=self.zaber_eye_lens)
         z0 = self.zaber_eye_lens.get_position()
         result = reflection_finder.find_reflection_plane(

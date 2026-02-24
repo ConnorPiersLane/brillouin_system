@@ -26,6 +26,7 @@ class AxialScanViewer(QWidget):
         super().__init__()
         self.axial_scan = axial_scan
         self.calc = CalibrationCalculator(self.axial_scan.calibration_params)
+        self.analyzer = SpectrumAnalyzer(self.calc)
         self.setWindowTitle(f"Axial Scan Viewer - ID: {axial_scan.id}")
 
         # Analysis pipeline
@@ -104,6 +105,7 @@ class AxialScanViewer(QWidget):
             f"Index: {self.current_index + 1} / {len(self.axial_scan.measurements)} | "
             f"Z pos: {mp.lens_zaber_position:.2f} µm"
         )
+        self.print_theoretical_precision()
         if self.axial_scan.system_state.is_do_bg_subtraction_active:
             frame = mp.frame_andor - self.axial_scan.system_state.bg_image.median_image
         else:
@@ -137,29 +139,23 @@ class AxialScanViewer(QWidget):
 
     def plot_axial_scan(self):
         self.ax_axial.cla()
-        positions = [
-            m.lens_zaber_position - self.axial_scan.measurements[0].lens_zaber_position
-            for m in self.axial_scan.measurements
-        ]
-        self.ax_axial.plot(range(len(self.freq_shifts)), self.freq_shifts, 'bo-', label="Frequency Shift")
 
+        # Plot frequency shift vs index
+        x = range(len(self.freq_shifts))
+        self.ax_axial.plot(x, self.freq_shifts, 'bo-', label="Frequency Shift")
+
+        # Highlight current point
         y_val = self.freq_shifts[self.current_index]
         if y_val is not None and np.isfinite(y_val):
             self.ax_axial.plot(self.current_index, y_val, 'ro', markersize=10, label="Current")
             self.ax_axial.set_title(f"Freq (GHz): {y_val:.3f}")
 
-        self.ax_axial.set_xticks(range(len(positions)))
-        self.ax_axial.set_xticklabels([f"{i}\n{pos:.1f}" for i, pos in enumerate(positions)], rotation=0)
-        self.ax_axial.set_xlabel("Index / Zaber Position (µm)")
+        # Set x-axis ticks (index only, downsampled)
+        step = max(1, len(self.freq_shifts) // 20)
+        self.ax_axial.set_xticks(range(0, len(self.freq_shifts), step))
+
+        self.ax_axial.set_xlabel("Index")
         self.ax_axial.set_ylabel("Frequency Shift (GHz)")
-
-
-        step = max(1, len(positions) // 20)
-        self.ax_axial.set_xticks(range(0, len(positions), step))
-        self.ax_axial.set_xticklabels(
-            [f"{i}\n{pos:.1f}" for i, pos in enumerate(positions)][::step],
-            rotation=0, ha="right"
-        )
 
         self.ax_axial.legend()
         self.ax_axial.grid(True)
@@ -183,7 +179,7 @@ class AxialScanViewer(QWidget):
     def on_analyze_snr(self):
         """Plot histogram of frequency shifts with Gaussian fit."""
         try:
-            self.print_statistics()
+            self.print_theoretical_precision()
 
             freq_shifts = np.array([fs for fs in self.freq_shifts if fs is not None], dtype=float)
             freq_shifts = freq_shifts[~np.isnan(freq_shifts)]
@@ -228,10 +224,10 @@ class AxialScanViewer(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to analyze SNR:\n{e}")
 
     # ---------------- Printing ----------------
-
-    def print_statistics(self):
+    def print_calibration_models(self):
         self.calc.print_all_models()
-        analyzer = SpectrumAnalyzer(self.calc)
+
+    def print_theoretical_precision(self):
         fit = self.analyzed_data.fitted_scan.fitted_spectras[self.current_index]
         photons = self.analyzed_data.fitted_scan.fitted_photon_counts[self.current_index]
 
@@ -240,7 +236,7 @@ class AxialScanViewer(QWidget):
         else:
             bg_frame_std = self.axial_scan.system_state.bg_image.std_image
 
-        tpse = analyzer.theoretical_precision(
+        tpse = self.analyzer.theoretical_precision(
             fs=fit,
             photons=photons,
             bg_frame_std=bg_frame_std,
@@ -248,9 +244,10 @@ class AxialScanViewer(QWidget):
             emccd_gain=self.axial_scan.system_state.andor_camera_info.gain
         )
         if tpse is not None:
-            self.print_theoretical_precision(tpse)
+            self.print_tpse(tpse)
 
-        ms = analyzer.measured_precision(self.analyzed_data.freq_shifts)
+    def print_statistics(self):
+        ms = self.analyzer.measured_precision(self.analyzed_data.freq_shifts)
         if ms is not None:
             self.print_measured_precision(ms)
 
@@ -288,9 +285,9 @@ class AxialScanViewer(QWidget):
 
     # --- New helpers ---
     @staticmethod
-    def print_theoretical_precision(tpse: "TheoreticalPeakStdError"):
+    def print_tpse(tpse: "TheoreticalPeakStdError"):
         fmt = AxialScanViewer._fmt
-        print("==== Theoretical Peak Std Error ====")
+        print("==== Theoretical Peak Std Error (MHz) ====")
         print(f"Left Peak: photons={fmt(tpse.left_peak_photons)}, "
               f"pixelation={fmt(tpse.left_peak_pixelation)}, "
               f"bg={fmt(tpse.left_peak_bg)}, "
@@ -299,6 +296,7 @@ class AxialScanViewer(QWidget):
               f"pixelation={fmt(tpse.right_peak_pixelation)}, "
               f"bg={fmt(tpse.right_peak_bg)}, "
               f"total={fmt(tpse.right_peak_total)}")
+        print(f"Distance: {fmt(tpse.distance_total)}")
         print("===================================")
 
     @staticmethod

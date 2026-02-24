@@ -109,7 +109,7 @@ class ReflectionFinderNI:
             self.daq.flush(seconds=0.05)
 
             # Slow scan forward a short distance (backoff + margin)
-            refine_dist = refine_backstep_um + 50.0
+            refine_dist = refine_backstep_um
             found2, z_refined = run_scan(refine_speed_um_s, refine_dist)
             if not found2:
                 # fallback: return the coarse hit if refine fails
