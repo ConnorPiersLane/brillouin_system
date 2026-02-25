@@ -144,12 +144,10 @@ class NI6008:
         self._task.in_stream.offset = 0
 
         total = 0
-        while True:
-            avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
-            if avail <= 0:
-                break
-            data = self._task.read(number_of_samples_per_channel=avail, timeout=0.0)
-            total += len(data)
+        avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
+        if avail > 0:
+            _ = self._task.read(number_of_samples_per_channel=avail, timeout=0.05)
+            total += avail
         return total
 
 if __name__ == "__main__":

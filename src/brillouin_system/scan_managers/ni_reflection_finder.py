@@ -57,9 +57,8 @@ class ReflectionFinderNI:
             bg_mean = np.mean(xs)
             bg_std = np.std(xs)
             threshold = float(bg_mean + n_sigma * bg_std)
-            print(f"mean:{bg_mean}")
-            print(f"std: {bg_std}")
-            print(f"threshold: {threshold}")
+            dt_sample = 1 / self.daq.sample_rate_hz
+
 
             def run_scan(scan_speed: float, scan_dist: float) -> tuple[bool, float | None]:
                 max_search_time = scan_dist / scan_speed
@@ -79,25 +78,21 @@ class ReflectionFinderNI:
                             return False, None
 
                         avail = self.daq.read_available()
-                        v = max(avail)
+                        idx = np.argmax(avail)
+                        val = avail[idx]
 
-                        if v > threshold:
+                        if val > threshold:
                             hits += 1
-                            print(v)
                             t0 = time.monotonic()
                         else:
                             hits = 0
 
                         if hits >= n_hits:
                             # stop as soon as we decide it’s real
+                            pos0 = self.zaber_lens.get_position()
                             self.zaber_lens.stop_slewing()
-                            t1 = time.monotonic()
-                            pos = self.zaber_lens.get_position()
-                            t2 = time.monotonic()
-                            print(avail)
-                            print(f"t1:{t1 - t0}")
-                            print(f"t2:{t2 - t1}")
-                            return True, self.zaber_lens.get_position()
+                            poshit = pos0 - (len(avail) - idx) * dt_sample * scan_speed
+                            return True, poshit
                 finally:
                     self.zaber_lens.stop_slewing()
 
