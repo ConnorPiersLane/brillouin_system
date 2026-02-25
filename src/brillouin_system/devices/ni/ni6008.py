@@ -116,7 +116,7 @@ class NI6008:
         return [float(x) for x in data]
 
     # ---------- flush ----------
-    def read_available(self) -> list[float]:
+    def read_available_block(self) -> list[float]:
         self._ensure_streaming()
 
         self._task.in_stream.relative_to = ReadRelativeTo.CURRENT_READ_POSITION

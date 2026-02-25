@@ -77,7 +77,7 @@ class ReflectionFinderNI:
                         if (time.monotonic() - t_start) >= max_search_time:
                             return False, None
 
-                        avail = self.daq.read_available()
+                        avail = self.daq.read_available_block()
                         idx = np.argmax(avail)
                         val = avail[idx]
 
@@ -89,9 +89,16 @@ class ReflectionFinderNI:
 
                         if hits >= n_hits:
                             # stop as soon as we decide it’s real
+                            t0 = time.monotonic()
                             pos0 = self.zaber_lens.get_position()
+                            t1 = time.monotonic()
                             self.zaber_lens.stop_slewing()
-                            poshit = pos0 - (len(avail) - idx) * dt_sample * scan_speed
+                            print(val)
+                            print(f"pos0: {pos0}")
+                            dpos = (len(avail) - idx) * dt_sample * scan_speed + (t1-t0) * scan_speed
+                            poshit = pos0 - dpos
+                            print(f"dposhit: {dpos}")
+                            print(f"poshit: {poshit}")
                             return True, poshit
                 finally:
                     self.zaber_lens.stop_slewing()
