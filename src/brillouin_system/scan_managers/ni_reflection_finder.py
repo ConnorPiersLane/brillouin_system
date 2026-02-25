@@ -105,12 +105,11 @@ class ReflectionFinderNI:
             # --- pass 1: fast scan to detect vicinity ---
             found, z_hit = run_scan(speed_um_s, max_search_distance_um)
 
-            def measure_at(z_um: float, n_avg: int = 50, settle_s: float = 0.001) -> float:
+            def measure_at(z_um: float, n_avg: int, settle_s: float) -> float:
                 self.zaber_lens.move_abs(float(z_um))
                 time.sleep(settle_s)
                 self.daq.flush()
-                _ = self.daq.read_block(1) # discard 3 samples
-                xs = self.daq.read_block(int(n_avg))
+                xs = self.daq.read_block(n_avg)
                 return float(np.mean(xs))
 
             def sample_peak_profile(
@@ -118,8 +117,8 @@ class ReflectionFinderNI:
                     *,
                     n_points: int = 10,
                     step_um: float = 15.0,
-                    n_avg: int = 50,
-                    settle_s: float = 0.005,
+                    n_avg: int = 5,
+                    settle_s: float = 0.001,
             ) -> tuple[np.ndarray, np.ndarray]:
                 """
                 Sample DAQ signal at evenly spaced Z positions around z_hit.
