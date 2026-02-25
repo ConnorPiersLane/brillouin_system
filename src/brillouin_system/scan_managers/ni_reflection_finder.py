@@ -5,6 +5,7 @@ import time
 from typing import Optional, Callable
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.logging_utils.logging_setup import get_logger
@@ -93,7 +94,7 @@ class ReflectionFinderNI:
                             pos_now = self.zaber_lens.get_position()
                             t_after = time.monotonic()
                             self.zaber_lens.stop_slewing()
-                            dt = (len(arr) - idx) / self.daq.sample_rate_hz + 0.5 * (t_after - t_before)
+                            dt = (len(arr) - idx) / self.daq.sample_rate_hz + 0.4 * (t_after - t_before)
                             z_hit = pos_now - dt * scan_speed
                             return True, z_hit
                 finally:
@@ -104,18 +105,19 @@ class ReflectionFinderNI:
             # --- pass 1: fast scan to detect vicinity ---
             found, z_hit = run_scan(speed_um_s, max_search_distance_um)
 
-            def measure_at(self, z_um: float, n_avg: int = 50, settle_s: float = 0.005) -> float:
+            def measure_at(z_um: float, n_avg: int = 50, settle_s: float = 0.001) -> float:
                 self.zaber_lens.move_abs(float(z_um))
                 time.sleep(settle_s)
                 self.daq.flush()
+                _ = self.daq.read_block(1) # discard 3 samples
                 xs = self.daq.read_block(int(n_avg))
                 return float(np.mean(xs))
 
             def sample_peak_profile(
                     z_hit: float,
                     *,
-                    n_points: int = 100,
-                    step_um: float = 5.0,
+                    n_points: int = 10,
+                    step_um: float = 15.0,
                     n_avg: int = 50,
                     settle_s: float = 0.005,
             ) -> tuple[np.ndarray, np.ndarray]:
@@ -140,18 +142,23 @@ class ReflectionFinderNI:
                     zs[i] = z
                     vals[i] = v
 
-                # Print nicely
-                print("i\tz_um\tvalue_V")
-                for i, (z, v) in enumerate(zip(zs, vals)):
-                    print(f"{i}\t{z:.2f}\t{v:.6f}")
 
-                # Optional: also print quick summary
-                imax = int(np.argmax(vals))
-                print(f"\nMax: i={imax}, z={zs[imax]:.2f} um, v={vals[imax]:.6f} V")
 
                 return zs, vals
-
+            tstart = time.monotonic()
             zs, vals = sample_peak_profile(z_hit)
+            print(f"time:{time.monotonic()-tstart}")
+            # Print nicely
+            print("i\tz_um\tvalue_V")
+            for i, (z, v) in enumerate(zip(zs, vals)):
+                print(f"{i}\t{z:.2f}\t{v:.6f}")
+
+            # Optional: also print quick summary
+            imax = int(np.argmax(vals))
+            print(f"\nMax: i={imax}, z={zs[imax]:.2f} um, v={vals[imax]:.6f} V")
+
+            zs = [float(xx - zs[int(len(zs)/2)]) for xx in zs]
+            vals = [float(v) for v in vals]
             print(zs)
             print(vals)
 
