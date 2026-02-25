@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import time
 from typing import Optional, Callable
 
+import numpy as np
+
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.logging_utils.logging_setup import get_logger
 
@@ -52,9 +54,12 @@ class ReflectionFinderNI:
 
         with self.daq.streaming():
             xs = self.daq.read_block(int(n_bg_samples))
-            bg_mean = sum(xs) / len(xs)
-            bg_std = (sum((x - bg_mean) ** 2 for x in xs) / len(xs)) ** 0.5
+            bg_mean = np.mean(xs)
+            bg_std = np.std(xs)
             threshold = float(bg_mean + n_sigma * bg_std)
+            print(f"mean:{bg_mean}")
+            print(f"std: {bg_std}")
+            print(f"threshold: {threshold}")
 
             def run_scan(scan_speed: float, scan_dist: float) -> tuple[bool, float | None]:
                 max_search_time = scan_dist / scan_speed
@@ -72,15 +77,26 @@ class ReflectionFinderNI:
 
                         if (time.monotonic() - t_start) >= max_search_time:
                             return False, None
-                        v = self.daq.read_latest(timeout_s=0.01)
+
+                        avail = self.daq.read_available()
+                        v = max(avail)
+
                         if v > threshold:
                             hits += 1
+                            print(v)
+                            t0 = time.monotonic()
                         else:
                             hits = 0
 
                         if hits >= n_hits:
                             # stop as soon as we decide it’s real
                             self.zaber_lens.stop_slewing()
+                            t1 = time.monotonic()
+                            pos = self.zaber_lens.get_position()
+                            t2 = time.monotonic()
+                            print(avail)
+                            print(f"t1:{t1 - t0}")
+                            print(f"t2:{t2 - t1}")
                             return True, self.zaber_lens.get_position()
                 finally:
                     self.zaber_lens.stop_slewing()
@@ -106,7 +122,7 @@ class ReflectionFinderNI:
             z_back = z_hit - refine_backstep_um
             self.zaber_lens.move_abs(z_back)
 
-            self.daq.flush(seconds=0.05)
+            self.daq.flush()
 
             # Slow scan forward a short distance (backoff + margin)
             refine_dist = refine_backstep_um

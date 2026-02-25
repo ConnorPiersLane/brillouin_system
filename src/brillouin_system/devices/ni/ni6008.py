@@ -1,37 +1,26 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import time
-from typing import Optional, Literal, Tuple
+from contextlib import contextmanager
+from typing import Optional
 
 import nidaqmx
-from nidaqmx.constants import AcquisitionType, TerminalConfiguration
-
-
-@dataclass(frozen=True)
-class StepEvent:
-    t: float                 # wall-clock time (time.time()) when detected
-    value: float             # sample value at detection
-    baseline: Optional[float] = None
-    delta: Optional[float] = None
+import numpy as np
+from nidaqmx.constants import (
+    AcquisitionType,
+    TerminalConfiguration,
+    ReadRelativeTo,
+)
+from nidaqmx.stream_readers import AnalogSingleChannelReader
 
 
 class NI6008:
     """
-    Simple NI USB-6008 analog-input reader (no threads).
+    Minimal NI USB-6008 analog input helper.
 
-    Typical PDA10A wiring:
-      - BNC center (+) -> AI0 (AI0+)
-      - BNC shell  (-) -> GND (AIGND)
-      - Use RSE terminal configuration
-
-    Usage:
-        ni = NI6008(device="Dev1", ai_channel="ai0", sample_rate_hz=1000)
-        with ni.streaming():
-            v = ni.read_value()
-            bg_mean, bg_std = ni.get_background_value(n_samples=500)
-            evt = ni.wait_for_step(threshold=0.2, mode="delta", direction="rising")
+    - read_latest() -> most recent acquired sample
+    - read_block(n) -> next n samples (FIFO)
+    - flush()       -> discard buffered samples (so next read starts "now")
     """
 
     def __init__(
@@ -39,29 +28,31 @@ class NI6008:
         device: str = "Dev1",
         ai_channel: str = "ai0",
         *,
-        terminal_config: TerminalConfiguration = TerminalConfiguration.RSE,
+        sample_rate_hz: float = 1000.0,
         min_val: float = -10.0,
         max_val: float = 10.0,
-        sample_rate_hz: float = 1000.0,
+        terminal_config: TerminalConfiguration = TerminalConfiguration.RSE,
     ):
         self.device = device
         self.ai_channel = ai_channel
-        self.terminal_config = terminal_config
+        self.sample_rate_hz = float(sample_rate_hz)
         self.min_val = float(min_val)
         self.max_val = float(max_val)
-        self.sample_rate_hz = float(sample_rate_hz)
+        self.terminal_config = terminal_config
 
         self._task: Optional[nidaqmx.Task] = None
+        self._reader: Optional[AnalogSingleChannelReader] = None
 
     @property
     def physical_channel(self) -> str:
         return f"{self.device}/{self.ai_channel}"
 
+    # ---------- lifecycle ----------
+
     @contextmanager
     def streaming(self):
-        """Create/start a continuous task; close it on exit."""
         if self._task is not None:
-            raise RuntimeError("NI6008 is already streaming")
+            raise RuntimeError("Already streaming")
 
         task = nidaqmx.Task()
         try:
@@ -79,7 +70,10 @@ class NI6008:
             )
 
             task.start()
+
             self._task = task
+            self._reader = AnalogSingleChannelReader(task.in_stream)
+
             yield
         finally:
             try:
@@ -91,86 +85,89 @@ class NI6008:
             except Exception:
                 pass
             self._task = None
+            self._reader = None
 
-    def read_value(self, *, timeout_s: float = 1.0) -> float:
-        """Read one sample (volts). Must be inside `with streaming():`."""
-        if self._task is None:
-            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
-        v = self._task.read(number_of_samples_per_channel=1, timeout=float(timeout_s))
-        return v[0]
+    def _ensure_streaming(self):
+        if self._task is None or self._reader is None:
+            raise RuntimeError("Not streaming")
 
-    def read_latest(self, *, timeout_s: float = 0.05, max_chunk: int = 200) -> float:
-        """
-        Return the most recent sample available, discarding older buffered samples.
-        - If there is backlog, read up to max_chunk and return the last one.
-        - If no backlog, block for 1 sample (up to timeout_s).
-        """
-        if self._task is None:
-            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
+    # ---------- latest ----------
+
+    def read_latest(self, *, timeout_s: float = 0.05) -> float:
+        self._ensure_streaming()
+
+        self._task.in_stream.relative_to = ReadRelativeTo.MOST_RECENT_SAMPLE
+        self._task.in_stream.offset = 0
+
+        return float(self._reader.read_one_sample(timeout=float(timeout_s)))
+
+    # ---------- FIFO block ----------
+
+    def read_block(self, n: int, *, timeout_s: float = 1.0) -> list[float]:
+        self._ensure_streaming()
+
+        self._task.in_stream.relative_to = ReadRelativeTo.CURRENT_READ_POSITION
+        self._task.in_stream.offset = 0
+
+        data = self._task.read(
+            number_of_samples_per_channel=int(n),
+            timeout=float(timeout_s),
+        )
+        return [float(x) for x in data]
+
+    # ---------- flush ----------
+    def read_available(self) -> list[float]:
+        self._ensure_streaming()
+
+        self._task.in_stream.relative_to = ReadRelativeTo.CURRENT_READ_POSITION
+        self._task.in_stream.offset = 0
 
         avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
+        if avail <= 0:
+            return [self.read_latest(timeout_s=0.05)]
 
-        if avail > 0:
-            n = min(avail, int(max_chunk))
-            data = self._task.read(number_of_samples_per_channel=n, timeout=0.0)
-            return float(data[-1])
-
-        # Nothing queued; wait briefly for a fresh sample
-        data = self._task.read(number_of_samples_per_channel=1, timeout=float(timeout_s))
-        return float(data[0])
-
-
-    def read_block(self, n_samples: int, *, timeout_s: Optional[float] = None) -> list[float]:
-        """Read N samples as a list[float]."""
-        if self._task is None:
-            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
-        n = int(n_samples)
-        if n <= 0:
-            return []
-
-        if timeout_s is None:
-            timeout_s = max(1.0, n / self.sample_rate_hz + 0.5)
-
-        data = self._task.read(number_of_samples_per_channel=n, timeout=float(timeout_s))
+        data = self._task.read(
+            number_of_samples_per_channel=avail,
+            timeout=0.0,
+        )
 
         return [float(x) for x in data]
 
-    def flush(self, *, seconds: float = 0.0, max_reads: int = 50) -> int:
+    def flush(self) -> int:
         """
-        Drain unread samples from the DAQmx buffer.
+        Discard all currently buffered samples.
+        After this, the next read_block() starts from 'now'.
+        """
+        self._ensure_streaming()
 
-        seconds > 0: also discard ~seconds worth of *new* samples after the buffer is empty,
-        so the next read reflects the current moment.
-        Returns: total samples discarded.
-        """
-        if self._task is None:
-            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
+        self._task.in_stream.relative_to = ReadRelativeTo.CURRENT_READ_POSITION
+        self._task.in_stream.offset = 0
 
         total = 0
-
-        # 1) Drain what's already buffered (available immediately)
-        for _ in range(max_reads):
+        while True:
             avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
             if avail <= 0:
                 break
             data = self._task.read(number_of_samples_per_channel=avail, timeout=0.0)
             total += len(data)
-
-        # 2) Optionally discard some fresh time-slice too
-        if seconds > 0:
-            n = max(1, int(self.sample_rate_hz * float(seconds)))
-            data = self._task.read(number_of_samples_per_channel=n, timeout=max(1.0, seconds + 0.2))
-            total += len(data)
-
         return total
-
 
 if __name__ == "__main__":
     ni = NI6008(device="Dev1", ai_channel="ai0", sample_rate_hz=1000)
 
     with ni.streaming():
-        vals = ni.read_block(100)
-        print(f"Read {len(vals)} samples:")
-        print(vals)
-        print(ni.read_value())
+        time.sleep(0.2)
+        print(ni.flush())
+        print(np.std(ni.read_block(100)))
+        print(ni.flush())
+        t1 = time.monotonic()
+        r = ni.read_latest()
+        t2 = time.monotonic()
+        print(f"time {t2 - t1}")
+        t1 = time.monotonic()
+        r = ni.read_block(1)
+        t2 = time.monotonic()
+        print(f"time {t2-t1}")
+        print(ni.read_latest())
+        print(ni.flush())
         print(ni.flush())
