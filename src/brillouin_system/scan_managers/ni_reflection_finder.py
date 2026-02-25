@@ -5,7 +5,6 @@ import time
 from typing import Optional, Callable
 
 import numpy as np
-from matplotlib import pyplot as plt
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.logging_utils.logging_setup import get_logger
@@ -94,7 +93,7 @@ class ReflectionFinderNI:
                             pos_now = self.zaber_lens.get_position()
                             t_after = time.monotonic()
                             self.zaber_lens.stop_slewing()
-                            dt = (len(arr) - idx) / self.daq.sample_rate_hz + 0.4 * (t_after - t_before)
+                            dt = (len(arr) - idx) / self.daq.sample_rate_hz + 0.0 * (t_after - t_before)
                             z_hit = pos_now - dt * scan_speed
                             return True, z_hit
                 finally:
@@ -105,20 +104,19 @@ class ReflectionFinderNI:
             # --- pass 1: fast scan to detect vicinity ---
             found, z_hit = run_scan(speed_um_s, max_search_distance_um)
 
-            def measure_at(z_um: float, n_avg: int, settle_s: float) -> float:
+            def measure_at(z_um: float, n_avg: int) -> float:
                 self.zaber_lens.move_abs(float(z_um))
-                time.sleep(settle_s)
                 self.daq.flush()
+                _ = self.daq.read_block(3)
                 xs = self.daq.read_block(n_avg)
                 return float(np.mean(xs))
 
             def sample_peak_profile(
                     z_hit: float,
                     *,
-                    n_points: int = 10,
-                    step_um: float = 15.0,
-                    n_avg: int = 5,
-                    settle_s: float = 0.001,
+                    n_points: int = 11,
+                    step_um: float = 5.0,
+                    n_avg: int = 10,
             ) -> tuple[np.ndarray, np.ndarray]:
                 """
                 Sample DAQ signal at evenly spaced Z positions around z_hit.
@@ -137,7 +135,7 @@ class ReflectionFinderNI:
 
                 for i in range(n_points):
                     z = z_start + i * step_um
-                    v = measure_at(z, n_avg=n_avg, settle_s=settle_s)
+                    v = measure_at(z, n_avg=n_avg)
                     zs[i] = z
                     vals[i] = v
 

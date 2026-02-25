@@ -136,18 +136,22 @@ class NI6008:
     def flush(self) -> int:
         """
         Discard all currently buffered samples.
-        After this, the next read_block() starts from 'now'.
+        Returns number of samples discarded.
         """
         self._ensure_streaming()
 
-        self._task.in_stream.relative_to = ReadRelativeTo.CURRENT_READ_POSITION
-        self._task.in_stream.offset = 0
-
         total = 0
-        avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
-        if avail > 0:
-            _ = self._task.read(number_of_samples_per_channel=avail, timeout=0.05)
+        while True:
+            avail = int(self._task.in_stream.avail_samp_per_chan)
+            if avail <= 0:
+                break
+
+            _ = self._task.read(
+                number_of_samples_per_channel=avail,
+                timeout=0.1
+            )
             total += avail
+
         return total
 
 if __name__ == "__main__":
