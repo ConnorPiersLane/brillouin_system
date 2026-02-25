@@ -124,7 +124,7 @@ class NI6008:
 
         avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
         if avail <= 0:
-            return [self.read_latest(timeout_s=0.05)]
+            return []
 
         data = self._task.read(
             number_of_samples_per_channel=avail,
