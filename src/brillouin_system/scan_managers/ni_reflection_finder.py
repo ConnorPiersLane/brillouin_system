@@ -197,6 +197,10 @@ class ReflectionFinderNI:
 
             zs, vals = self.sample_peak_profile(z_hit, step_um=self._step_um, range_um=self._range_um)
 
+            imax = int(np.argmax(vals))
+            if vals[imax] < threshold:
+                return ReflectionFindingResult(found=False, z_um=None)
+
             z_peak = self.parabola_peak_3pt(zs, vals)
             t2 = time.monotonic()
 
