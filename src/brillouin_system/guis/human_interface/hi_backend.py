@@ -18,7 +18,7 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
-from brillouin_system.scan_managers.ni_reflection_finder import ReflectionFinderNI
+from brillouin_system.scan_managers.ni_reflection_finder import ReflectionFinderNI, ReflectionFindingResult
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
 from brillouin_system.logging_utils.logging_setup import get_logger
@@ -145,7 +145,7 @@ class HiBackend:
         # f2b = frontend to backend
         self.b2f_send_system_state_signal = None
         self.b2f_emit_display_result = None
-        self.f2b_cancel_callback = None
+        self.f2b_cancel_callback: Callable[[], bool] = lambda: False
 
         # Init Zaber position Signals
         # Human Interface
@@ -435,11 +435,12 @@ class HiBackend:
 
 
 
-    def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan):
+    def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan) -> bool:
 
         lens_x0 = self.zaber_eye_lens.get_position()
-        lens_x0_original = lens_x0
         all_results = []
+        reflection_pos_inwards = None
+        reflection_pos_backwards = None
 
         if self.is_reference_mode:
             log.info(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
@@ -470,8 +471,13 @@ class HiBackend:
                   f"ID: {request_axial_scan.id}")
 
             if request_axial_scan.find_reflection_plane:
-                self.find_reflection_plane()
-                lens_x0 = self.zaber_eye_lens.get_position()
+                result: ReflectionFindingResult = self.find_reflection_plane(is_go_forwards=True)
+                if result.found:
+                    reflection_pos_inwards = result.z_um
+                    self.zaber_eye_lens.move_abs(reflection_pos_inwards)
+                else:
+                    self.zaber_eye_lens.move_abs(lens_x0)
+                    return False
 
             try:
                 if not self.is_sample_illumination_continuous:
@@ -495,7 +501,7 @@ class HiBackend:
 
                     log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
                     self.zaber_eye_lens.move_rel(dx)
-                    zaber_pos = round(self.zaber_eye_lens.get_position() - lens_x0)
+                    zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
                     frame, ts = self._get_andor_camera_snap()
@@ -509,12 +515,20 @@ class HiBackend:
                             time_stamp=ts)
                     )
 
+
             finally:
                 if not self.is_sample_illumination_continuous:
                     self.shutter_manager.sample.close()
 
+        if request_axial_scan.find_reflection_plane:
+            result: ReflectionFindingResult = self.find_reflection_plane(is_go_forwards=False)
+            if result.found:
+                reflection_pos_backwards = result.z_um
+            else:
+                reflection_pos_backwards = None
+
         # Move lens back to original position
-        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0_original)
+        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
 
         self._i_axial_scans += 1
 
@@ -525,9 +539,12 @@ class HiBackend:
             system_state=self.get_current_system_state(),
             calibration_params=self.calibration_poly_fit_params,
             eye_tracker_results=request_axial_scan.eye_tracker_results,
-            scan_speed_um_s=None,
+            reflection_plane_estimate_inwards=reflection_pos_inwards,
+            reflection_plane_estimate_outwards=reflection_pos_backwards,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
+
+        return True
 
 
     def display_spectrum(self, frame):
@@ -685,20 +702,35 @@ class HiBackend:
             log.info(f"[Calibration] Exception: {e}")
             return False
 
-    def find_reflection_plane(self):
+    def find_reflection_plane(self, is_go_forwards: bool=True) -> ReflectionFindingResult:
+        """
+
+        Args:
+
+            is_go_forwards: True (forwards) False (backwards)
+
+        Returns:
+
+        """
         if self.is_reference_mode:
             log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
+            return ReflectionFindingResult(found=False, z_um=None)
 
-        reflection_finder = ReflectionFinderNI(daq=self.daq,
-                                               zaber_axis=self.zaber_eye_lens,
-                                               scanning_config=self._axial_scan_config)
-        z0 = self.zaber_eye_lens.get_position()
-        result = reflection_finder.find_reflection_plane()
-        if result.found:
-            self.move_and_update_gui_zaber_eye_lens_abs(result.z_um)
-        else:
-            self.move_and_update_gui_zaber_eye_lens_abs(z0)
+        try:
+            if not self.is_sample_illumination_continuous:
+                self.shutter_manager.sample.open()
 
+            reflection_finder = ReflectionFinderNI(daq=self.daq,
+                                                   zaber_axis=self.zaber_eye_lens,
+                                                   scanning_config=self._axial_scan_config,
+                                                   cancel_cb=self.f2b_cancel_callback)
+
+            result = reflection_finder.find_reflection_plane(is_go_forwards=is_go_forwards)
+            return result
+
+        finally:
+            if not self.is_sample_illumination_continuous:
+                self.shutter_manager.sample.close()
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""

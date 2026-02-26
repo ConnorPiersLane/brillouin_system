@@ -42,6 +42,7 @@ class MeasurementPoint:
 
 
 
+
 @dataclass
 class AxialScan:
     i: int  # internal tracker
@@ -49,8 +50,9 @@ class AxialScan:
     measurements: list[MeasurementPoint]
     system_state: SystemState
     calibration_params: CalibrationPolyfitParameters | None
-    scan_speed_um_s: float | None = None
     eye_tracker_results: EyeTrackerResults | None = None
+    reflection_plane_estimate_inwards: float | None = None
+    reflection_plane_estimate_outwards: float | None = None
 
 # -------------- Scan Fitting --------------
 

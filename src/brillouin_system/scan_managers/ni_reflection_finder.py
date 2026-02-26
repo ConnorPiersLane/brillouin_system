@@ -93,15 +93,18 @@ class ReflectionFinderNI:
 
 
     def run_scan(self, scan_speed: float, scan_dist: float, threshold: float) -> tuple[bool, float | None]:
-        max_search_time = scan_dist / scan_speed
+        max_search_time = abs(scan_dist / scan_speed)
         self.zaber_lens.start_slewing_guarded(
             speed_um_per_s=float(scan_speed),
-            max_distance_um=float(scan_dist),
+            max_distance_um=float(abs(scan_dist)),
         )
+        if scan_speed == 0:
+            raise ValueError("scan_speed must be nonzero")
         t_start = time.monotonic()
         try:
             while True:
                 if self.cancel_cb and self.cancel_cb():
+                    log.info(f"[Reflection Finding] Cancelled during scanning.")
                     return False, None
 
                 if (time.monotonic() - t_start) >= max_search_time:
@@ -116,10 +119,11 @@ class ReflectionFinderNI:
                 cross = np.where(arr > threshold)[0]
 
                 if cross.size > 0:
-                    idx = int(cross[0])  # first threshold crossing in this chunk
+                    i0 = cross[0]
+                    i_peak = i0 + np.argmax(arr[i0:])
                     pos_now = self.zaber_lens.get_position()
                     self.zaber_lens.stop_slewing()
-                    dt = (len(arr) - idx) / self.daq.sample_rate_hz  # + 0.0 * (t_after - t_before)
+                    dt = (len(arr) - i_peak) / self.daq.sample_rate_hz  # + 0.0 * (t_after - t_before)
                     z_hit = pos_now - dt * scan_speed
                     return True, z_hit
         finally:
@@ -138,7 +142,7 @@ class ReflectionFinderNI:
             z_hit: float,
             step_um: float,
             range_um: float,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
         """
         Sample DAQ signal at evenly spaced Z positions around z_hit.
 
@@ -158,6 +162,11 @@ class ReflectionFinderNI:
         vals = np.empty(n_points, dtype=float)
 
         for i in range(n_points):
+
+            if self.cancel_cb and self.cancel_cb():
+                log.info(f"[Reflection Finding] Cancelled during scanning.")
+                return None, None
+
             z = z_start + i * step_um
             v = self.measure_at(z)
             zs[i] = z
@@ -167,10 +176,14 @@ class ReflectionFinderNI:
 
     def find_reflection_plane(
             self,
+            is_go_forwards: bool = True
     ) -> ReflectionFindingResult:
         n_bg_samples = self._n_bg_samples
         n_sigma = self._n_sigma
-        speed_um_s = self._speed_um_s
+        if is_go_forwards:
+            speed_um_s = self._speed_um_s
+        else:
+            speed_um_s = -1*self._speed_um_s
         max_search_distance_um = self._max_search_distance_um
 
 
@@ -190,18 +203,24 @@ class ReflectionFinderNI:
             if not found or z_hit is None:
                 return ReflectionFindingResult(found=False, z_um=None)
 
-            z_hit = float(z_hit - self._backstep_after_search_um)
+            direction = 1.0 if is_go_forwards else -1.0
+            z_hit = float(z_hit - direction * self._backstep_after_search_um)
 
             if not self._do_refine:
                 return ReflectionFindingResult(found=True, z_um=z_hit)
 
             zs, vals = self.sample_peak_profile(z_hit, step_um=self._step_um, range_um=self._range_um)
 
+            # Cancel Callback has been pressed by frontend
+            if zs is None or vals is None:
+                return ReflectionFindingResult(found=False, z_um=None)
+
+
             imax = int(np.argmax(vals))
             if vals[imax] < threshold:
                 return ReflectionFindingResult(found=False, z_um=None)
 
-            z_peak = self.parabola_peak_3pt(zs, vals)
+            z_peak = float(zs[imax])
             t2 = time.monotonic()
 
 
