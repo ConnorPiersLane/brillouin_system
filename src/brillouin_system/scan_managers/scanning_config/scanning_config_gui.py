@@ -33,7 +33,7 @@ class AxialScanningConfigDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Axial Scanning Configuration")
-        self.setMinimumSize(380, 390)
+        self.setMinimumSize(380, 420)
 
         self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
@@ -86,27 +86,24 @@ class AxialScanningConfigDialog(QDialog):
         le_n_bg.setValidator(QIntValidator(0, 1_000_000))
         self._add_row(v, "N BG samples", "n_bg_samples", le_n_bg)
 
-        le_n_hits = QLineEdit()
-        le_n_hits.setValidator(QIntValidator(1, 1_000_000))
-        self._add_row(v, "N hits", "n_hits", le_n_hits)
+        le_backstep = QLineEdit()
+        le_backstep.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Backstep after search [µm]", "backstep_after_search_um", le_backstep)
 
-        # --- refinement options ---
         cb_refine = QCheckBox("Enabled")
-        self._add_check(v, "Refine", "refine", cb_refine)
+        self._add_check(v, "Refine", "do_refine", cb_refine)
 
-        le_refine_speed = QLineEdit()
-        le_refine_speed.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Refine speed [µm/s]", "refine_speed_um_s", le_refine_speed)
+        le_avg = QLineEdit()
+        le_avg.setValidator(QIntValidator(1, 1_000_000))
+        self._add_row(v, "N avg samples", "n_avg_samples", le_avg)
 
-        le_refine_backstep = QLineEdit()
-        le_refine_backstep.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Refine backstep [µm]", "refine_backstep_um", le_refine_backstep)
+        le_step = QLineEdit()
+        le_step.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Refine step [µm]", "step_um", le_step)
 
-        # --- backoff options ---
-        le_backoff = QLineEdit()
-        le_backoff.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        le_backoff.setPlaceholderText("leave blank for auto")
-        self._add_row(v, "Backoff [µm]", "backoff_um", le_backoff)
+        le_range = QLineEdit()
+        le_range.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Refine range [µm]", "range_um", le_range)
 
         g.setLayout(v)
         return g
@@ -135,38 +132,26 @@ class AxialScanningConfigDialog(QDialog):
 
     def load_values(self) -> None:
         cfg: ScanningConfig = self.cfg_holder.get()
-        self.inputs["n_sigma"].setText(str(cfg.n_sigma))
-        self.inputs["speed_um_s"].setText(str(cfg.speed_um_s))
-        self.inputs["max_search_distance_um"].setText(str(cfg.max_search_distance_um))
-        self.inputs["n_bg_samples"].setText(str(cfg.n_bg_samples))
-        self.inputs["n_hits"].setText(str(cfg.n_hits))
 
-        self.checks["refine"].setChecked(bool(cfg.refine))
-        self.inputs["refine_speed_um_s"].setText(str(cfg.refine_speed_um_s))
-        self.inputs["refine_backstep_um"].setText(str(cfg.refine_backstep_um))
+        for k, v in self.inputs.items():
+            v.setText(str(getattr(cfg, k)))
 
-        # blank means None/auto
-        self.inputs["backoff_um"].setText("" if cfg.backoff_um is None else str(cfg.backoff_um))
+        self.checks["do_refine"].setChecked(bool(cfg.do_refine))
 
     def _update_config_from_inputs(self) -> None:
         def _req(key: str) -> str:
             return self.inputs[key].text().strip()
-
-        backoff_txt = _req("backoff_um")
-        backoff_val = None if backoff_txt == "" else float(backoff_txt)
 
         self.cfg_holder.update(
             n_sigma=int(_req("n_sigma")),
             speed_um_s=float(_req("speed_um_s")),
             max_search_distance_um=float(_req("max_search_distance_um")),
             n_bg_samples=int(_req("n_bg_samples")),
-            n_hits=int(_req("n_hits")),
-
-            refine=bool(self.checks["refine"].isChecked()),
-            refine_speed_um_s=float(_req("refine_speed_um_s")),
-            refine_backstep_um=float(_req("refine_backstep_um")),
-
-            backoff_um=backoff_val,
+            backstep_after_search_um=float(_req("backstep_after_search_um")),
+            do_refine=bool(self.checks["do_refine"].isChecked()),
+            n_avg_samples=int(_req("n_avg_samples")),
+            step_um=float(_req("step_um")),
+            range_um=float(_req("range_um")),
         )
 
     # ------------------------------------------------------------------ #

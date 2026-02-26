@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import tomli
 import tomli_w
@@ -19,15 +19,13 @@ class ScanningConfig:
     speed_um_s: float = 5000.0
     max_search_distance_um: float = 5000.0
     n_bg_samples: int = 10
-    n_hits: int = 1
+    backstep_after_search_um: float = 0.0
 
     # refinement behavior
-    refine: bool = False
-    refine_speed_um_s: float = 100.0
-    refine_backstep_um: float = 200.0
-
-    # backoff behavior
-    backoff_um: Optional[float] = 200.0  # set None if you want "auto"
+    do_refine: bool = False
+    n_avg_samples: int = 20
+    step_um: float = 5.0
+    range_um: float = 50.0
 
 
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
@@ -39,27 +37,23 @@ def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
-    """
-    Convert dataclass to a TOML-ready dict.
-
-    NOTE: tomli_w can write floats/ints/bools, but not Python None.
-    If backoff_um is None, we omit it from TOML.
-    """
-    d: dict[str, Any] = {
+    return {
         "n_sigma": cfg.n_sigma,
         "speed_um_s": cfg.speed_um_s,
         "max_search_distance_um": cfg.max_search_distance_um,
         "n_bg_samples": cfg.n_bg_samples,
-        "n_hits": cfg.n_hits,
-        "refine": bool(cfg.refine),
-        "refine_speed_um_s": float(cfg.refine_speed_um_s),
-        "backoff_um": float(cfg.backoff_um),
-        "refine_backstep_um": float(cfg.refine_backstep_um),
+        "backstep_after_search_um": cfg.backstep_after_search_um,
+        "do_refine": bool(cfg.do_refine),
+        "n_avg_samples": cfg.n_avg_samples,
+        "step_um": cfg.step_um,
+        "range_um": cfg.range_um,
     }
-    return d
 
 
-def load_axial_scanning_config(path: Path, section: str = "axial_scanning") -> ScanningConfig:
+def load_axial_scanning_config(
+    path: Path,
+    section: str = "axial_scanning",
+) -> ScanningConfig:
     try:
         with path.open("rb") as f:
             data = tomli.load(f)
@@ -70,7 +64,11 @@ def load_axial_scanning_config(path: Path, section: str = "axial_scanning") -> S
     return ScanningConfig(**_toml_to_kwargs(raw))
 
 
-def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> None:
+def save_config_section(
+    path: Path,
+    section: str,
+    config: ThreadSafeConfig,
+) -> None:
     try:
         with path.open("rb") as f:
             data = tomli.load(f)
