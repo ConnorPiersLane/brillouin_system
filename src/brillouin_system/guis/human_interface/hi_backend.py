@@ -689,19 +689,11 @@ class HiBackend:
         if self.is_reference_mode:
             log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
 
-        reflection_finder = ReflectionFinderNI(daq=self.daq, zaber_axis=self.zaber_eye_lens)
+        reflection_finder = ReflectionFinderNI(daq=self.daq,
+                                               zaber_axis=self.zaber_eye_lens,
+                                               scanning_config=self._axial_scan_config)
         z0 = self.zaber_eye_lens.get_position()
-        result = reflection_finder.find_reflection_plane(
-            n_sigma=self._axial_scan_config.n_sigma,
-            speed_um_s=self._axial_scan_config.speed_um_s,
-            max_search_distance_um=self._axial_scan_config.max_search_distance_um,
-            n_bg_samples = self._axial_scan_config.n_bg_samples,
-            n_hits=self._axial_scan_config.n_hits,
-            cancel_cb=self.f2b_cancel_callback,
-            refine=self._axial_scan_config.refine,
-            refine_speed_um_s=self._axial_scan_config.refine_speed_um_s,
-            backoff_um=self._axial_scan_config.backoff_um,
-        )
+        result = reflection_finder.find_reflection_plane()
         if result.found:
             self.move_and_update_gui_zaber_eye_lens_abs(result.z_um)
         else:
