@@ -69,8 +69,11 @@ class ReflectionFinderNI:
                  cancel_cb: Optional[Callable[[], bool]] = None,
                  ):
         self.daq: NI6008 | NIDummy = daq
+
         self.zaber_lens: ZaberEyeLens = zaber_axis
         self.cancel_cb: Optional[Callable[[], bool]] = cancel_cb
+
+
 
         # parameters slew
         self._n_sigma: int = scanning_config.n_sigma
@@ -172,6 +175,8 @@ class ReflectionFinderNI:
 
 
         with self.daq.streaming():
+            self.daq.flush()
+            _ = self.daq.read_block(3)
             bg = np.asarray(self.daq.read_block(int(n_bg_samples)))
             threshold = float(bg.mean() + n_sigma * bg.std())
 
@@ -214,9 +219,12 @@ class ReflectionFinderNI:
             print('Coarse structure')
             print(zs)
             print(vals)
+            print(f"peak: {z_peak}")
 
             print('Fine structure')
-            zs, vals = self.sample_peak_profile(z_hit, step_um=2, range_um=100)
+            zs, vals = self.sample_peak_profile(z_hit, step_um=1, range_um=100)
+            imax = int(np.argmax(vals))
+            print(f"\nMax: i={imax}, z={zs[imax]:.2f} um, v={vals[imax]:.6f} V")
             zs = [float(xx - zs[int(len(zs)/2)]) for xx in zs]
             vals = [float(v) for v in vals]
             print(zs)
