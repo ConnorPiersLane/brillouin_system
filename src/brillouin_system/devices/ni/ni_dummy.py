@@ -1,93 +1,186 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-import random
 import time
-from dataclasses import dataclass
-from typing import Optional
+import math
+import random
+from collections import deque
+from contextlib import contextmanager
+from typing import Deque, List, Optional
+
+from brillouin_system.devices.ni.ni_base import NIBase
 
 
-@dataclass(frozen=True)
-class StepEvent:
-    t: float
-    value: float
-    baseline: Optional[float] = None
-    delta: Optional[float] = None
-
-
-class NIDummy:
+class NIDummy(NIBase):
     """
-    Dummy NI6008 replacement (no nidaqmx required).
+    Drop-in dummy replacement for NI6008.
 
-    Same API:
-      - with ni.streaming():
-      - ni.read_value()
-      - ni.read_block(n)
+    API-compatible with:
+      - streaming()
+      - read_latest()
+      - read_block(n)
+      - read_available_block()
+      - flush()
+
+    Extras:
+      - gain (e.g. 20x larger values)
+      - deterministic timing
+      - never returns empty when it shouldn't
     """
 
     def __init__(
         self,
         *,
         sample_rate_hz: float = 1000.0,
-        noise_std: float = 0.01,
-        baseline: float = 0.0,
-        step_amplitude: float = 0.2,
-        step_probability_per_sample: float = 0.01,
+        baseline_v: float = 0.1,
+        noise_std_v: float = 0.01,
+        signal_amplitude_v: float = 0.5,
+        signal_freq_hz: float = 2.0,
+        gain: float = 1.0,              # <<< SET THIS TO 20.0 WHEN NEEDED
+        max_buffer_seconds: float = 2.0,
         seed: Optional[int] = None,
     ):
         self.sample_rate_hz = float(sample_rate_hz)
-        self.noise_std = float(noise_std)
-        self.baseline = float(baseline)
-        self.step_amplitude = float(step_amplitude)
-        self.step_probability_per_sample = float(step_probability_per_sample)
+        self.baseline_v = float(baseline_v)
+        self.noise_std_v = float(noise_std_v)
+        self.signal_amplitude_v = float(signal_amplitude_v)
+        self.signal_freq_hz = float(signal_freq_hz)
+        self.gain = float(gain)
+
+        self._rng = random.Random(seed)
+
+        self._max_buffer_len = int(max_buffer_seconds * self.sample_rate_hz)
+        self._buf: Deque[float] = deque()
 
         self._streaming = False
-        self._current_level = self.baseline
-        self._rng = random.Random(seed)
+        self._t0 = 0.0
+        self._last_index = 0
+
+    # ------------------------------------------------------------------
+    # lifecycle
+    # ------------------------------------------------------------------
 
     @contextmanager
     def streaming(self):
         if self._streaming:
-            raise RuntimeError("NI6008 dummy is already streaming")
+            raise RuntimeError("Already streaming")
+
         self._streaming = True
+        self._t0 = time.monotonic()
+        self._last_index = 0
+        self._buf.clear()
+
         try:
             yield
         finally:
             self._streaming = False
+            self._buf.clear()
 
-    def _next_sample(self) -> float:
-        # optional random step events
-        if self._rng.random() < self.step_probability_per_sample:
-            self._current_level += self._rng.choice([-1.0, 1.0]) * self.step_amplitude
-        return self._current_level + self._rng.gauss(0.0, self.noise_std)
-
-    def read_value(self, *, timeout_s: float = 1.0) -> float:
+    def _ensure_streaming(self):
         if not self._streaming:
-            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
-        time.sleep(1.0 / self.sample_rate_hz)
-        return float(self._next_sample())
+            raise RuntimeError("Not streaming")
 
-    def read_block(self, n_samples: int, *, timeout_s: Optional[float] = None) -> list[float]:
-        if not self._streaming:
-            raise RuntimeError("Not streaming. Use `with ni.streaming():`.")
+    # ------------------------------------------------------------------
+    # signal generation
+    # ------------------------------------------------------------------
 
-        n = int(n_samples)
+    def _sample_value(self, index: int) -> float:
+        if index % 100 == 0:
+            return 5.0
+
+        # small deterministic variation, always < 1
+        return 0.2 + 0.3 * math.sin(2 * math.pi * index / 25)
+
+    def _update_buffer(self):
+        self._ensure_streaming()
+
+        now = time.monotonic()
+        elapsed = max(0.0, now - self._t0)
+        target_index = int(elapsed * self.sample_rate_hz)
+
+        while self._last_index < target_index:
+            self._buf.append(self._sample_value(self._last_index))
+            self._last_index += 1
+
+        # cap buffer size
+        while len(self._buf) > self._max_buffer_len:
+            self._buf.popleft()
+
+    # ------------------------------------------------------------------
+    # API
+    # ------------------------------------------------------------------
+
+    def read_latest(self, *, timeout_s: float = 0.05) -> float:
+        self._ensure_streaming()
+
+        deadline = time.monotonic() + timeout_s
+        while True:
+            self._update_buffer()
+            if self._buf:
+                return self._buf[-1]
+
+            if time.monotonic() >= deadline:
+                # force-generate one sample
+                v = self._sample_value(self._last_index)
+                self._last_index += 1
+                self._buf.append(v)
+                return v
+
+            time.sleep(0.001)
+
+    def read_block(self, n: int, *, timeout_s: float = 1.0) -> List[float]:
+        self._ensure_streaming()
+        n = int(n)
         if n <= 0:
             return []
 
-        dt = 1.0 / self.sample_rate_hz
-        out: list[float] = []
-        for _ in range(n):
-            out.append(float(self._next_sample()))
-            time.sleep(dt)
+        deadline = time.monotonic() + timeout_s
+        out: List[float] = []
+
+        while len(out) < n:
+            self._update_buffer()
+
+            while self._buf and len(out) < n:
+                out.append(self._buf.popleft())
+
+            if len(out) >= n or time.monotonic() >= deadline:
+                break
+
+            time.sleep(0.001)
+
+        return out
+
+    def read_available_block(self) -> List[float]:
+        self._ensure_streaming()
+        self._update_buffer()
+
+        if not self._buf:
+            return []
+
+        out = list(self._buf)
+        self._buf.clear()
         return out
 
     def flush(self) -> int:
-        return 0
+        self._ensure_streaming()
+        self._update_buffer()
+        n = len(self._buf)
+        self._buf.clear()
+        return n
 
+
+# ----------------------------------------------------------------------
+# quick test
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
-    ni = NIDummy(sample_rate_hz=1000, noise_std=0.02, step_probability_per_sample=1e-3, seed=0)
+    ni = NIDummy(
+        sample_rate_hz=1000,
+        gain=20.0,          # <<< 20× larger values
+        seed=0,
+    )
+
     with ni.streaming():
-        vals = ni.read_block(10)
-        print(vals)
-        print("single:", ni.read_value())
+        time.sleep(0.2)
+        print("flush:", ni.flush())
+        print("block std:", max(ni.read_block(100)))
+        print("latest:", ni.read_latest())
+        print("available:", len(ni.read_available_block()))

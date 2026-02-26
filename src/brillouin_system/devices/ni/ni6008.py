@@ -13,8 +13,10 @@ from nidaqmx.constants import (
 )
 from nidaqmx.stream_readers import AnalogSingleChannelReader
 
+from brillouin_system.devices.ni.ni_base import NIBase
 
-class NI6008:
+
+class NI6008(NIBase):
     """
     Minimal NI USB-6008 analog input helper.
 

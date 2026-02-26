@@ -6,8 +6,8 @@ from typing import Optional, Callable
 
 import numpy as np
 
-from brillouin_system.devices.ni.ni6008 import NI6008
-from brillouin_system.devices.ni.ni_dummy import NIDummy
+
+from brillouin_system.devices.ni.ni_dummy import NIBase
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
@@ -62,13 +62,13 @@ class ReflectionFinderNI:
         return float(z2 + dz)
 
     def __init__(self,
-                 daq: NI6008 | NIDummy,
+                 daq: NIBase,
                  zaber_axis: ZaberEyeLens,
                  *,
                  scanning_config: ScanningConfig,
                  cancel_cb: Optional[Callable[[], bool]] = None,
                  ):
-        self.daq: NI6008 | NIDummy = daq
+        self.daq: NIBase = daq
 
         self.zaber_lens: ZaberEyeLens = zaber_axis
         self.cancel_cb: Optional[Callable[[], bool]] = cancel_cb
@@ -87,9 +87,6 @@ class ReflectionFinderNI:
         self._n_avg_samples: int = scanning_config.n_avg_samples
         self._step_um = scanning_config.step_um
         self._range_um = scanning_config.range_um
-
-
-
 
 
     def run_scan(self, scan_speed: float, scan_dist: float, threshold: float) -> tuple[bool, float | None]:
@@ -125,7 +122,7 @@ class ReflectionFinderNI:
                     self.zaber_lens.stop_slewing()
                     dt = (len(arr) - i_peak) / self.daq.sample_rate_hz  # + 0.0 * (t_after - t_before)
                     z_hit = pos_now - dt * scan_speed
-                    return True, z_hit
+                    return True, float(z_hit)
         finally:
             self.zaber_lens.stop_slewing()
 
