@@ -75,7 +75,7 @@ class AxialScanningConfigDialog(QDialog):
         self._add_row(v, "N Sigma", "n_sigma", le_n_sigma)
 
         le_speed = QLineEdit()
-        le_speed.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        le_speed.setValidator(QDoubleValidator(-1e12, 1e12, 6))
         self._add_row(v, "Speed [µm/s]", "speed_um_s", le_speed)
 
         le_max_search = QLineEdit()

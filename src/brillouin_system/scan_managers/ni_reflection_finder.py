@@ -78,6 +78,8 @@ class ReflectionFinderNI:
         # parameters slew
         self._n_sigma: int = scanning_config.n_sigma
         self._speed_um_s: float = scanning_config.speed_um_s
+        if self._speed_um_s == 0:
+            raise ValueError("scan_speed must be nonzero")
         self._max_search_distance_um: float = scanning_config.max_search_distance_um
         self._n_bg_samples: int = scanning_config.n_bg_samples
         self._backstep_after_search_um: float = scanning_config.backstep_after_search_um
@@ -95,8 +97,7 @@ class ReflectionFinderNI:
             speed_um_per_s=float(scan_speed),
             max_distance_um=float(abs(scan_dist)),
         )
-        if scan_speed == 0:
-            raise ValueError("scan_speed must be nonzero")
+
         t_start = time.monotonic()
         try:
             while True:

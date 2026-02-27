@@ -485,7 +485,15 @@ class HiSignaller(QObject):
         QCoreApplication.processEvents()
 
         try:
-            self.backend.find_reflection_plane()
+            z0 = self.backend.zaber_eye_lens.get_position()
+            result = self.backend.find_reflection_plane()
+            if result.found:
+                z = result.z_um
+            else:
+                z = z0
+            self.backend.zaber_eye_lens.move_abs(z)
+            self.update_zaber_lens_position(z)
+
         finally:
             self.update_system_state(new_state=old_state)
             if was_running:
