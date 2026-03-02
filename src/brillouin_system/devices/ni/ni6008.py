@@ -130,7 +130,7 @@ class NI6008(NIBase):
 
         data = self._task.read(
             number_of_samples_per_channel=avail,
-            timeout=0.0,
+            timeout=0.01,
         )
 
         return [float(x) for x in data]
