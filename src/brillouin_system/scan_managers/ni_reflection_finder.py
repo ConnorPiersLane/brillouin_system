@@ -131,7 +131,7 @@ class ReflectionFinderNI:
 
         self.zaber_lens.move_abs(float(z_um))
         self.daq.flush()
-        _ = self.daq.read_block(3)
+        _ = self.daq.read_block(10)
         xs = self.daq.read_block(int(self._n_avg_samples))
         return float(np.mean(xs))
 
@@ -219,11 +219,12 @@ class ReflectionFinderNI:
                 return ReflectionFindingResult(found=False, z_um=None)
 
             z_peak = float(zs[imax])
+            z_peak2 = self.parabola_peak_3pt(zs, vals)
             t2 = time.monotonic()
 
 
             # Just for testing:
-
+            print(f"----------------------------------------------------------------------------------------------")
             print(f"time scanning: {t1-t0}")
             print(f"time stepping: {t2 - t1}")
 
@@ -235,21 +236,24 @@ class ReflectionFinderNI:
             # Optional: also print quick summary
             imax = int(np.argmax(vals))
             print(f"\nMax: i={imax}, z={zs[imax]:.2f} um, v={vals[imax]:.6f} V")
-            zs = [float(xx - zs[int(len(zs)/2)]) for xx in zs]
+            zs = [float(xx) for xx in zs]
             vals = [float(v) for v in vals]
             print('Coarse structure')
             print(zs)
             print(vals)
-            print(f"peak: {z_peak}")
+            print(f"Peak Estimate from slewing: {z_hit}")
+            print(f"Peak from max refine: {z_peak}")
+            print(f"Peak from parable fit: {z_peak2}")
 
-            print('Fine structure')
+            print('Fine structure with dz = 1um')
             zs, vals = self.sample_peak_profile(z_hit, step_um=1, range_um=100)
             imax = int(np.argmax(vals))
             print(f"\nMax: i={imax}, z={zs[imax]:.2f} um, v={vals[imax]:.6f} V")
-            zs = [float(xx - zs[int(len(zs)/2)]) for xx in zs]
+            zs = [float(xx) for xx in zs]
             vals = [float(v) for v in vals]
             print(zs)
             print(vals)
+            print(f"----------------------------------------------------------------------------------------------")
 
 
             return ReflectionFindingResult(found=True, z_um=z_peak)

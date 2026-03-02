@@ -529,6 +529,8 @@ class HiBackend:
 
         # Move lens back to original position
         self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+        print(f"Plane forwards: {reflection_pos_inwards}")
+        print(f"Plane backwards: {reflection_pos_backwards}")
 
         self._i_axial_scans += 1
 
@@ -725,7 +727,7 @@ class HiBackend:
                                                    scanning_config=self._axial_scan_config,
                                                    cancel_cb=self.f2b_cancel_callback)
 
-            result = reflection_finder.find_reflection_plane(is_go_forwards=is_go_forwards)
+            result: ReflectionFindingResult = reflection_finder.find_reflection_plane(is_go_forwards=is_go_forwards)
             return result
 
         finally:
