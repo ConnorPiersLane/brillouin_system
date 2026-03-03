@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Iterator, List
 
+import numpy as np
+
 
 class NIBase(ABC):
     """
@@ -41,7 +43,7 @@ class NIBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def read_block(self, n: int, *, timeout_s: float = 1.0) -> List[float]:
+    def read_block(self, n: int, *, timeout_s: float = 1.0) -> np.ndarray:
         """
         Return the next n samples (FIFO). Implementations may return fewer if timeout expires.
         """

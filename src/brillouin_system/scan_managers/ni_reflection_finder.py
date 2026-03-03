@@ -126,11 +126,10 @@ class ReflectionFinderNI:
                     return False, None
 
                 samples = self.daq.read_available_block()
-
-                if samples is None or len(samples) == 0:
+                if samples.size == 0:
                     continue
 
-                arr = np.asarray(samples, dtype=float)
+                arr = samples  # already np.ndarray
                 cross = np.where(arr > threshold)[0]
 
                 if cross.size > 0:
@@ -147,7 +146,7 @@ class ReflectionFinderNI:
     def measure_at(self, z_um: float) -> float:
         self.zaber_lens.move_abs(float(z_um))
         self.daq.flush()
-        xs = np.asarray(self.daq.read_block(int(self._n_point_samples)), dtype=float)
+        xs = self.daq.read_block(self._n_point_samples)
         return self.max_values_mean(xs)
 
     def sample_peak_profile(
@@ -203,7 +202,7 @@ class ReflectionFinderNI:
         with self.daq.streaming():
             self.daq.flush()
             _ = self.daq.read_block(3)
-            bg = np.asarray(self.daq.read_block(int(n_bg_samples)))
+            bg: np.ndarray = self.daq.read_block(int(n_bg_samples))
             threshold = float(bg.mean() + n_sigma * bg.std())
 
             t0 = time.monotonic()
