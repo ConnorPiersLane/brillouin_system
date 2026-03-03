@@ -176,5 +176,4 @@ if __name__ == "__main__":
         print(ni.flush())
         print(ni.flush())
         r1 = ni.read_block(1000)
-        r2 = ni.read_block(1000)
-        print(r1+r2)
+        print(r1)
