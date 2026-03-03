@@ -25,15 +25,10 @@ from brillouin_system.scan_managers.scanning_config.scanning_config import (
 
 
 class AxialScanningConfigDialog(QDialog):
-    def __init__(
-        self,
-        cfg_holder: ThreadSafeConfig | None = None,
-        on_apply=None,
-        parent=None,
-    ):
+    def __init__(self, cfg_holder: ThreadSafeConfig | None = None, on_apply=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Axial Scanning Configuration")
-        self.setMinimumSize(380, 420)
+        self.setMinimumSize(380, 460)
 
         self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
@@ -82,9 +77,9 @@ class AxialScanningConfigDialog(QDialog):
         le_max_search.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "Max search distance [µm]", "max_search_distance_um", le_max_search)
 
-        le_n_bg = QLineEdit()
-        le_n_bg.setValidator(QIntValidator(0, 1_000_000))
-        self._add_row(v, "N BG samples", "n_bg_samples", le_n_bg)
+        le_bg_ms = QLineEdit()
+        le_bg_ms.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "Background acquisition time [ms]", "background_acquisition_time_ms", le_bg_ms)
 
         le_backstep = QLineEdit()
         le_backstep.setValidator(QDoubleValidator(0.0, 1e12, 6))
@@ -93,9 +88,9 @@ class AxialScanningConfigDialog(QDialog):
         cb_refine = QCheckBox("Enabled")
         self._add_check(v, "Refine", "do_refine", cb_refine)
 
-        le_avg = QLineEdit()
-        le_avg.setValidator(QIntValidator(1, 1_000_000))
-        self._add_row(v, "N avg samples", "n_avg_samples", le_avg)
+        le_point_ms = QLineEdit()
+        le_point_ms.setValidator(QIntValidator(1, 1_000_000))
+        self._add_row(v, "Point acquisition time [ms]", "point_acquisition_time_ms", le_point_ms)
 
         le_step = QLineEdit()
         le_step.setValidator(QDoubleValidator(0.0, 1e12, 6))
@@ -104,6 +99,11 @@ class AxialScanningConfigDialog(QDialog):
         le_range = QLineEdit()
         le_range.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "Refine range [µm]", "range_um", le_range)
+
+        # NEW: analysis behavior
+        le_n_max = QLineEdit()
+        le_n_max.setValidator(QIntValidator(1, 1_000_000))
+        self._add_row(v, "Top-N max values to average", "n_max_values", le_n_max)
 
         g.setLayout(v)
         return g
@@ -133,8 +133,8 @@ class AxialScanningConfigDialog(QDialog):
     def load_values(self) -> None:
         cfg: ScanningConfig = self.cfg_holder.get()
 
-        for k, v in self.inputs.items():
-            v.setText(str(getattr(cfg, k)))
+        for k, w in self.inputs.items():
+            w.setText(str(getattr(cfg, k)))
 
         self.checks["do_refine"].setChecked(bool(cfg.do_refine))
 
@@ -146,12 +146,13 @@ class AxialScanningConfigDialog(QDialog):
             n_sigma=int(_req("n_sigma")),
             speed_um_s=float(_req("speed_um_s")),
             max_search_distance_um=float(_req("max_search_distance_um")),
-            n_bg_samples=int(_req("n_bg_samples")),
+            background_acquisition_time_ms=int(_req("background_acquisition_time_ms")),
             backstep_after_search_um=float(_req("backstep_after_search_um")),
             do_refine=bool(self.checks["do_refine"].isChecked()),
-            n_avg_samples=int(_req("n_avg_samples")),
+            point_acquisition_time_ms=int(_req("point_acquisition_time_ms")),
             step_um=float(_req("step_um")),
             range_um=float(_req("range_um")),
+            n_max_values=max(1, int(_req("n_max_values"))),
         )
 
     # ------------------------------------------------------------------ #

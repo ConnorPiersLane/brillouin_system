@@ -75,6 +75,9 @@ class NIDummy(NIBase):
             self._streaming = False
             self._buf.clear()
 
+    def get_sample_rate(self) -> float:
+        return self.sample_rate_hz
+
     def _ensure_streaming(self):
         if not self._streaming:
             raise RuntimeError("Not streaming")

@@ -32,6 +32,10 @@ class NIBase(ABC):
         yield  # pragma: no cover
 
     @abstractmethod
+    def get_sample_rate(self) -> float:
+        raise NotImplementedError
+
+    @abstractmethod
     def read_latest(self, *, timeout_s: float = 0.05) -> float:
         """Return the most recent acquired sample."""
         raise NotImplementedError

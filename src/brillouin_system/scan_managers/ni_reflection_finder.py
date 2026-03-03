@@ -31,6 +31,8 @@ class ReflectionFinderNI:
       - optionally get_background_value(n_samples) -> (mean, std)
     """
 
+
+
     @staticmethod
     def parabola_peak_3pt(zs, vals) -> float:
         """
@@ -81,15 +83,30 @@ class ReflectionFinderNI:
         if self._speed_um_s == 0:
             raise ValueError("scan_speed must be nonzero")
         self._max_search_distance_um: float = scanning_config.max_search_distance_um
-        self._n_bg_samples: int = scanning_config.n_bg_samples
+        self._n_bg_samples: int = self.acquisition_time_to_samples(scanning_config.background_acquisition_time_ms)
         self._backstep_after_search_um: float = scanning_config.backstep_after_search_um
 
         # parameters refine
         self._do_refine = scanning_config.do_refine
-        self._n_avg_samples: int = scanning_config.n_avg_samples
+        self._n_point_samples: int = self.acquisition_time_to_samples(scanning_config.point_acquisition_time_ms)
         self._step_um = scanning_config.step_um
         self._range_um = scanning_config.range_um
+        self._n_max_values: int = scanning_config.n_max_values
 
+    def acquisition_time_to_samples(self, acq_time_ms: float) -> int:
+        n = int(round(acq_time_ms * 1e-3 * self.daq.get_sample_rate()))
+        return max(1, n)
+
+    def max_values_mean(self, xs) -> float:
+        xs = np.asarray(xs)  # cheap if already ndarray
+        s = xs.size
+        n = self._n_max_values
+
+        if s == 0:
+            raise ValueError('Input Array has size 0')
+        if s <= n:
+            return float(xs.mean())
+        return float(np.partition(xs, s - n)[s - n:].mean())
 
     def run_scan(self, scan_speed: float, scan_dist: float, threshold: float) -> tuple[bool, float | None]:
         max_search_time = abs(scan_dist / scan_speed)
@@ -121,19 +138,17 @@ class ReflectionFinderNI:
                     i_peak = i0 + np.argmax(arr[i0:])
                     pos_now = self.zaber_lens.get_position()
                     self.zaber_lens.stop_slewing()
-                    dt = (len(arr) - i_peak) / self.daq.sample_rate_hz  # + 0.0 * (t_after - t_before)
+                    dt = (len(arr) - i_peak) / self.daq.get_sample_rate()  # + 0.0 * (t_after - t_before)
                     z_hit = pos_now - dt * scan_speed
                     return True, float(z_hit)
         finally:
             self.zaber_lens.stop_slewing()
 
     def measure_at(self, z_um: float) -> float:
-
         self.zaber_lens.move_abs(float(z_um))
         self.daq.flush()
-        _ = self.daq.read_block(10)
-        xs = self.daq.read_block(int(self._n_avg_samples))
-        return float(np.mean(xs))
+        xs = np.asarray(self.daq.read_block(int(self._n_point_samples)), dtype=float)
+        return self.max_values_mean(xs)
 
     def sample_peak_profile(
             self,

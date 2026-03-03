@@ -2,9 +2,13 @@
 n_sigma = 10
 speed_um_s = 5000.0
 max_search_distance_um = 2000.0
-n_bg_samples = 100
+background_acquisition_time_ms = 10
 backstep_after_search_um = 0.0
-do_refine = true
-n_avg_samples = 50
+
+do_refine = false
+point_acquisition_time_ms = 20
 step_um = 5.0
 range_um = 50.0
+
+# analysis behavior
+n_max_values = 5

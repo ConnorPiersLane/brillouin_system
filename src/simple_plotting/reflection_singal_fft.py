@@ -42,7 +42,7 @@ freqs = np.fft.rfftfreq(N, d=1/fs)
 magnitude = (2 / np.sum(window)) * np.abs(X)
 
 plt.subplot(2, 1, 2)
-plt.plot(freqs[:100], magnitude[:100])
+plt.plot(freqs[:200], magnitude[:200])
 plt.xlabel("Frequency (Hz)")
 plt.ylabel("Magnitude")
 plt.title("Frequency Spectrum")
