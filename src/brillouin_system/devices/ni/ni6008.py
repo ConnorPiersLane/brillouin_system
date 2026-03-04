@@ -14,9 +14,8 @@ from nidaqmx.stream_readers import AnalogSingleChannelReader
 from brillouin_system.devices.ni.ni_base import NIBase
 
 
-# ----------------------------
-# Results / internal state
-# ----------------------------
+
+
 
 @dataclass(frozen=True)
 class AcquisitionResult:

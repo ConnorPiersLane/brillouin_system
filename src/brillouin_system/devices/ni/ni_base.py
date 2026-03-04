@@ -50,7 +50,7 @@ class NIBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def read_available_block(self) -> List[float]:
+    def read_available_block(self) -> np.ndarray:
         """Return all currently buffered samples (non-blocking), clearing the internal FIFO."""
         raise NotImplementedError
 
