@@ -287,37 +287,62 @@ class NI6008(NIBase):
             # Producer-local buffer: NEVER shared with foreground code
             tmp = np.empty(chunk_size, dtype=np.float64)
 
+            # Tune this: small blocking read when FIFO is empty.
+            # 8–64 is usually fine. At 1000 Hz, 32 samples ~= 32 ms.
+            min_block = min(32, chunk_size)
+
             try:
-                # Configure stream position once for continuous draining
                 if self._task is None or self._reader is None:
                     return
+
                 self._task.in_stream.relative_to = ReadRelativeTo.CURRENT_READ_POSITION
                 self._task.in_stream.offset = 0
 
                 while not stop_evt.is_set():
-                    # If streaming was closed, exit
                     if self._task is None or self._reader is None:
                         break
 
                     avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
-                    want = min(avail, chunk_size) if avail > 0 else chunk_size
-                    if want <= 0:
-                        time.sleep(0.001)
-                        continue
 
-                    # Read into tmp[:want]
+                    if avail > 0:
+                        # Drain immediately (non-blocking)
+                        want = min(avail, chunk_size)
+                        timeout = 0.0
+                    else:
+                        # FIFO empty: block briefly for a small chunk so we actually keep acquiring
+                        want = min_block
+                        timeout = float(poll_timeout_s)
+
+                        # If user set poll_timeout_s=0, don't busy-spin
+                        if timeout == 0.0:
+                            time.sleep(0.001)
+                            continue
+
+                    view = tmp[:want]
                     try:
                         n_read = self._reader.read_many_sample(
-                            data=tmp,
+                            data=view,
                             number_of_samples_per_channel=want,
-                            timeout=float(poll_timeout_s),
+                            timeout=timeout,
                         )
+
+                    except nidaqmx.errors.DaqError as e:
+                        TIMEOUT = -200284  # DAQmx timeout
+
+                        code = getattr(e, "error_code", None)
+                        if hasattr(code, "value"):  # sometimes it's an enum-like object
+                            code = code.value
+
+                        if code == TIMEOUT:
+                            continue  # benign timeout, keep acquiring
+
+                        # real DAQ error -> stop
+                        stop_evt.set()
+                        break
+
                     except Exception:
-                        # If task is gone/closed, exit; otherwise avoid tight spin
-                        if self._task is None or self._reader is None:
-                            break
-                        time.sleep(0.001)
-                        continue
+                        stop_evt.set()
+                        break
 
                     if n_read is None:
                         n_read = want
@@ -330,7 +355,6 @@ class NI6008(NIBase):
                         if acq is None:
                             break
 
-                        # Respect hard cap: stop instead of dropping/overwriting.
                         if acq.max_samples is not None and acq.write_idx >= acq.max_samples:
                             stop_evt.set()
                             break
@@ -340,11 +364,10 @@ class NI6008(NIBase):
                         room = acq.capacity - acq.write_idx
                         take = n_read if n_read <= room else room
 
-                        acq.values[acq.write_idx : acq.write_idx + take] = tmp[:take]
+                        # Copy from the actual read view
+                        acq.values[acq.write_idx: acq.write_idx + take] = view[:take]
                         acq.write_idx += take
 
-                        # If we couldn't fit the whole read because of max_samples/capacity,
-                        # stop rather than drop.
                         if take < n_read and acq.max_samples is not None:
                             stop_evt.set()
                             break
@@ -442,8 +465,9 @@ class NI6008(NIBase):
         self._task.in_stream.offset = 0
 
         buf = self._ensure_fg_buffer(n)
+        view = buf[:n]
         n_read = self._reader.read_many_sample(
-            data=buf,
+            data=view,
             number_of_samples_per_channel=n,
             timeout=float(timeout_s),
         )
@@ -455,7 +479,7 @@ class NI6008(NIBase):
         if n_read <= 0:
             return self._empty
 
-        return buf[:n_read]
+        return view[:n_read] if n_read > 0 else self._empty
 
     def read_available_block(self, *, timeout_s: float = 0.01) -> np.ndarray:
         """Read all currently available samples from FIFO (may be empty)."""
@@ -471,8 +495,9 @@ class NI6008(NIBase):
             return self._empty
 
         buf = self._ensure_fg_buffer(avail)
+        view = buf[:avail]
         n_read = self._reader.read_many_sample(
-            data=buf,
+            data=view,
             number_of_samples_per_channel=avail,
             timeout=float(timeout_s),
         )
@@ -484,7 +509,7 @@ class NI6008(NIBase):
         if n_read <= 0:
             return self._empty
 
-        return buf[:n_read]
+        return view[:n_read] if n_read > 0 else self._empty
 
     def flush(self) -> int:
         """Discard all currently buffered samples. Returns number of samples discarded."""
@@ -502,11 +527,12 @@ class NI6008(NIBase):
                 break
 
             buf = self._ensure_fg_buffer(avail)
+            view = buf[:avail]
             try:
                 n_read = self._reader.read_many_sample(
-                    data=buf,
+                    data=view,
                     number_of_samples_per_channel=avail,
-                    timeout=0.0,  # don't wait; just drain
+                    timeout=0.0,
                 )
             except Exception:
                 break
@@ -557,6 +583,7 @@ if __name__ == "__main__":
 
         result = ni.stop_acquiring()
         print("acquired samples:", result.values.size)
+
         ts = result.timestamps()
         if ts.size:
             print("first/last time:", ts[0], ts[-1])
