@@ -23,20 +23,54 @@ class AcquisitionResult:
     """Returned by stop_acquiring()."""
     values: np.ndarray          # shape (n,), float64
     sample_rate_hz: float       # DAQ sample rate
-    t0_wall: float              # wall-clock time.time() when acquisition started
+
+    # wall clock anchor (Unix epoch seconds)
+    t0_wall: float
+    t1_wall: float
+
+    # monotonic high-resolution clock (seconds, arbitrary origin)
+    t0_perf: float
+    t1_perf: float
 
     def timestamps(self) -> np.ndarray:
         """
-        Reconstruct timestamps on demand (no need to store them per-sample).
-        t[i] = t0_wall + i / sample_rate_hz
+        Best-effort reconstruction of per-sample wall timestamps.
 
-        NOTE:
-        This uses an ideal sample clock from t0_wall. It is consistent *relative*
-        to itself, but absolute alignment to the ADC's first-sample wall time may
-        be offset by buffering/OS scheduling.
+        Strategy:
+          - Build an ideal sample timeline using perf_counter (stable spacing).
+          - Map that timeline to wall time using midpoint anchoring to reduce
+            start/stop latency bias.
+
+        This improves absolute alignment vs using t0_wall alone, but still
+        cannot guarantee true ADC first-sample wall time.
         """
-        n = self.values.size
-        return self.t0_wall + (np.arange(n, dtype=np.float64) / self.sample_rate_hz)
+        n = int(self.values.size)
+        if n <= 0:
+            return np.empty(0, dtype=np.float64)
+
+        fs = float(self.sample_rate_hz)
+        i = np.arange(n, dtype=np.float64)
+
+        # Ideal sample times on perf clock
+        p = self.t0_perf + (i / fs)
+
+        # Midpoint mapping perf -> wall
+        t_mid_wall = 0.5 * (self.t0_wall + self.t1_wall)
+        t_mid_perf = 0.5 * (self.t0_perf + self.t1_perf)
+
+        return t_mid_wall + (p - t_mid_perf)
+
+    def spans(self) -> dict[str, float]:
+        """Handy diagnostics to see how good alignment likely is."""
+        n = int(self.values.size)
+        fs = float(self.sample_rate_hz)
+        sample_span = (n - 1) / fs if n > 1 else 0.0
+        return {
+            "n": float(n),
+            "sample_span_s": sample_span,
+            "wall_span_s": float(self.t1_wall - self.t0_wall),
+            "perf_span_s": float(self.t1_perf - self.t0_perf),
+        }
 
 
 @dataclass
@@ -53,6 +87,9 @@ class _AcqState:
 
     # metadata
     t0_wall: float
+    t0_perf: float
+    t_last_wall: float
+    t_last_perf: float
     sample_rate_hz: float
     max_samples: Optional[int]
 
@@ -250,6 +287,7 @@ class NI6008(NIBase):
         stop_evt = threading.Event()
         lock = threading.Lock()
         t0_wall = time.time()
+        t0_perf = time.perf_counter()
 
         # Create state first so producer can reference it safely
         self._acq = _AcqState(
@@ -261,6 +299,9 @@ class NI6008(NIBase):
             capacity=cap,
             write_idx=0,
             t0_wall=t0_wall,
+            t0_perf=t0_perf,
+            t_last_wall=t0_wall,
+            t_last_perf=t0_perf,
             sample_rate_hz=fs,
             max_samples=max_samples_eff,
         )
@@ -287,10 +328,6 @@ class NI6008(NIBase):
             # Producer-local buffer: NEVER shared with foreground code
             tmp = np.empty(chunk_size, dtype=np.float64)
 
-            # Tune this: small blocking read when FIFO is empty.
-            # 8–64 is usually fine. At 1000 Hz, 32 samples ~= 32 ms.
-            min_block = min(32, chunk_size)
-
             try:
                 if self._task is None or self._reader is None:
                     return
@@ -304,43 +341,25 @@ class NI6008(NIBase):
 
                     avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
 
-                    if avail > 0:
-                        # Drain immediately (non-blocking)
-                        want = min(avail, chunk_size)
-                        timeout = 0.0
-                    else:
-                        # FIFO empty: block briefly for a small chunk so we actually keep acquiring
-                        want = min_block
-                        timeout = float(poll_timeout_s)
+                    if avail <= 0:
+                        # No samples yet: yield CPU briefly, then check again.
+                        time.sleep(0.001)
+                        continue
 
-                        # If user set poll_timeout_s=0, don't busy-spin
-                        if timeout == 0.0:
-                            time.sleep(0.001)
-                            continue
-
+                    want = min(avail, chunk_size)
                     view = tmp[:want]
+
                     try:
                         n_read = self._reader.read_many_sample(
                             data=view,
                             number_of_samples_per_channel=want,
-                            timeout=timeout,
+                            timeout=0.0,  # non-blocking because avail>0
                         )
-
-                    except nidaqmx.errors.DaqError as e:
-                        TIMEOUT = -200284  # DAQmx timeout
-
-                        code = getattr(e, "error_code", None)
-                        if hasattr(code, "value"):  # sometimes it's an enum-like object
-                            code = code.value
-
-                        if code == TIMEOUT:
-                            continue  # benign timeout, keep acquiring
-
-                        # real DAQ error -> stop
-                        stop_evt.set()
-                        break
-
-                    except Exception:
+                    except Exception as e:
+                        with lock:
+                            acq = self._acq
+                            if acq is not None:
+                                acq.last_error = repr(e)
                         stop_evt.set()
                         break
 
@@ -350,10 +369,16 @@ class NI6008(NIBase):
                     if n_read <= 0:
                         continue
 
+                    now_wall = time.time()
+                    now_perf = time.perf_counter()
+
                     with lock:
                         acq = self._acq
                         if acq is None:
                             break
+
+                        acq.t_last_wall = now_wall
+                        acq.t_last_perf = now_perf
 
                         if acq.max_samples is not None and acq.write_idx >= acq.max_samples:
                             stop_evt.set()
@@ -390,10 +415,15 @@ class NI6008(NIBase):
         because foreground reads are only valid after acquisition is fully stopped.
         """
         if self._acq is None:
+            now_wall = time.time()
+            now_perf = time.perf_counter()
             return AcquisitionResult(
                 values=self._empty.copy(),
                 sample_rate_hz=self.sample_rate_hz,
-                t0_wall=time.time(),
+                t0_wall=now_wall,
+                t1_wall=now_wall,
+                t0_perf=now_perf,
+                t1_perf=now_perf,
             )
 
         acq = self._acq
@@ -412,11 +442,20 @@ class NI6008(NIBase):
             n = int(acq.write_idx)
             values = acq.values[:n].copy()
             fs = float(acq.sample_rate_hz)
-            t0 = float(acq.t0_wall)
+            t0_wall = float(acq.t0_wall)
+            t0_perf = float(acq.t0_perf)
+            t1_wall = float(acq.t_last_wall)
+            t1_perf = float(acq.t_last_perf)
             acq.running = False
 
         self._acq = None
-        return AcquisitionResult(values=values, sample_rate_hz=fs, t0_wall=t0)
+        return AcquisitionResult(values=values,
+                                 sample_rate_hz=fs,
+                                 t0_wall=t0_wall,
+                                 t1_wall=t1_wall,
+                                 t0_perf=t0_perf,
+                                 t1_perf=t1_perf,
+                                 )
 
     def get_acquiring_snapshot(self) -> Optional[np.ndarray]:
         """
@@ -583,6 +622,11 @@ if __name__ == "__main__":
 
         result = ni.stop_acquiring()
         print("acquired samples:", result.values.size)
+
+        print("spans:", result.spans())
+        ts = result.timestamps()
+        if ts.size:
+            print("first/last time:", ts[0], ts[-1])
 
         ts = result.timestamps()
         if ts.size:
