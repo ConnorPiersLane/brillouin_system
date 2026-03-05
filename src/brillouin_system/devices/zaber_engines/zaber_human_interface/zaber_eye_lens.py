@@ -1,11 +1,26 @@
 import time
 import threading
-from dataclasses import dataclass
+
 
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection
 from zaber_motion.ascii.axis import Axis
 
+
+from dataclasses import dataclass
+import numpy as np
+
+@dataclass(frozen=True, slots=True)
+class ZaberPositionLog:
+    t_perf: np.ndarray      # shape (n,), float64
+    z_um: np.ndarray        # shape (n,), float64
+
+    def interp(self, t_query: np.ndarray) -> np.ndarray:
+        """Linear interpolation of z(t)."""
+        if self.t_perf.size == 0:
+            return np.empty_like(t_query, dtype=np.float64)
+        # np.interp expects increasing x
+        return np.interp(t_query, self.t_perf, self.z_um)
 
 
 @dataclass()
@@ -28,6 +43,12 @@ class ZaberEyeLens:
         self._slew_guard_thread = None
         self._slew_guard_start_pos = None
         self._slew_guard_max_dist = None  # in µm
+
+        self._log_active = False
+        self._log_thread = None
+        self._log_lock = threading.Lock()
+        self._log_t = []
+        self._log_z = []
 
         self.home()
         self.move_init()
@@ -122,6 +143,102 @@ class ZaberEyeLens:
         self._slew_guard_thread = t
         t.start()
 
+    def start_position_log(self, *, poll_s: float = 0.01) -> None:
+        """
+        Start a background thread that logs (perf_counter time, z position).
+        poll_s sets the target polling period (e.g., 10 ms).
+        """
+        if self._log_active:
+            raise RuntimeError("Position logging already running")
+
+        poll_s = float(poll_s)
+        if poll_s <= 0:
+            raise ValueError("poll_s must be > 0")
+
+        # reset buffers
+        with self._log_lock:
+            self._log_t = []
+            self._log_z = []
+
+        self._log_active = True
+
+        def _loop():
+            next_t = time.perf_counter()
+            try:
+                while self._log_active:
+                    # pace ourselves (more stable than time.sleep(poll_s) in a loop)
+                    now = time.perf_counter()
+                    if now < next_t:
+                        time.sleep(next_t - now)
+                        continue
+                    next_t += poll_s
+
+                    t0 = time.perf_counter()
+                    z = self.get_position()
+                    t1 = time.perf_counter()
+
+                    t = 0.5 * (t0 + t1)
+
+                    with self._log_lock:
+                        self._log_t.append(t)
+                        self._log_z.append(z)
+            finally:
+                self._log_active = False
+
+        th = threading.Thread(target=_loop, name="ZaberPosLog", daemon=True)
+        self._log_thread = th
+        th.start()
+
+    def stop_position_log(self, *, join_timeout_s: float = 2.0) -> ZaberPositionLog:
+        """
+        Stop the position log thread and return a ZaberPositionLog.
+        """
+        if not self._log_active:
+            # return empty
+            return ZaberPositionLog(
+                t_perf=np.empty(0, dtype=np.float64),
+                z_um=np.empty(0, dtype=np.float64),
+            )
+
+        self._log_active = False
+        th = self._log_thread
+        if th is not None:
+            th.join(timeout=float(join_timeout_s))
+            if th.is_alive():
+                raise TimeoutError("Zaber position log thread did not stop")
+
+        with self._log_lock:
+            t = np.asarray(self._log_t, dtype=np.float64)
+            z = np.asarray(self._log_z, dtype=np.float64)
+
+        # Ensure strictly increasing times for interpolation
+        if t.size >= 2:
+            keep = np.concatenate(([True], np.diff(t) > 0))
+            t = t[keep]
+            z = z[keep]
+
+        return ZaberPositionLog(t_perf=t, z_um=z)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def slewing_with_log(self, speed_um_per_s: float, max_distance_um: float, *, poll_s: float = 0.01):
+        """
+        Context manager: starts guarded slewing + position log, then always stops both.
+        Yields nothing; collect log with stop_position_log() after exiting.
+        """
+        self.start_position_log(poll_s=poll_s)
+        try:
+            self.start_slewing_guarded(speed_um_per_s, max_distance_um)
+            yield
+        finally:
+            try:
+                self.stop_slewing()
+            except Exception:
+                pass
+            # stop log after motion stop (captures stop point)
+            _ = self.stop_position_log()
+
 
     def close(self):
         self.connection.close()
@@ -139,6 +256,13 @@ class ZaberEyeLensDummy:
         self._slew_guard_thread = None
         self._slew_guard_start_pos = None
         self._slew_guard_max_dist = None  # in µm
+
+
+        self._log_active = False
+        self._log_thread = None
+        self._log_lock = threading.Lock()
+        self._log_t = []
+        self._log_z = []
 
         print(f"[ZaberEyeLensDummy] Initialized on port {port}, axis {axis_index}")
         self.home()
@@ -223,9 +347,155 @@ class ZaberEyeLensDummy:
         self._slew_guard_thread = t
         t.start()
 
+    def start_position_log(self, *, poll_s: float = 0.01) -> None:
+        """
+        Start a background thread that logs (perf_counter time, z position).
+        poll_s sets the target polling period (e.g., 10 ms).
+        """
+        if self._log_active:
+            raise RuntimeError("Position logging already running")
+
+        poll_s = float(poll_s)
+        if poll_s <= 0:
+            raise ValueError("poll_s must be > 0")
+
+        # reset buffers
+        with self._log_lock:
+            self._log_t = []
+            self._log_z = []
+
+        self._log_active = True
+
+        def _loop():
+            next_t = time.perf_counter()
+            try:
+                while self._log_active:
+                    # pace ourselves (more stable than time.sleep(poll_s) in a loop)
+                    now = time.perf_counter()
+                    if now < next_t:
+                        time.sleep(next_t - now)
+                        continue
+                    next_t += poll_s
+
+                    t = time.perf_counter()
+                    z = float(self.get_position())
+
+                    with self._log_lock:
+                        self._log_t.append(t)
+                        self._log_z.append(z)
+            finally:
+                self._log_active = False
+
+        th = threading.Thread(target=_loop, name="ZaberPosLog", daemon=True)
+        self._log_thread = th
+        th.start()
+
+    def stop_position_log(self, *, join_timeout_s: float = 2.0) -> ZaberPositionLog:
+        """
+        Stop the position log thread and return a ZaberPositionLog.
+        """
+        if not self._log_active:
+            # return empty
+            return ZaberPositionLog(
+                t_perf=np.empty(0, dtype=np.float64),
+                z_um=np.empty(0, dtype=np.float64),
+            )
+
+        self._log_active = False
+        th = self._log_thread
+        if th is not None:
+            th.join(timeout=float(join_timeout_s))
+            if th.is_alive():
+                raise TimeoutError("Zaber position log thread did not stop")
+
+        with self._log_lock:
+            t = np.asarray(self._log_t, dtype=np.float64)
+            z = np.asarray(self._log_z, dtype=np.float64)
+
+        # Ensure strictly increasing times for interpolation
+        if t.size >= 2:
+            keep = np.concatenate(([True], np.diff(t) > 0))
+            t = t[keep]
+            z = z[keep]
+
+        return ZaberPositionLog(t_perf=t, z_um=z)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def slewing_with_log(self, speed_um_per_s: float, max_distance_um: float, *, poll_s: float = 0.01):
+        """
+        Context manager: starts guarded slewing + position log, then always stops both.
+        Yields nothing; collect log with stop_position_log() after exiting.
+        """
+        self.start_position_log(poll_s=poll_s)
+        try:
+            self.start_slewing_guarded(speed_um_per_s, max_distance_um)
+            yield
+        finally:
+            try:
+                self.stop_slewing()
+            except Exception:
+                pass
+            # stop log after motion stop (captures stop point)
+            _ = self.stop_position_log()
+
+
     def close(self):
         print(f"[ZaberEyeLensDummy] Shutdown: port {self.port}, axis {self.axis_index}")
 
 
 if __name__ == "__main__":
-    zaber_hi = ZaberEyeLens()
+
+    z = ZaberEyeLens()
+
+    print("\n--- Zaber get_position() latency test ---")
+
+    n = 100
+    times = []
+
+    for _ in range(n):
+        t0 = time.perf_counter()
+        _ = z.get_position()
+        t1 = time.perf_counter()
+        times.append(t1 - t0)
+
+    import numpy as np
+
+    times = np.array(times)
+
+    print(f"mean latency : {times.mean()*1000:.2f} ms")
+    print(f"median       : {np.median(times)*1000:.2f} ms")
+    print(f"min          : {times.min()*1000:.2f} ms")
+    print(f"max          : {times.max()*1000:.2f} ms")
+    print(f"std          : {times.std()*1000:.2f} ms")
+
+    print("\n--- Continuous polling test (2 seconds) ---")
+
+    duration = 2.0
+    ts = []
+    zs = []
+
+    t_end = time.perf_counter() + duration
+
+    while time.perf_counter() < t_end:
+        t0 = time.perf_counter()
+        zpos = z.get_position()
+        t1 = time.perf_counter()
+
+        ts.append(0.5 * (t0 + t1))  # midpoint timestamp
+        zs.append(zpos)
+
+    ts = np.array(ts)
+
+    rate = len(ts) / duration
+
+    if len(ts) > 1:
+        dt = np.diff(ts)
+        print(f"samples collected : {len(ts)}")
+        print(f"polling rate      : {rate:.1f} Hz")
+        print(f"dt mean           : {dt.mean()*1000:.2f} ms")
+        print(f"dt std            : {dt.std()*1000:.2f} ms")
+        print(f"dt max            : {dt.max()*1000:.2f} ms")
+
+    print("\nDone.")
