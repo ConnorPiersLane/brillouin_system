@@ -178,7 +178,6 @@ class ZaberEyeLens:
                     t1 = time.perf_counter()
 
                     t = 0.5 * (t0 + t1)
-                    t = t0
 
                     with self._log_lock:
                         self._log_t.append(t)
