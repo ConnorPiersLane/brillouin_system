@@ -252,15 +252,15 @@ if __name__ == "__main__":
 
     ni = NI6008()
     z = ZaberEyeLens()
-
+    z.move_abs(12000)
     with ni.streaming():
         res = find_reflection_realtime(
             ni, z,
             mode="max",                  # or "midpoint"
             speed_um_s=5000.0,
             max_distance_um=5000.0,
-            threshold_high=0.2,
-            threshold_low=0.1,
+            threshold_high=0.1,
+            threshold_low=0.05,
             debounce_s=0.020,
             max_time_s=10.0,
             z_poll_s=0.016,
