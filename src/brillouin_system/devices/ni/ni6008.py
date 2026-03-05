@@ -204,6 +204,8 @@ class NI6008:
             idle_sleep_s:
                 Sleep when no samples are available (prevents busy-wait).
         """
+        self.flush()
+
         max_samples = int(max_samples)
         if max_samples <= 0:
             raise ValueError("max_samples must be > 0")
@@ -269,7 +271,8 @@ class NI6008:
 
                     avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
                     if avail <= 0:
-                        time.sleep(idle_sleep_s)
+                        if not first_chunk:
+                            time.sleep(idle_sleep_s)
                         continue
 
                     want = min(room, chunk_size, avail)
@@ -328,7 +331,7 @@ class NI6008:
                     if acq2 is not None:
                         acq2.running = False
 
-        self.flush()
+        #
         th = threading.Thread(target=_producer, name="NI6008Acq", daemon=True)
         self._acq.thread = th
         th.start()

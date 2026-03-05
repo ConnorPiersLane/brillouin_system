@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 import numpy as np
 
-from brillouin_system.devices.ni.ni6008 import NI6008
+from brillouin_system.devices.ni.ni6008 import NI6008, ReadResult
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 
 
@@ -55,7 +55,7 @@ class ZaberNISlewScanner:
         speed_um_s: float,
         max_distance_um: float,
         max_samples: int,
-        z_poll_s: float = 0.0,
+        z_poll_s: float = 0.016,
         peak_mode: str = "max",   # "max" or "absmax"
     ) -> SlewScanResult:
         """
@@ -69,6 +69,7 @@ class ZaberNISlewScanner:
           peak_mode: "max" finds argmax(signal), "absmax" finds argmax(abs(signal))
         """
         # --- start DAQ acquisition ---
+        self.ni.flush()
         self.ni.start_acquiring(max_samples=int(max_samples), chunk_size=2048)
 
         # --- start Zaber position logging (midpoint timestamps) ---
@@ -145,6 +146,7 @@ class ZaberNISlewScanner:
 if __name__ ==  "__main__":
     ni = NI6008(sample_rate_hz=1000)
     zaber = ZaberEyeLens()
+    zaber.move_abs(10000)
     scanner = ZaberNISlewScanner(ni, zaber)
 
     with ni.streaming():

@@ -59,8 +59,8 @@ class ZaberEyeLens:
         self.axis.wait_until_idle()
 
     def move_init(self):
-        self.move_abs(12e3)
-
+        # self.move_abs(12e3)
+        self.move_abs(0)
     def move_abs(self, position_um: float):
         self.axis.move_absolute(position_um, Units.LENGTH_MICROMETRES)
         self.axis.wait_until_idle()
@@ -178,7 +178,7 @@ class ZaberEyeLens:
                     t1 = time.perf_counter()
 
                     lat = t1 - t0
-                    alpha = 0.2  # calibrated
+                    alpha = 0.25 # calibrated
                     t = t0 + alpha * lat
 
                     with self._log_lock:
