@@ -1,258 +1,245 @@
-# ni_reflection_finder_switchable.py
+# ni_reflection_finder_realtime_ts.py
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
-from typing import Optional, Literal
+from dataclasses import dataclass
+from typing import Literal, Optional
 
 import numpy as np
 
 Mode = Literal["midpoint", "max"]
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ReflectionResult:
     found: bool
     mode: Mode
-    z_um: Optional[float] = None
-    t_event_perf: Optional[float] = None
-    idx_first: Optional[int] = None
-    idx_last: Optional[int] = None
-    idx_event: Optional[int] = None  # midpoint idx or max-idx within interval
-    peak_value: Optional[float] = None  # only meaningful in mode="max"
+    event_index: Optional[int] = None          # index into daq.values
+    event_time_perf: Optional[float] = None    # daq.time_of(event_index)
+    event_z_um: Optional[float] = None         # interpolated z at event time
+    peak_value: Optional[float] = None         # only meaningful for mode="max"
+    idx_first: Optional[int] = None            # interval start (index into daq.values)
+    idx_last: Optional[int] = None             # last above threshold_high (index into daq.values)
 
 
-def find_reflection_while_slewing(
+def _interp_z(t_query: float, t_z: np.ndarray, z_um: np.ndarray) -> float:
+    """Linear interpolation with monotonic-time cleanup (like your slew scanner)."""
+    t_z = np.asarray(t_z, dtype=np.float64)
+    z_um = np.asarray(z_um, dtype=np.float64)
+    if t_z.size < 2:
+        return float("nan")
+    keep = np.concatenate(([True], np.diff(t_z) > 0))
+    t_z = t_z[keep]
+    z_um = z_um[keep]
+    if t_z.size < 2:
+        return float("nan")
+    return float(np.interp(np.array([t_query], dtype=np.float64), t_z, z_um)[0])
+
+
+def find_reflection_realtime(
     ni,
     zaber,
     *,
     mode: Mode = "midpoint",
-    speed_um_per_s: float,
+    speed_um_s: float,
     max_distance_um: float,
     threshold_high: float,
     threshold_low: float,
-    debounce_s: float = 0.010,
-    poll_s: float = 0.010,
-    read_timeout_s: float = 0.010,
+    debounce_s: float = 0.020,     # 20 ms at 1 kHz is a good start
     max_time_s: float = 10.0,
-    flush_first: bool = True,
-    # optional fallback if scan ends before interval ends
-    return_best_if_timeout: bool = True,
+    z_poll_s: float = 0.016,       # ~63 Hz like your calibration; set 0 for "as fast as possible"
+    chunk_size: int = 2048,
+    pretrigger_flush: bool = True,
+    z_offset_um: float = 0.0,      # optional manual offset like your slew scanner
 ) -> ReflectionResult:
     """
-    Detect a single above-threshold interval using hysteresis + debounce.
-    Then return either:
-      - mode="midpoint": midpoint index of the interval
-      - mode="max": max sample within the interval
+    Early-stop reflection finder that matches your "2 µm" calibration architecture:
+      - Use NI background acquisition timestamps (daq.time_of(i))
+      - Use full Zaber position log + interpolation
+      - Stop slewing immediately after the reflection interval ends
 
-    Timestamping:
-      - DAQ event time is computed from NI ReadResult.t0_perf + (global_sample_idx / fs)
-      - Z is found by interpolating Zaber position log vs perf_counter timestamps
+    Interval definition (hysteresis + debounce):
+      start when v > threshold_high
+      end when v <= threshold_low for debounce_s
 
-    Requirements from your existing classes:
-      - ni.read_available_block(timeout_s=...) -> rr with rr.values, rr.sample_rate_hz, rr.t0_perf
-      - ni.flush() (optional)
-      - zaber.start_position_log(poll_s=...)
-      - zaber.stop_position_log() -> log with .interp(np.array([t]))
-      - zaber.start_slewing_guarded(speed_um_per_s, max_distance_um)
-      - zaber.stop_slewing()
-      - zaber.get_position() (fallback)
+    Returns either:
+      mode="midpoint": event index = midpoint(idx_first, idx_last_above)
+      mode="max":      event index = argmax(v) within the interval
     """
     if mode not in ("midpoint", "max"):
         raise ValueError(f"mode must be 'midpoint' or 'max', got {mode!r}")
 
-    if flush_first:
+    fs = float(getattr(ni, "sample_rate_hz", 1000.0))
+    debounce_samples = max(1, int(round(float(debounce_s) * fs)))
+    max_samples = int(fs * float(max_time_s)) + int(chunk_size) * 2  # a bit of headroom
+
+    # Optional: flush FIFO / settle before starting the timed scan
+    if pretrigger_flush:
         try:
             ni.flush()
         except Exception:
             pass
 
-    t_start = time.perf_counter()
-
-    # Global sample accounting
-    gidx = 0
-    t0_global: Optional[float] = None
-    fs: Optional[float] = None
-    debounce_samples: Optional[int] = None
-
-    # Interval state
+    # Interval state (indices are absolute indices into the acquisition stream == daq.values)
     in_interval = False
     idx_first: Optional[int] = None
     idx_last_above: Optional[int] = None
     low_run = 0
 
-    # "max within interval" tracking
+    # Track max within interval
     best_v = float("-inf")
     best_idx: Optional[int] = None
 
-    # Keep last-known data in case we timeout while inside an interval
-    last_rr_t0: Optional[float] = None  # not strictly needed, but handy for debugging
+    last_idx = 0  # NI background write index cursor
+    t_start = time.perf_counter()
 
     zlog = None
+    daq = None
 
-    def finalize_with_event_idx(event_idx: int, peak_value: Optional[float]) -> ReflectionResult:
-        assert t0_global is not None and fs is not None
+    try:
+        # --- start DAQ acquisition (internal perf timeline model) ---
+        ni.start_acquiring(max_samples=max_samples, chunk_size=int(chunk_size))
 
-        t_event = float(t0_global) + (float(event_idx) / float(fs))
+        # --- start Zaber position logging ---
+        zaber.start_position_log(poll_s=float(z_poll_s) if z_poll_s > 0 else 0.0)
 
-        # stop motion & get log (best effort)
+        # --- start motion ---
+        zaber.start_slewing_guarded(float(speed_um_s), float(max_distance_um))
+
+        while True:
+            if (time.perf_counter() - t_start) > float(max_time_s):
+                break
+
+            rr, last_idx = ni.get_new_block(last_idx, copy=False)
+            xs = rr.values
+            n = int(xs.size)
+            if n <= 0:
+                time.sleep(0.001)
+                continue
+
+            # rr.t0_perf is the time of xs[0] (already aligned to acquisition t0)
+            # Absolute index of xs[0] in the full acquisition stream:
+            start_i = int(last_idx - n)
+
+            # Scan this block sample-by-sample (1 kHz -> totally fine)
+            th_hi = float(threshold_high)
+            th_lo = float(threshold_low)
+
+            for j in range(n):
+                v = float(xs[j])
+                i_abs = start_i + j  # absolute sample index (daq.values index)
+
+                if not in_interval:
+                    if v > th_hi:
+                        in_interval = True
+                        idx_first = i_abs
+                        idx_last_above = i_abs
+                        low_run = 0
+                        best_v = v
+                        best_idx = i_abs
+                else:
+                    # Update "last above high" and max tracking
+                    if v > th_hi:
+                        idx_last_above = i_abs
+                        low_run = 0
+                    # For max mode, keep tracking max anywhere inside the interval
+                    if mode == "max" and v > best_v:
+                        best_v = v
+                        best_idx = i_abs
+
+                    # End condition: baseline (low) for debounce_samples
+                    if v <= th_lo:
+                        low_run += 1
+                        if low_run >= debounce_samples:
+                            # Interval ended -> we can stop early
+                            raise StopIteration
+                    else:
+                        low_run = 0
+
+    except StopIteration:
+        pass
+    finally:
+        # Stop motion/logging/acq (best effort)
         try:
             zaber.stop_slewing()
         except Exception:
             pass
 
-        nonlocal zlog
         try:
             zlog = zaber.stop_position_log()
         except Exception:
             zlog = None
 
-        if zlog is None or getattr(zlog, "t_perf", np.array([])).size == 0:
-            z_event = float(zaber.get_position())
+        try:
+            daq = ni.stop_acquiring()
+        except Exception:
+            daq = None
+
+    # Validate we detected something
+    if (not in_interval) or idx_first is None or idx_last_above is None or daq is None:
+        return ReflectionResult(found=False, mode=mode)
+
+    # Choose event index
+    if mode == "midpoint":
+        event_i = int((idx_first + idx_last_above) // 2)
+        peak_val = None
+    else:
+        if best_idx is None:
+            event_i = int((idx_first + idx_last_above) // 2)
+            peak_val = None
         else:
-            z_event = float(zlog.interp(np.array([t_event], dtype=np.float64))[0])
+            event_i = int(best_idx)
+            peak_val = float(best_v)
 
-        return ReflectionResult(
-            found=True,
-            mode=mode,
-            z_um=z_event,
-            t_event_perf=t_event,
-            idx_first=int(idx_first) if idx_first is not None else None,
-            idx_last=int(idx_last_above) if idx_last_above is not None else None,
-            idx_event=int(event_idx),
-            peak_value=float(peak_value) if peak_value is not None else None,
-        )
-
+    # Use DAQ internal timestamp model (same as your calibration: daq.time_of(i))
     try:
-        zaber.start_position_log(poll_s=poll_s)
-        zaber.start_slewing_guarded(float(speed_um_per_s), float(max_distance_um))
+        t_event = float(daq.time_of(event_i))
+    except Exception:
+        # Fallback if time_of isn't available for some reason
+        t_event = float(daq.t0_perf) + (float(event_i) / float(daq.sample_rate_hz))
 
-        while True:
-            if (time.perf_counter() - t_start) > float(max_time_s):
-                # Timeout: optionally return best-so-far if we're inside an interval
-                if return_best_if_timeout and in_interval and idx_first is not None:
-                    if mode == "midpoint":
-                        assert idx_last_above is not None
-                        event_idx = (idx_first + idx_last_above) // 2
-                        return finalize_with_event_idx(event_idx, None)
-                    else:
-                        if best_idx is None:
-                            # interval started but we never updated best (shouldn't happen)
-                            best_idx = idx_first
-                            best_v_local = None
-                        else:
-                            best_v_local = best_v
-                        return finalize_with_event_idx(int(best_idx), best_v_local)
-                return ReflectionResult(found=False, mode=mode)
-
-            rr = ni.read_available_block(timeout_s=float(read_timeout_s))
-            arr = rr.values
-            n = int(arr.size)
-            if n <= 0:
-                time.sleep(0.001)
-                continue
-
-            last_rr_t0 = float(rr.t0_perf)
-
-            if t0_global is None:
-                t0_global = float(rr.t0_perf)
-            fs = float(rr.sample_rate_hz)
-
-            if debounce_samples is None:
-                debounce_samples = max(1, int(round(float(debounce_s) * fs)))
-
-            th_hi = float(threshold_high)
-            th_lo = float(threshold_low)
-
-            for i in range(n):
-                v = float(arr[i])
-                gi = gidx + i
-
-                if not in_interval:
-                    if v > th_hi:
-                        in_interval = True
-                        idx_first = gi
-                        idx_last_above = gi
-                        low_run = 0
-
-                        # init max-tracking at interval start
-                        best_v = v
-                        best_idx = gi
-                else:
-                    # update last-above and max-tracker
-                    if v > th_hi:
-                        idx_last_above = gi
-                        low_run = 0
-                        if mode == "max" and v > best_v:
-                            best_v = v
-                            best_idx = gi
-                    else:
-                        # still track max even if between hi/lo (optional but usually desired)
-                        if mode == "max" and v > best_v:
-                            best_v = v
-                            best_idx = gi
-
-                        if v <= th_lo:
-                            low_run += 1
-                            if low_run >= int(debounce_samples):
-                                # Interval ended -> choose event index
-                                assert idx_first is not None and idx_last_above is not None
-                                if mode == "midpoint":
-                                    event_idx = (idx_first + idx_last_above) // 2
-                                    return finalize_with_event_idx(event_idx, None)
-                                else:
-                                    # max within interval
-                                    if best_idx is None:
-                                        best_idx = (idx_first + idx_last_above) // 2
-                                        peak_value = None
-                                    else:
-                                        peak_value = best_v
-                                    return finalize_with_event_idx(int(best_idx), peak_value)
-                        else:
-                            # between low and high: don't accumulate low_run
-                            low_run = 0
-
-            gidx += n
-
-    finally:
-        # Safety cleanup: don't leak motion/logging
+    # Interpolate Z from the full Zaber log (same monotonic cleanup as your calibration)
+    if zlog is None or getattr(zlog, "t_perf", np.array([])).size < 2:
         try:
-            zaber.stop_slewing()
+            z_event = float(zaber.get_position())
         except Exception:
-            pass
-        try:
-            zaber.stop_position_log()
-        except Exception:
-            pass
+            z_event = float("nan")
+    else:
+        z_event = _interp_z(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
+    z_event = float(z_event) + float(z_offset_um)
+
+    return ReflectionResult(
+        found=True,
+        mode=mode,
+        event_index=event_i,
+        event_time_perf=t_event,
+        event_z_um=z_event,
+        peak_value=peak_val,
+        idx_first=int(idx_first),
+        idx_last=int(idx_last_above),
+    )
 
 
-# --- Example usage ---
-# from ni6008 import NI6008
-# from zaber_eye_lens import ZaberEyeLens
-#
-# ni = NI6008(sample_rate_hz=1000)
-# z = ZaberEyeLens(port="COM5", axis_index=1)
-#
-# with ni.streaming():
-#     res_mid = find_reflection_while_slewing(
-#         ni, z,
-#         mode="midpoint",
-#         speed_um_per_s=200.0,
-#         max_distance_um=3000.0,
-#         threshold_high=0.8,
-#         threshold_low=0.2,
-#         debounce_s=0.020,
-#         max_time_s=10.0,
-#     )
-#     res_max = find_reflection_while_slewing(
-#         ni, z,
-#         mode="max",
-#         speed_um_per_s=200.0,
-#         max_distance_um=3000.0,
-#         threshold_high=0.8,
-#         threshold_low=0.2,
-#         debounce_s=0.020,
-#         max_time_s=10.0,
-#     )
-# print(res_mid)
-# print(res_max)
+# --------------------
+# Example usage
+# --------------------
+from brillouin_system.devices.ni.ni6008 import NI6008
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+
+ni = NI6008()
+z = ZaberEyeLens()
+
+with ni.streaming():
+    res = find_reflection_realtime(
+        ni, z,
+        mode="max",                  # or "midpoint"
+        speed_um_s=5000.0,
+        max_distance_um=5000.0,
+        threshold_high=0.2,
+        threshold_low=0.1,
+        debounce_s=0.020,
+        max_time_s=10.0,
+        z_poll_s=0.016,
+    )
+print(res)
+z.move_abs(res.event_z_um)
