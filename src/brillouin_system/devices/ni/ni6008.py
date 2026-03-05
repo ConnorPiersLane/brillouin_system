@@ -276,7 +276,11 @@ class NI6008(NIBase):
                             stop_evt.set()
                             break
 
-                    want = min(room, chunk_size)
+                    avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
+                    if avail <= 0:
+                        continue  # or time.sleep(0.001)
+
+                    want = min(room, chunk_size, avail)
 
                     # Block in DAQmx briefly instead of polling avail
                     try:

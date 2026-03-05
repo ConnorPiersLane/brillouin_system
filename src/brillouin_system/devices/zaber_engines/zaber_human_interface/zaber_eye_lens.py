@@ -143,7 +143,7 @@ class ZaberEyeLens:
         self._slew_guard_thread = t
         t.start()
 
-    def start_position_log(self, *, poll_s: float = 0.01) -> None:
+    def start_position_log(self, *, poll_s: float = 0.016) -> None:
         """
         Start a background thread that logs (perf_counter time, z position).
         poll_s sets the target polling period (e.g., 10 ms).
@@ -178,6 +178,7 @@ class ZaberEyeLens:
                     t1 = time.perf_counter()
 
                     t = 0.5 * (t0 + t1)
+                    t = t0
 
                     with self._log_lock:
                         self._log_t.append(t)
@@ -446,6 +447,7 @@ class ZaberEyeLensDummy:
 
 
 if __name__ == "__main__":
+    import numpy as np
 
     z = ZaberEyeLens()
 
@@ -499,3 +501,122 @@ if __name__ == "__main__":
         print(f"dt max            : {dt.max()*1000:.2f} ms")
 
     print("\nDone.")
+
+
+    # ---- Configure test ----
+    v_cmd = 1000.0          # µm/s (try 100, 200, 500, 1000)
+    dist_um = 5000.0       # total travel for guarded slew
+    poll_s = 0.0           # 0 means "as fast as get_position allows" (~63 Hz for you)
+
+    print("\n--- Slewing test ---")
+    print(f"Commanded speed: {v_cmd:.1f} µm/s")
+    print(f"Guard distance : {dist_um:.1f} µm")
+    print(f"Polling        : {'max speed' if poll_s <= 0 else f'{poll_s*1000:.1f} ms'}")
+
+    # ---- Simple local logger (uses midpoint timestamps) ----
+    t_list = []
+    z_list = []
+    lat_list = []
+
+
+    stop_log = threading.Event()
+
+
+    def log_loop():
+        while not stop_log.is_set():
+            t0 = time.perf_counter()
+            pos = float(z.get_position())
+            t1 = time.perf_counter()
+
+            t_mid = 0.5 * (t0 + t1)
+
+            t_list.append(t_mid)
+            z_list.append(pos)
+            lat_list.append(t1 - t0)
+
+            if poll_s > 0:
+                time.sleep(poll_s)
+
+    # ---- Run motion + logging ----
+    start_pos = float(z.get_position())
+
+    th = threading.Thread(target=log_loop, daemon=True)
+    th.start()
+
+    t_start = time.perf_counter()
+    z.start_slewing_guarded(speed_um_per_s=v_cmd, max_distance_um=dist_um)
+
+    # wait until guard likely done (distance/speed + margin)
+    t_expected = abs(dist_um / v_cmd)
+    time.sleep(t_expected + 0.25)
+
+    z.stop_slewing()
+    t_stop = time.perf_counter()
+
+    stop_log.set()
+    th.join(timeout=2.0)
+
+    end_pos = float(z.get_position())
+
+    # ---- Convert to arrays ----
+    t = np.asarray(t_list, dtype=np.float64)
+    p = np.asarray(z_list, dtype=np.float64)
+    lat = np.asarray(lat_list, dtype=np.float64)
+
+    # Keep only samples within [t_start, t_stop] window (motion interval)
+    if t.size > 0:
+        m = (t >= t_start) & (t <= t_stop)
+        t = t[m]
+        p = p[m]
+        lat = lat[m]
+
+    print(f"\nCollected {t.size} samples during motion")
+    if t.size < 3:
+        print("Not enough samples to analyze. Try increasing dist_um.")
+    else:
+        # Ensure increasing timestamps for diffs/interp
+        keep = np.concatenate(([True], np.diff(t) > 0))
+        t = t[keep]
+        p = p[keep]
+        lat = lat[keep]
+
+        dt = np.diff(t)
+        dp = np.diff(p)
+
+        v_est = dp / dt
+
+        print("\n--- Timing / latency ---")
+        print(f"get_position latency mean : {lat.mean()*1000:.2f} ms")
+        print(f"get_position latency std  : {lat.std()*1000:.2f} ms")
+        print(f"effective poll rate       : {1.0/dt.mean():.1f} Hz (mean dt {dt.mean()*1000:.2f} ms)")
+
+        print("\n--- Velocity estimate from log ---")
+        print(f"v_est mean : {v_est.mean():.2f} µm/s")
+        print(f"v_est std  : {v_est.std():.2f} µm/s")
+        print(f"v_cmd      : {v_cmd:.2f} µm/s")
+
+        # Ignore first/last 15% to reduce accel/decel effects (simple trim)
+        n = v_est.size
+        i0 = int(0.15 * n)
+        i1 = int(0.85 * n) if int(0.85 * n) > i0 else n
+        v_mid = v_est[i0:i1] if i1 > i0 else v_est
+
+        print("\n--- Mid-run velocity (trim accel/decel) ---")
+        print(f"v_mid mean : {v_mid.mean():.2f} µm/s")
+        print(f"v_mid std  : {v_mid.std():.2f} µm/s")
+
+        # Compare against pos+speed prediction using first sample
+        z_pred = p[0] + v_cmd * (t - t[0])
+        err = p - z_pred
+
+        print("\n--- pos+speed prediction residual ---")
+        print(f"err mean : {err.mean():.2f} µm")
+        print(f"err std  : {err.std():.2f} µm")
+        print(f"err max  : {np.max(np.abs(err)):.2f} µm")
+
+    print("\n--- Start/End position sanity ---")
+    print(f"start_pos: {start_pos:.2f} µm")
+    print(f"end_pos  : {end_pos:.2f} µm")
+    print(f"delta    : {end_pos - start_pos:.2f} µm (expected ~{dist_um:+.2f} µm)")
+
+    z.close()
