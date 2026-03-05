@@ -269,8 +269,6 @@ class NI6008:
 
                     avail = int(getattr(self._task.in_stream, "avail_samp_per_chan", 0))
                     if avail <= 0:
-                        if idle_sleep_s > 0:
-                            time.sleep(idle_sleep_s)
                         continue
 
                     want = min(room, chunk_size, avail)
@@ -313,9 +311,8 @@ class NI6008:
                         acq2.values[acq2.write_idx: acq2.write_idx + take] = tmp[:take]
 
                         if first_chunk:
-                            # Best-effort anchor: time_of(last_written_index) ~= t_after
-                            last_i = acq2.write_idx + take - 1
-                            acq2.t0_perf = t_after - (last_i / acq2.sample_rate_hz)
+                            # treat t_after as time of the last sample of this chunk
+                            acq2.t0_perf = t_after - ((take - 1) / acq2.sample_rate_hz)
                             first_chunk = False
 
                         acq2.write_idx += take
