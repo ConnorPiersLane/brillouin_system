@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 import numpy as np
 
-from brillouin_system.devices.ni.ni6008_7 import NI6008
+from brillouin_system.devices.ni.ni6008 import NI6008
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 
 
