@@ -143,7 +143,7 @@ class ZaberNISlewScanner:
         return self.z_offset_um
 
 if __name__ ==  "__main__":
-    ni = NI6008()
+    ni = NI6008(sample_rate_hz=1000)
     zaber = ZaberEyeLens()
     scanner = ZaberNISlewScanner(ni, zaber)
 
