@@ -149,7 +149,7 @@ if __name__ ==  "__main__":
 
     with ni.streaming():
         res = scanner.run_slew_scan(
-            speed_um_s=1000.0,
+            speed_um_s=10000.0,
             max_distance_um=5000.0,
             max_samples=int(ni.sample_rate_hz * 15),  # enough samples for the whole motion
             z_poll_s=0.016,                             # as fast as possible (~63 Hz)
@@ -158,4 +158,5 @@ if __name__ ==  "__main__":
 
     print("peak value:", res.peak_value)
     print("peak z (uncalibrated):", res.peak_z_um)
-
+    z_offset = scanner.calibrate_plane_offset(measured_peak_z_um=res.peak_z_um, true_plane_z_um=13291)
+    print(z_offset)

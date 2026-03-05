@@ -177,7 +177,9 @@ class ZaberEyeLens:
                     z = self.get_position()
                     t1 = time.perf_counter()
 
-                    t = 0.5 * (t0 + t1)
+                    lat = t1 - t0
+                    alpha = 0.2  # calibrated
+                    t = t0 + alpha * lat
 
                     with self._log_lock:
                         self._log_t.append(t)
