@@ -4,6 +4,9 @@ import time
 from dataclasses import dataclass
 import numpy as np
 
+from brillouin_system.devices.ni.ni6008 import NI6008
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+
 
 @dataclass(frozen=True, slots=True)
 class SlewScanResult:
@@ -140,29 +143,19 @@ class ZaberNISlewScanner:
         return self.z_offset_um
 
 if __name__ ==  "__main__":
+    ni = NI6008()
+    zaber = ZaberEyeLens()
     scanner = ZaberNISlewScanner(ni, zaber)
 
     with ni.streaming():
         res = scanner.run_slew_scan(
-            speed_um_s=300.0,
-            max_distance_um=3000.0,
+            speed_um_s=1000.0,
+            max_distance_um=5000.0,
             max_samples=int(ni.sample_rate_hz * 15),  # enough samples for the whole motion
-            z_poll_s=0.0,                             # as fast as possible (~63 Hz)
+            z_poll_s=0.016,                             # as fast as possible (~63 Hz)
             peak_mode="max",
         )
 
     print("peak value:", res.peak_value)
     print("peak z (uncalibrated):", res.peak_z_um)
-    scanner = ZaberNISlewScanner(ni, zaber)
 
-    with ni.streaming():
-        res = scanner.run_slew_scan(
-            speed_um_s=300.0,
-            max_distance_um=3000.0,
-            max_samples=int(ni.sample_rate_hz * 15),  # enough samples for the whole motion
-            z_poll_s=0.0,  # as fast as possible (~63 Hz)
-            peak_mode="max",
-        )
-
-    print("peak value:", res.peak_value)
-    print("peak z (uncalibrated):", res.peak_z_um)
