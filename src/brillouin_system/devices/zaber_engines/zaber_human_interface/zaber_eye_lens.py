@@ -10,7 +10,7 @@ from zaber_motion.ascii.axis import Axis
 from dataclasses import dataclass
 import numpy as np
 
-
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_position_log import ZaberPositionLog
 
 
 class ZaberEyeLens:

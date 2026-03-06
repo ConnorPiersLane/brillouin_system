@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_position_log import interp_z_positions, ZaberPositionLog
 
@@ -223,7 +224,7 @@ if __name__ == "__main__":
 
     ni = NI6008()
     z = ZaberEyeLens()
-    z.move_abs(0)
+    z.move_abs(10000)
     res = find_reflection_realtime(
         ni, z,
         ni_sample_rate_hz=1000,
@@ -238,7 +239,16 @@ if __name__ == "__main__":
         idle_sleep_s=0.001,
     )
 
-    print(res)
+    # print(res)
 
     if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
         z.move_abs(res.event_z_um)
+
+    plt.figure()
+    # plt.plot(r[:500], marker='o')
+    plt.plot(res.zaber_lens_ts, res.zaber_lens_z_um, marker='o')
+    plt.axvline(x=res.event_time_perf)  # vertical line at xe
+
+    plt.grid(True)
+
+    plt.show()
