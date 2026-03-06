@@ -2,24 +2,33 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Iterator, List
+from typing import Iterator, Protocol, runtime_checkable
 
-import numpy as np
+
+@runtime_checkable
+class SupportsSampleRate(Protocol):
+    sample_rate_hz: float
 
 
 class NIBase(ABC):
     """
     Abstract base class for NI-like analog input devices.
 
-    Expected API (matches your NI6008 + dummy patterns):
+    Matches NI6008-style API:
+
       - with ni.streaming():
+      - ni.sample_rate_hz  (attribute/property)
       - ni.read_latest(timeout_s=...) -> float
       - ni.read_block(n, timeout_s=...) -> list[float]
       - ni.read_available_block() -> list[float]
       - ni.flush() -> int
-      - ni.sample_rate_hz (attribute/property)
+
+    Notes:
+      - NI6008 implements sample_rate_hz as an attribute; this base requires it too.
+      - get_sample_rate() is kept for backward compatibility.
     """
 
+    # ---- lifecycle ----
 
     @contextmanager
     @abstractmethod
@@ -33,9 +42,16 @@ class NIBase(ABC):
         """
         yield  # pragma: no cover
 
+    # ---- sample rate ----
+
+    @property
     @abstractmethod
-    def get_sample_rate(self) -> float:
+    def get_sample_rate_hz(self) -> float:
+        """Sample rate in Hz."""
         raise NotImplementedError
+
+
+    # ---- reads ----
 
     @abstractmethod
     def read_latest(self, *, timeout_s: float = 0.05) -> float:
@@ -43,14 +59,14 @@ class NIBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def read_block(self, n: int, *, timeout_s: float = 1.0) -> np.ndarray:
+    def read_block(self, n: int, *, timeout_s: float = 1.0) -> list[float]:
         """
-        Return the next n samples (FIFO). Implementations may return fewer if timeout expires.
+        Return the next n sequential samples (FIFO). May return fewer if timeout expires.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def read_available_block(self) -> np.ndarray:
+    def read_available_block(self) -> list[float]:
         """Return all currently buffered samples (non-blocking), clearing the internal FIFO."""
         raise NotImplementedError
 

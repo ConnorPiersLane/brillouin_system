@@ -4,13 +4,13 @@ import time
 from dataclasses import dataclass
 import numpy as np
 
-from brillouin_system.devices.ni.ni6008 import NI6008, ReadResult
+from brillouin_system.devices.ni.ni6008 import NI6008, NIReadResult
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 
 
 @dataclass(frozen=True, slots=True)
 class SlewScanResult:
-    daq: "ReadResult"                  # from NI
+    daq: "NIReadResult"  # from NI
     z_t: np.ndarray                    # perf times for zaber samples
     z_um: np.ndarray                   # zaber positions
     peak_index: int                    # index into daq.values
@@ -54,8 +54,9 @@ class ZaberNISlewScanner:
         *,
         speed_um_s: float,
         max_distance_um: float,
-        max_samples: int,
+        max_sampling_time_s: int,
         z_poll_s: float = 0.016,
+        alpha: float = 0.25,
         peak_mode: str = "max",   # "max" or "absmax"
     ) -> SlewScanResult:
         """
@@ -66,17 +67,18 @@ class ZaberNISlewScanner:
           max_distance_um: guard distance (slew will stop after this travel)
           max_samples: NI preallocated samples (hard cap)
           z_poll_s: if 0, poll as fast as get_position allows (~63 Hz for you)
+          alpha: calibration parameter for zaber lens timing
           peak_mode: "max" finds argmax(signal), "absmax" finds argmax(abs(signal))
         """
         # --- start DAQ acquisition ---
         self.ni.flush()
-        self.ni.start_acquiring(max_samples=int(max_samples), chunk_size=2048)
+        self.ni.start_acquiring(max_sampling_time_s=max_sampling_time_s, chunk_size=2048)
 
         # --- start Zaber position logging (midpoint timestamps) ---
         # Expect you implemented these:
         #   zaber.start_position_log(poll_s=...)
         #   zaber.stop_position_log() -> ZaberPositionLog with fields t_perf, z_um
-        self.zaber.start_position_log(poll_s=float(z_poll_s) if z_poll_s > 0 else 0.0)
+        self.zaber.start_position_log(poll_s=z_poll_s,  alpha=alpha)
 
         # --- start motion ---
         t_move_start = time.perf_counter()

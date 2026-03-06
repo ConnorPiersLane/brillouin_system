@@ -17,7 +17,7 @@ from nidaqmx.stream_readers import AnalogSingleChannelReader
 # ----------------------------
 
 @dataclass(frozen=True, slots=True)
-class ReadResult:
+class NIReadResult:
     """
     Lightweight read result with a perf_counter anchor.
 
@@ -111,6 +111,37 @@ class NI6008:
 
         self._acq: Optional[_AcqState] = None
 
+    def get_sample_rate_hz(self) -> float:
+        return self.sample_rate_hz
+
+    def set_sample_rate_hz(self, fs: float) -> None:
+        """
+        Set the analog input sample rate (Hz).
+
+        Must be called when the device is not streaming and no background
+        acquisition is running.
+
+        Args:
+            fs:
+                Desired sample rate in Hz.
+        """
+        fs = float(fs)
+
+        if fs <= 0:
+            raise ValueError("sample_rate_hz must be > 0")
+
+        # USB-6008 limit (aggregate AI rate ≈ 10 kS/s)
+        if fs > 10_000:
+            raise ValueError("NI USB-6008 max AI sample rate is ~10 kHz")
+
+        if self._task is not None:
+            raise RuntimeError("Cannot change sample rate while streaming")
+
+        if self._acq is not None and self._acq.running:
+            raise RuntimeError("Cannot change sample rate while acquiring")
+
+        self.sample_rate_hz = fs
+
     @property
     def physical_channel(self) -> str:
         return f"{self.device}/{self.ai_channel}"
@@ -118,13 +149,11 @@ class NI6008:
     # ----------------------------
     # lifecycle
     # ----------------------------
-
-    @contextmanager
-    def streaming(self):
+    def start_streaming(self) -> None:
         """
         Configure and start a continuous DAQmx analog input task.
 
-        Ensures any background acquisition is stopped before closing the task.
+        After this returns, foreground reads and background acquisition are possible.
         """
         if self._task is not None:
             raise RuntimeError("Already streaming")
@@ -137,31 +166,20 @@ class NI6008:
                 max_val=self.max_val,
                 terminal_config=self.terminal_config,
             )
+
             task.timing.cfg_samp_clk_timing(
                 rate=self.sample_rate_hz,
                 sample_mode=AcquisitionType.CONTINUOUS,
                 samps_per_chan=self.samps_per_chan_buffer,
             )
+
             task.start()
 
             self._task = task
             self._reader = AnalogSingleChannelReader(task.in_stream)
 
-            yield
-        finally:
-            # stop background acquisition first
-            acq = self._acq
-            if acq is not None:
-                try:
-                    acq.stop_evt.set()
-                except Exception:
-                    pass
-                acq.thread.join(timeout=2.0)
-                if acq.thread.is_alive():
-                    raise RuntimeError("NI6008 acquisition thread did not stop during streaming() cleanup")
-                self._acq = None
-
-            # stop and close task
+        except Exception:
+            # If anything fails mid-start, make sure we don't leak the task.
             try:
                 task.stop()
             except Exception:
@@ -170,9 +188,56 @@ class NI6008:
                 task.close()
             except Exception:
                 pass
+            raise
 
-            self._task = None
+    def stop_streaming(self, *, join_timeout_s: float = 2.0) -> None:
+        """
+        Stop background acquisition (if running), then stop and close the DAQmx task.
+
+        Safe to call multiple times.
+        """
+        task = self._task
+        if task is None:
             self._reader = None
+            return
+
+        # Stop background acquisition first (best effort)
+        acq = self._acq
+        if acq is not None:
+            try:
+                acq.stop_evt.set()
+            except Exception:
+                pass
+
+            acq.thread.join(timeout=float(join_timeout_s))
+            if acq.thread.is_alive():
+                raise RuntimeError("NI6008 acquisition thread did not stop during stop_streaming()")
+
+            self._acq = None
+
+        # Now stop/close DAQmx task
+        try:
+            task.stop()
+        except Exception:
+            pass
+        try:
+            task.close()
+        except Exception:
+            pass
+
+        self._task = None
+        self._reader = None
+
+    @contextmanager
+    def streaming(self):
+        """
+        Context manager wrapper around start_streaming()/stop_streaming().
+        """
+        self.start_streaming()
+        try:
+            yield
+        finally:
+            self.stop_streaming()
 
     def _ensure_streaming(self) -> None:
         if self._task is None or self._reader is None:
@@ -189,24 +254,28 @@ class NI6008:
     def start_acquiring(
         self,
         *,
-        max_samples: int,
-        chunk_size: int = 2048,
+        max_sampling_time_s: float,
+        chunk_size: int = 1024,
         idle_sleep_s: float = 0.001,
     ) -> None:
         """
         Start background acquisition into a fixed-size buffer.
 
         Args:
-            max_samples:
-                Preallocates exactly this many samples. When full, acquisition stops.
+            max_sampling_time_s:
+                Preallocates exactly this many samples max_sampling_time_s*fs + headroom. When full, acquisition stops.
             chunk_size:
                 Maximum samples read per producer iteration.
             idle_sleep_s:
                 Sleep when no samples are available (prevents busy-wait).
         """
+        self._ensure_streaming()
+        self._ensure_not_acquiring()
         self.flush()
 
-        max_samples = int(max_samples)
+        fs = self.sample_rate_hz
+
+        max_samples = int(max_sampling_time_s * fs + chunk_size * 2 ) # some headroom
         if max_samples <= 0:
             raise ValueError("max_samples must be > 0")
 
@@ -218,13 +287,9 @@ class NI6008:
         if idle_sleep_s < 0:
             raise ValueError("idle_sleep_s must be >= 0")
 
-        if self._acq is not None and self._acq.running:
-            raise RuntimeError("Acquisition already running")
 
-        self._ensure_streaming()
-        assert self._task is not None and self._reader is not None
 
-        fs = float(self.sample_rate_hz)
+
         values = np.empty(max_samples, dtype=np.float64)
 
         stop_evt = threading.Event()
@@ -336,7 +401,7 @@ class NI6008:
         self._acq.thread = th
         th.start()
 
-    def get_new_block(self, last_idx: int, *, copy: bool = False) -> ReadResult:
+    def get_new_block_result(self, last_idx: int, *, copy: bool = False) -> NIReadResult:
         """
         Return the new samples since last_idx while acquisition is running.
 
@@ -359,7 +424,7 @@ class NI6008:
         acq = self._acq
         if acq is None:
             now = time.perf_counter()
-            return ReadResult(self._empty, float(self.sample_rate_hz), now, int(last_idx))
+            return NIReadResult(self._empty, float(self.sample_rate_hz), now, int(last_idx))
 
         start = int(last_idx)
         if start < 0:
@@ -371,13 +436,13 @@ class NI6008:
             fs = float(acq.sample_rate_hz)
 
             if start >= end:
-                return ReadResult(self._empty, fs, t0, start)
+                return NIReadResult(self._empty, fs, t0, start)
 
             view = acq.values[start:end]
             out = view.copy() if copy else view
-            return ReadResult(out, fs, t0, start)
+            return NIReadResult(out, fs, t0, start)
 
-    def get_acquiring_error(self) -> Optional[str]:
+    def get_acquiring_error(self) -> str | None:
         """If the producer hit an exception, returns repr(exception)."""
         acq = self._acq
         if acq is None:
@@ -385,7 +450,7 @@ class NI6008:
         with acq.lock:
             return acq.last_error
 
-    def stop_acquiring(self, *, join_timeout_s: float | None = 2.0) -> ReadResult:
+    def stop_acquiring(self, *, join_timeout_s: float | None = 2.0) -> NIReadResult:
         """
         Stop background acquisition and return collected samples (copied).
 
@@ -395,7 +460,7 @@ class NI6008:
         acq = self._acq
         if acq is None:
             now = time.perf_counter()
-            return ReadResult(self._empty.copy(), float(self.sample_rate_hz), now, 0)
+            return NIReadResult(self._empty.copy(), float(self.sample_rate_hz), now, 0)
 
         acq.stop_evt.set()
 
@@ -413,7 +478,7 @@ class NI6008:
             t0 = float(acq.t0_perf)
 
         self._acq = None
-        return ReadResult(values=values, sample_rate_hz=fs, t0_perf=t0, ind0=0)
+        return NIReadResult(values=values, sample_rate_hz=fs, t0_perf=t0, ind0=0)
 
     # ----------------------------
     # optional foreground helper
@@ -619,12 +684,12 @@ if __name__ == "__main__":
 
         # ---- background acquisition ----
         max_samples = int(ni.sample_rate_hz * 2.0)  # 2 seconds
-        ni.start_acquiring(max_samples=max_samples, chunk_size=2048, idle_sleep_s=0.001)
+        ni.start_acquiring(max_sampling_time_s=2.0, chunk_size=2048, idle_sleep_s=0.001)
 
         last = 0
         for _ in range(5):
             time.sleep(0.1)
-            rr = ni.get_new_block(last, copy=False)
+            rr = ni.get_new_block_result(last, copy=False)
 
             n_new = int(rr.values.size)
             last = rr.ind0 + n_new
