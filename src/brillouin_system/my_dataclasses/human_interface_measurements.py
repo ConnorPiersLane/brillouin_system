@@ -8,6 +8,7 @@ from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
+from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, \
     calculate_photon_counts_from_fitted_spectrum
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
@@ -51,8 +52,8 @@ class AxialScan:
     system_state: SystemState
     calibration_params: CalibrationPolyfitParameters | None
     eye_tracker_results: EyeTrackerResults | None = None
-    reflection_plane_estimate_inwards: float | None = None
-    reflection_plane_estimate_outwards: float | None = None
+    reflection_result_forwards: ReflectionResult | None = None
+    reflection_result_backwards: ReflectionResult | None = None
 
 # -------------- Scan Fitting --------------
 

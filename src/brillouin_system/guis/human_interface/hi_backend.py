@@ -15,10 +15,10 @@ from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
-from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLensDummy
+from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens_dummy import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
-from brillouin_system.scan_managers.ni_reflection_finder import ReflectionFinderNI, ReflectionFindingResult
+from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
 from brillouin_system.logging_utils.logging_setup import get_logger
@@ -75,7 +75,7 @@ class HiBackend:
             # zaber_eye_lens=ZaberEyeLens()
             # zaber_hi=ZaberHumanInterface()
             from brillouin_system.devices.ni.ni_dummy import NIDummy
-            daq = NIDummy()
+            ni = NIDummy()
 
         else:
             # camera=IxonUltra(
@@ -97,7 +97,7 @@ class HiBackend:
             # zaber_hi=ZaberHumanInterface()
             zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
-            daq = NI6008()
+            ni = NI6008()
 
         self.andor_camera: BaseCamera | DummyCamera | IxonUltra = camera
         self._andor_config: AndorConfig = andor_frame_config.get()
@@ -115,7 +115,7 @@ class HiBackend:
         self.zaber_hi = zaber_hi
 
         # DAQ
-        self.daq = daq
+        self.ni = ni
 
         # State
         self.is_sample_illumination_continuous: bool = True
@@ -439,8 +439,8 @@ class HiBackend:
 
         lens_x0 = self.zaber_eye_lens.get_position()
         all_results = []
-        reflection_pos_inwards = None
-        reflection_pos_backwards = None
+        reflection_result_forwards: ReflectionResult | None = None
+        reflection_result_backwards: ReflectionResult | None = None
 
         if self.is_reference_mode:
             log.info(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
@@ -471,10 +471,9 @@ class HiBackend:
                   f"ID: {request_axial_scan.id}")
 
             if request_axial_scan.find_reflection_plane:
-                result: ReflectionFindingResult = self.find_reflection_plane(is_go_forwards=True)
-                if result.found:
-                    reflection_pos_inwards = result.z_um
-                    self.zaber_eye_lens.move_abs(reflection_pos_inwards)
+                reflection_result_forwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
+                if reflection_result_forwards.found:
+                    self.zaber_eye_lens.move_abs(reflection_result_forwards.event_z_um)
                 else:
                     self.zaber_eye_lens.move_abs(lens_x0)
                     return False
@@ -521,16 +520,12 @@ class HiBackend:
                     self.shutter_manager.sample.close()
 
         if request_axial_scan.find_reflection_plane:
-            result: ReflectionFindingResult = self.find_reflection_plane(is_go_forwards=False)
-            if result.found:
-                reflection_pos_backwards = result.z_um
-            else:
-                reflection_pos_backwards = None
+            reflection_result_backwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=False)
 
         # Move lens back to original position
         self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
-        print(f"Plane forwards: {reflection_pos_inwards}")
-        print(f"Plane backwards: {reflection_pos_backwards}")
+        print(f"Plane forwards: {reflection_result_forwards.event_z_um}")
+        print(f"Plane backwards: {reflection_result_backwards.event_z_um}")
 
         self._i_axial_scans += 1
 
@@ -541,8 +536,8 @@ class HiBackend:
             system_state=self.get_current_system_state(),
             calibration_params=self.calibration_poly_fit_params,
             eye_tracker_results=request_axial_scan.eye_tracker_results,
-            reflection_plane_estimate_inwards=reflection_pos_inwards,
-            reflection_plane_estimate_outwards=reflection_pos_backwards,
+            reflection_result_forwards=reflection_result_forwards,
+            reflection_result_backwards=reflection_result_backwards,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
 
@@ -704,7 +699,7 @@ class HiBackend:
             log.info(f"[Calibration] Exception: {e}")
             return False
 
-    def find_reflection_plane(self, is_go_forwards: bool=True) -> ReflectionFindingResult:
+    def find_reflection_plane(self, is_go_forwards: bool=True) -> ReflectionResult:
         """
 
         Args:
@@ -716,18 +711,40 @@ class HiBackend:
         """
         if self.is_reference_mode:
             log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
-            return ReflectionFindingResult(found=False, z_um=None)
+            return ReflectionResult(found=False)
 
         try:
             if not self.is_sample_illumination_continuous:
                 self.shutter_manager.sample.open()
 
-            reflection_finder = ReflectionFinderNI(daq=self.daq,
-                                                   zaber_axis=self.zaber_eye_lens,
-                                                   scanning_config=self._axial_scan_config,
-                                                   cancel_cb=self.f2b_cancel_callback)
 
-            result: ReflectionFindingResult = reflection_finder.find_reflection_plane(is_go_forwards=is_go_forwards)
+            ni_sample_rate_hz = self._axial_scan_config.ni_sample_rate_hz
+            if is_go_forwards:
+                speed_um_s = self._axial_scan_config.speed_um_s
+            else:
+                speed_um_s = -self._axial_scan_config.speed_um_s
+            max_distance_um = self._axial_scan_config.max_distance_um
+            threshold_high_n_sigma = self._axial_scan_config.threshold_high_n_sigma
+            threshold_low_n_sigma = self._axial_scan_config.threshold_low_n_sigma
+            bg_acqui_s = self._axial_scan_config.bg_acqui_s
+            debounce_s = self._axial_scan_config.debounce_s
+            z_poll_s = self._axial_scan_config.z_poll_s
+            chunk_size = self._axial_scan_config.chunk_size
+            idle_sleep_s = self._axial_scan_config.idle_sleep_s
+            result: ReflectionResult = find_reflection_realtime(
+                ni=self.ni,
+                zaber=self.zaber_eye_lens,
+                ni_sample_rate_hz=ni_sample_rate_hz,
+                speed_um_s=speed_um_s,
+                max_distance_um=max_distance_um,
+                threshold_high_n_sigma=threshold_high_n_sigma,
+                threshold_low_n_sigma=threshold_low_n_sigma,
+                bg_acqui_s=bg_acqui_s,
+                debounce_s=debounce_s,
+                z_poll_s=z_poll_s,
+                chunk_size=chunk_size,
+                idle_sleep_s=idle_sleep_s,
+            )
             return result
 
         finally:

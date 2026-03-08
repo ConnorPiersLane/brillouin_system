@@ -15,6 +15,7 @@ from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, BackgroundImage
 from brillouin_system.devices.zaber_engines.zaber_position import ZaberPosition
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
+from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
 
 known_classes = {
     cls.__name__: cls
@@ -28,6 +29,7 @@ known_classes = {
         FittedSpectrum, DisplayResults,
         AndorCameraInfo,
         Intrinsics, StereoExtrinsics, StereoCalibration,
-        EyeTrackerConfig, EyeTrackerRawData, EyeTrackerResults
+        EyeTrackerConfig, EyeTrackerRawData, EyeTrackerResults,
+        ReflectionResult,
     ]
 }
