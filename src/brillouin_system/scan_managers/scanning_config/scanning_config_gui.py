@@ -1,26 +1,25 @@
 from __future__ import annotations
 
 from PyQt5.QtWidgets import (
+    QApplication,
     QDialog,
-    QVBoxLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
-    QGroupBox,
-    QApplication,
     QMessageBox,
-    QCheckBox,
+    QPushButton,
+    QVBoxLayout,
 )
-from PyQt5.QtGui import QIntValidator, QDoubleValidator
+from PyQt5.QtGui import QDoubleValidator, QIntValidator
 
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config import (
-    ScanningConfig,
     AXIAL_SCANNING_TOML_PATH,
+    ScanningConfig,
+    axial_scanning_config,
     load_axial_scanning_config,
     save_config_section,
-    axial_scanning_config,
 )
 
 
@@ -28,13 +27,12 @@ class AxialScanningConfigDialog(QDialog):
     def __init__(self, cfg_holder: ThreadSafeConfig | None = None, on_apply=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Axial Scanning Configuration")
-        self.setMinimumSize(380, 460)
+        self.setMinimumSize(430, 500)
 
         self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
 
         self.inputs: dict[str, QLineEdit] = {}
-        self.checks: dict[str, QCheckBox] = {}
 
         layout = QVBoxLayout()
         layout.addWidget(self._group_axial_scanning())
@@ -54,56 +52,57 @@ class AxialScanningConfigDialog(QDialog):
         row.addWidget(widget, 1)
         layout.addLayout(row)
 
-    def _add_check(self, layout: QVBoxLayout, label: str, key: str, cb: QCheckBox):
-        self.checks[key] = cb
-        row = QHBoxLayout()
-        row.addWidget(QLabel(label))
-        row.addWidget(cb, 1)
-        layout.addLayout(row)
-
     def _group_axial_scanning(self) -> QGroupBox:
-        g = QGroupBox("Axial Scanning")
+        g = QGroupBox("Reflection Finder")
         v = QVBoxLayout()
 
-        le_n_sigma = QLineEdit()
-        le_n_sigma.setValidator(QIntValidator(0, 1_000_000))
-        self._add_row(v, "N Sigma", "n_sigma", le_n_sigma)
+        le_sample_rate = QLineEdit()
+        le_sample_rate.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "NI sample rate [Hz]", "ni_sample_rate_hz", le_sample_rate)
 
         le_speed = QLineEdit()
-        le_speed.setValidator(QDoubleValidator(-1e12, 1e12, 6))
+        le_speed.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "Speed [µm/s]", "speed_um_s", le_speed)
 
-        le_max_search = QLineEdit()
-        le_max_search.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Max search distance [µm]", "max_search_distance_um", le_max_search)
+        le_max_distance = QLineEdit()
+        le_max_distance.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Max distance [µm]", "max_distance_um", le_max_distance)
 
-        le_bg_ms = QLineEdit()
-        le_bg_ms.setValidator(QIntValidator(0, 1_000_000))
-        self._add_row(v, "Background acquisition time [ms]", "background_acquisition_time_ms", le_bg_ms)
+        le_hi_sigma = QLineEdit()
+        le_hi_sigma.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "High threshold [nσ]", "threshold_high_n_sigma", le_hi_sigma)
 
-        le_backstep = QLineEdit()
-        le_backstep.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Backstep after search [µm]", "backstep_after_search_um", le_backstep)
+        le_lo_sigma = QLineEdit()
+        le_lo_sigma.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "Low threshold [nσ]", "threshold_low_n_sigma", le_lo_sigma)
 
-        cb_refine = QCheckBox("Enabled")
-        self._add_check(v, "Refine", "do_refine", cb_refine)
+        le_bg_acqui = QLineEdit()
+        le_bg_acqui.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Background acquisition [s]", "bg_acqui_s", le_bg_acqui)
 
-        le_point_ms = QLineEdit()
-        le_point_ms.setValidator(QIntValidator(1, 1_000_000))
-        self._add_row(v, "Point acquisition time [ms]", "point_acquisition_time_ms", le_point_ms)
+        le_debounce = QLineEdit()
+        le_debounce.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Debounce [s]", "debounce_s", le_debounce)
 
-        le_step = QLineEdit()
-        le_step.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Refine step [µm]", "step_um", le_step)
+        le_z_poll = QLineEdit()
+        le_z_poll.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Z poll [s]", "z_poll_s", le_z_poll)
 
-        le_range = QLineEdit()
-        le_range.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Refine range [µm]", "range_um", le_range)
+        le_alpha = QLineEdit()
+        le_alpha.setValidator(QDoubleValidator(0.0, 1.0, 6))
+        self._add_row(v, "Alpha", "alpha", le_alpha)
 
-        # NEW: analysis behavior
-        le_n_max = QLineEdit()
-        le_n_max.setValidator(QIntValidator(1, 1_000_000))
-        self._add_row(v, "Top-N max values to average", "n_max_values", le_n_max)
+        le_chunk_size = QLineEdit()
+        le_chunk_size.setValidator(QIntValidator(1, 1_000_000))
+        self._add_row(v, "Chunk size", "chunk_size", le_chunk_size)
+
+        le_idle_sleep = QLineEdit()
+        le_idle_sleep.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Idle sleep [s]", "idle_sleep_s", le_idle_sleep)
+
+        le_z_offset = QLineEdit()
+        le_z_offset.setValidator(QDoubleValidator(-1e12, 1e12, 6))
+        self._add_row(v, "Z offset [µm]", "z_offset_um", le_z_offset)
 
         g.setLayout(v)
         return g
@@ -136,23 +135,23 @@ class AxialScanningConfigDialog(QDialog):
         for k, w in self.inputs.items():
             w.setText(str(getattr(cfg, k)))
 
-        self.checks["do_refine"].setChecked(bool(cfg.do_refine))
-
     def _update_config_from_inputs(self) -> None:
         def _req(key: str) -> str:
             return self.inputs[key].text().strip()
 
         self.cfg_holder.update(
-            n_sigma=int(_req("n_sigma")),
+            ni_sample_rate_hz=float(_req("ni_sample_rate_hz")),
             speed_um_s=float(_req("speed_um_s")),
-            max_search_distance_um=float(_req("max_search_distance_um")),
-            background_acquisition_time_ms=int(_req("background_acquisition_time_ms")),
-            backstep_after_search_um=float(_req("backstep_after_search_um")),
-            do_refine=bool(self.checks["do_refine"].isChecked()),
-            point_acquisition_time_ms=int(_req("point_acquisition_time_ms")),
-            step_um=float(_req("step_um")),
-            range_um=float(_req("range_um")),
-            n_max_values=max(1, int(_req("n_max_values"))),
+            max_distance_um=float(_req("max_distance_um")),
+            threshold_high_n_sigma=int(_req("threshold_high_n_sigma")),
+            threshold_low_n_sigma=int(_req("threshold_low_n_sigma")),
+            bg_acqui_s=float(_req("bg_acqui_s")),
+            debounce_s=float(_req("debounce_s")),
+            z_poll_s=float(_req("z_poll_s")),
+            alpha=float(_req("alpha")),
+            chunk_size=max(1, int(_req("chunk_size"))),
+            idle_sleep_s=float(_req("idle_sleep_s")),
+            z_offset_um=float(_req("z_offset_um")),
         )
 
     # ------------------------------------------------------------------ #

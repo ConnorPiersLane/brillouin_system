@@ -76,7 +76,7 @@ def find_reflection_realtime(
         th_hi = av + threshold_high_n_sigma * sigma
         th_lo = av + threshold_low_n_sigma * sigma
 
-        max_time_s = max_distance_um / speed_um_s + 1
+        max_time_s = abs(max_distance_um / speed_um_s) + 1
         debounce_samples = max(1, int(round(float(debounce_s) * fs)))
 
         # Interval state (indices are acquisition-buffer indices)

@@ -13,62 +13,72 @@ from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 @dataclass
 class ScanningConfig:
     # ----------------------------
-    # Axial Scanning
+    # Reflection Finder
     # ----------------------------
-    n_sigma: int = 10
+    ni_sample_rate_hz: float = 1000.0
     speed_um_s: float = 5000.0
-    max_search_distance_um: float = 5000.0
-    background_acquisition_time_ms: int = 10
-    backstep_after_search_um: float = 0.0
-
-    # refinement behavior
-    do_refine: bool = False
-    point_acquisition_time_ms: int = 20
-    step_um: float = 5.0
-    range_um: float = 50.0
-
-    # analysis behavior
-    n_max_values: int = 5  # mean of top-N values; if fewer exist, mean of all
+    max_distance_um: float = 5000.0
+    threshold_high_n_sigma: int = 10
+    threshold_low_n_sigma: int = 4
+    bg_acqui_s: float = 0.1
+    debounce_s: float = 0.020
+    z_poll_s: float = 0.016
+    alpha: float = 0.25
+    chunk_size: int = 1024
+    idle_sleep_s: float = 0.001
+    z_offset_um: float = 0.0
 
 
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
+
+
+# old-name shims for backward compatibility
+_LEGACY_KEY_MAP = {
+    "n_sigma": "threshold_high_n_sigma",
+    "max_search_distance_um": "max_distance_um",
+    "background_acquisition_time_ms": "bg_acqui_s",
+}
 
 
 def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
     """Convert a TOML section dict into ScanningConfig kwargs.
 
     - Filters unknown keys.
-    - Includes small backward-compat shims for older key names.
+    - Includes backward-compat shims for older key names.
+    - Converts old millisecond background acquisition setting to seconds.
     """
+    raw = dict(raw)
+
+    if "threshold_high_n_sigma" not in raw and "n_sigma" in raw:
+        raw["threshold_high_n_sigma"] = raw["n_sigma"]
+
+    if "max_distance_um" not in raw and "max_search_distance_um" in raw:
+        raw["max_distance_um"] = raw["max_search_distance_um"]
+
+    if "bg_acqui_s" not in raw and "background_acquisition_time_ms" in raw:
+        raw["bg_acqui_s"] = float(raw["background_acquisition_time_ms"]) / 1000.0
+
     allowed = set(ScanningConfig.__dataclass_fields__.keys())
-
-    # Backward compatibility (older config files)
-    if "background_acquisition_time_ms" not in raw and "n_bg_samples" in raw:
-        raw = dict(raw)
-        raw["background_acquisition_time_ms"] = raw["n_bg_samples"]
-
-    if "point_acquisition_time_ms" not in raw and "n_avg_samples" in raw:
-        raw = dict(raw)
-        raw["point_acquisition_time_ms"] = raw["n_avg_samples"]
-
-    # If n_max_values missing, dataclass default (5) will apply automatically.
-
     return {k: v for k, v in raw.items() if k in allowed}
+
 
 
 def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
     return {
-        "n_sigma": cfg.n_sigma,
-        "speed_um_s": cfg.speed_um_s,
-        "max_search_distance_um": cfg.max_search_distance_um,
-        "background_acquisition_time_ms": cfg.background_acquisition_time_ms,
-        "backstep_after_search_um": cfg.backstep_after_search_um,
-        "do_refine": bool(cfg.do_refine),
-        "point_acquisition_time_ms": cfg.point_acquisition_time_ms,
-        "step_um": cfg.step_um,
-        "range_um": cfg.range_um,
-        "n_max_values": int(cfg.n_max_values),
+        "ni_sample_rate_hz": float(cfg.ni_sample_rate_hz),
+        "speed_um_s": float(cfg.speed_um_s),
+        "max_distance_um": float(cfg.max_distance_um),
+        "threshold_high_n_sigma": int(cfg.threshold_high_n_sigma),
+        "threshold_low_n_sigma": int(cfg.threshold_low_n_sigma),
+        "bg_acqui_s": float(cfg.bg_acqui_s),
+        "debounce_s": float(cfg.debounce_s),
+        "z_poll_s": float(cfg.z_poll_s),
+        "alpha": float(cfg.alpha),
+        "chunk_size": int(cfg.chunk_size),
+        "idle_sleep_s": float(cfg.idle_sleep_s),
+        "z_offset_um": float(cfg.z_offset_um),
     }
+
 
 
 def load_axial_scanning_config(path: Path, section: str = "axial_scanning") -> ScanningConfig:
@@ -80,6 +90,7 @@ def load_axial_scanning_config(path: Path, section: str = "axial_scanning") -> S
         raw = {}
 
     return ScanningConfig(**_toml_to_kwargs(raw))
+
 
 
 def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> None:
