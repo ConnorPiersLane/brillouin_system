@@ -350,6 +350,7 @@ class NI6008:
                             number_of_samples_per_channel=want,
                             timeout=0.02,
                         )
+                        # t_after = time.perf_counter()
                     except Exception as e:
                         with lock:
                             acq2 = self._acq
@@ -650,75 +651,78 @@ if __name__ == "__main__":
     ni = NI6008(device="Dev1", ai_channel="ai0", sample_rate_hz=1000)
 
     with ni.streaming():
-        time.sleep(0.2)
-
-        # ---- flush ----
-        n_flushed = ni.flush()
-        print("flushed:", n_flushed)
-
-        # ---- read_latest ----
-        t1 = time.perf_counter()
-        x_latest = ni.read_latest(timeout_s=0.05)
-        t2 = time.perf_counter()
-        print(f"read_latest: {x_latest:.6f}  (dt={(t2 - t1):.6f} s)")
-
-        # ---- read_block ----
-        # give the FIFO a moment to accumulate
-        time.sleep(0.05)
-        t1 = time.perf_counter()
-        blk10 = ni.read_block(10, timeout_s=1.0)
-        t2 = time.perf_counter()
-        print(f"read_block(10): n={len(blk10)} dt={(t2 - t1):.6f} s std={float(np.std(blk10)) if blk10 else float('nan')}")
-
-        # ---- read_available_block ----
-        # let some samples arrive, then read whatever is there (non-blocking)
-        time.sleep(0.05)
-        t1 = time.perf_counter()
-        avail_blk = ni.read_available_block()
-        t2 = time.perf_counter()
-        print(f"read_available_block: n={len(avail_blk)} dt={(t2 - t1):.6f} s")
-
-        # optional: drain again so acquisition starts "clean"
-        print("flushed:", ni.flush())
-
-        # ---- background acquisition ----
-        max_samples = int(ni.sample_rate_hz * 2.0)  # 2 seconds
-        ni.start_acquiring(max_sampling_time_s=2.0, chunk_size=2048, idle_sleep_s=0.001)
-
-        last = 0
-        for _ in range(5):
-            time.sleep(0.1)
-            rr = ni.get_new_block_result(last, copy=False)
-
-            n_new = int(rr.values.size)
-            last = rr.ind0 + n_new
-
-            if n_new:
-                t_first = rr.time_of(rr.ind0)
-                t_last = rr.time_of(rr.ind0 + n_new - 1)
-                std = float(np.std(rr.values))
-            else:
-                t_first = None
-                t_last = None
-                std = float("nan")
-
-            print("get_new_block:",
-                  "new:", n_new,
-                  "cursor:", last,
-                  "t_first/t_last:", t_first, t_last,
-                  "std:", std)
-
-        # capture error BEFORE stop clears acquisition state
-        err = ni.get_acquiring_error()
-
-        result = ni.stop_acquiring()
-        print("stop_acquiring: acquired:", int(result.values.size))
-
-        if err is not None:
-            print("acq error:", err)
-
-        if result.values.size:
-            print("first/last perf:",
-                  result.time_of(0),
-                  result.time_of(int(result.values.size) - 1))
-            print("std:", float(np.std(result.values)))
+        ni.flush()
+        data = ni.read_block(2000, timeout_s=5)
+        print(data)
+        # time.sleep(0.2)
+        #
+        # # ---- flush ----
+        # n_flushed = ni.flush()
+        # print("flushed:", n_flushed)
+        #
+        # # ---- read_latest ----
+        # t1 = time.perf_counter()
+        # x_latest = ni.read_latest(timeout_s=0.05)
+        # t2 = time.perf_counter()
+        # print(f"read_latest: {x_latest:.6f}  (dt={(t2 - t1):.6f} s)")
+        #
+        # # ---- read_block ----
+        # # give the FIFO a moment to accumulate
+        # time.sleep(0.05)
+        # t1 = time.perf_counter()
+        # blk10 = ni.read_block(10, timeout_s=1.0)
+        # t2 = time.perf_counter()
+        # print(f"read_block(10): n={len(blk10)} dt={(t2 - t1):.6f} s std={float(np.std(blk10)) if blk10 else float('nan')}")
+        #
+        # # ---- read_available_block ----
+        # # let some samples arrive, then read whatever is there (non-blocking)
+        # time.sleep(0.05)
+        # t1 = time.perf_counter()
+        # avail_blk = ni.read_available_block()
+        # t2 = time.perf_counter()
+        # print(f"read_available_block: n={len(avail_blk)} dt={(t2 - t1):.6f} s")
+        #
+        # # optional: drain again so acquisition starts "clean"
+        # print("flushed:", ni.flush())
+        #
+        # # ---- background acquisition ----
+        # max_samples = int(ni.sample_rate_hz * 2.0)  # 2 seconds
+        # ni.start_acquiring(max_sampling_time_s=2.0, chunk_size=2048, idle_sleep_s=0.001)
+        #
+        # last = 0
+        # for _ in range(5):
+        #     time.sleep(0.1)
+        #     rr = ni.get_new_block_result(last, copy=False)
+        #
+        #     n_new = int(rr.values.size)
+        #     last = rr.ind0 + n_new
+        #
+        #     if n_new:
+        #         t_first = rr.time_of(rr.ind0)
+        #         t_last = rr.time_of(rr.ind0 + n_new - 1)
+        #         std = float(np.std(rr.values))
+        #     else:
+        #         t_first = None
+        #         t_last = None
+        #         std = float("nan")
+        #
+        #     print("get_new_block:",
+        #           "new:", n_new,
+        #           "cursor:", last,
+        #           "t_first/t_last:", t_first, t_last,
+        #           "std:", std)
+        #
+        # # capture error BEFORE stop clears acquisition state
+        # err = ni.get_acquiring_error()
+        #
+        # result = ni.stop_acquiring()
+        # print("stop_acquiring: acquired:", int(result.values.size))
+        #
+        # if err is not None:
+        #     print("acq error:", err)
+        #
+        # if result.values.size:
+        #     print("first/last perf:",
+        #           result.time_of(0),
+        #           result.time_of(int(result.values.size) - 1))
+        #     print("std:", float(np.std(result.values)))

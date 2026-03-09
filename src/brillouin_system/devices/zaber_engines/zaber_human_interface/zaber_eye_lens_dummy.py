@@ -55,9 +55,6 @@ class ZaberEyeLensDummy:
         print(f"[ZaberEyeLensDummy] Current position = {self._position:.2f} µm")
         return self._position
 
-    def set_zaber_position_by_class(self, zaber_position: ZaberLensPosition):
-        if zaber_position.um is not None:
-            self.move_abs(zaber_position.um)
 
     # ---------------- Slewing (non-blocking) ----------------
     def start_slewing(self, speed_um_per_s: float):

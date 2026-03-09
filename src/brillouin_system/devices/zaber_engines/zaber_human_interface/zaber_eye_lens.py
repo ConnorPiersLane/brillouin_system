@@ -43,8 +43,8 @@ class ZaberEyeLens:
         self.axis.wait_until_idle()
 
     def move_init(self):
-        # self.move_abs(12e3)
-        self.move_abs(0)
+        self.move_abs(10e3)
+        # self.move_abs(0)
     def move_abs(self, position_um: float):
         self.axis.move_absolute(float(position_um), Units.LENGTH_MICROMETRES)
         self.axis.wait_until_idle()

@@ -91,8 +91,8 @@ class HiBackend:
             camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
-            # microwave=Microwave()
-            microwave = MicrowaveDummy()
+            microwave=Microwave()
+            # microwave = MicrowaveDummy()
             zaber_eye_lens=ZaberEyeLens()
             # zaber_hi=ZaberHumanInterface()
             zaber_hi = ZaberHumanInterfaceDummy()

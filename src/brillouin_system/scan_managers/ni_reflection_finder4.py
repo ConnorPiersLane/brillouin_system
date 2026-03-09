@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Optional
 
 import numpy as np
@@ -30,6 +30,12 @@ class ReflectionResult:
     daq_values: np.ndarray | None = None
     zaber_lens_ts: np.ndarray | None = None
     zaber_lens_z_um: np.ndarray | None = None
+
+def print_reflection_result(result):
+    for f in fields(result):
+        value = getattr(result, f.name)
+        print(f"{f.name}: {value}")
+
 
 def find_reflection_realtime(
     ni: NI6008,
@@ -224,13 +230,13 @@ if __name__ == "__main__":
 
     ni = NI6008()
     z = ZaberEyeLens()
-    z.move_abs(10000)
+    z.move_abs(12500)
     res = find_reflection_realtime(
         ni, z,
         ni_sample_rate_hz=1000,
-        speed_um_s=5000.0,
-        max_distance_um=5000.0,
-        threshold_high_n_sigma=10,
+        speed_um_s=-5000.0,
+        max_distance_um=10000.0,
+        threshold_high_n_sigma=20,
         threshold_low_n_sigma=4,
         bg_acqui_s=0.1,
         debounce_s=0.020,
@@ -239,16 +245,16 @@ if __name__ == "__main__":
         idle_sleep_s=0.001,
     )
 
-    # print(res)
+    # print_reflection_result(res)
 
     if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
         z.move_abs(res.event_z_um)
-
-    plt.figure()
-    # plt.plot(r[:500], marker='o')
-    plt.plot(res.zaber_lens_ts, res.zaber_lens_z_um, marker='o')
-    plt.axvline(x=res.event_time_perf)  # vertical line at xe
-
-    plt.grid(True)
-
-    plt.show()
+        print(res.event_z_um)
+    # plt.figure()
+    # # plt.plot(r[:500], marker='o')
+    # plt.plot(res.zaber_lens_ts, res.zaber_lens_z_um, marker='o')
+    # plt.axvline(x=res.event_time_perf)  # vertical line at xe
+    #
+    # plt.grid(True)
+    #
+    # plt.show()
