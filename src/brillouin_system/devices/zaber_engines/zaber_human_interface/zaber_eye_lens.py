@@ -114,7 +114,7 @@ class ZaberEyeLens:
                         self.axis.wait_until_idle()
                         break
 
-                    time.sleep(0.01)  # 10 ms polling
+                    time.sleep(0.03)  # 10 ms polling
             finally:
                 # guard finished
                 self._slew_guard_active = False
