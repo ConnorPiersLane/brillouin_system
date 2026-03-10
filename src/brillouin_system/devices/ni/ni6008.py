@@ -287,9 +287,6 @@ class NI6008:
         if idle_sleep_s < 0:
             raise ValueError("idle_sleep_s must be >= 0")
 
-
-
-
         values = np.empty(max_samples, dtype=np.float64)
 
         stop_evt = threading.Event()
@@ -381,7 +378,7 @@ class NI6008:
                         acq2.values[acq2.write_idx: acq2.write_idx + take] = tmp[:take]
 
                         if first_chunk:
-                            acq2.t0_perf = t_before - ((avail - n_read) / fs)
+                            acq2.t0_perf = t_before - ((avail - 1) / fs)
                             first_chunk = False
 
                         acq2.write_idx += take
