@@ -263,6 +263,16 @@ class AxialScanViewer(QWidget):
               f"bg_subtraction={ss.is_do_bg_subtraction_active}, "
               f"exposure={ss.andor_camera_info.exposure}, "
               f"gain={ss.andor_camera_info.gain}")
+        if scan.reflection_result_forwards is not None:
+            if scan.reflection_result_forwards.event_z_um is not None:
+                print(f'Plane (forwards): {round(scan.reflection_result_forwards.event_z_um)}')
+            else:
+                print(f'Plane (forwards): None')
+        if scan.reflection_result_backwards is not None:
+            if scan.reflection_result_backwards.event_z_um is not None:
+                print(f'Plane (forwards): {round(scan.reflection_result_backwards.event_z_um)}')
+            else:
+                print(f'Plane (forwards): None')
         print("=============================")
 
     def print_measurement_info(self, idx: int):
