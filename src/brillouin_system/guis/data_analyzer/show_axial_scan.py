@@ -256,24 +256,6 @@ class AxialScanViewer(QWidget):
         print("==== Axial Scan Overview ====")
         print(f"ID: {scan.id}, Internal tracker i: {scan.i}")
         print(f"Number of measurements: {len(scan.measurements)}")
-        if scan.reflection_plane_estimate_inwards is not None:
-            print(f"Reflection Plane (forwards scan): {round(scan.reflection_plane_estimate_inwards)}")
-        else:
-            print("Reflection Plane (forwards scan): None")
-
-        if scan.reflection_plane_estimate_outwards is not None:
-            print(f"Reflection Plane (backwards scan): {round(scan.reflection_plane_estimate_outwards)}")
-        else:
-            print("Reflection Plane (backwards scan): None")
-
-        if (
-                scan.reflection_plane_estimate_inwards is not None
-                and scan.reflection_plane_estimate_outwards is not None
-        ):
-            print(
-                f"Difference forwards-backwards: "
-                f"{round(scan.reflection_plane_estimate_inwards - scan.reflection_plane_estimate_outwards)}"
-            )
 
         self.calc.print_current_model()
         ss = scan.system_state

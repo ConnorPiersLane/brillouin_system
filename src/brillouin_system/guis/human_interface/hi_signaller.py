@@ -342,7 +342,7 @@ class HiSignaller(QObject):
     @pyqtSlot()
     def snap_and_fit(self):
         try:
-            frame, _ = self.backend.get_andor_frame()
+            frame = self.backend.get_andor_frame()
             self.backend.display_spectrum(frame=frame)
 
         except Exception as e:

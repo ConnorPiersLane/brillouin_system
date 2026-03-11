@@ -59,6 +59,11 @@ class NIDummy(NIBase):
     # lifecycle
     # ------------------------------------------------------------------
 
+    def get_sample_rate_hz(self) -> float:
+        """Sample rate in Hz."""
+        return self.sample_rate_hz
+
+
     @contextmanager
     def streaming(self):
         if self._streaming:

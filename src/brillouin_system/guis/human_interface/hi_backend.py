@@ -90,10 +90,11 @@ class HiBackend:
             # )
             camera = DummyCamera()
 
-            shutter_manager=ShutterManager('human_interface')
-            microwave=Microwave()
-            # microwave = MicrowaveDummy()
-            zaber_eye_lens=ZaberEyeLens()
+            # shutter_manager=ShutterManager('human_interface')
+            # microwave=Microwave()
+            microwave = MicrowaveDummy()
+            # zaber_eye_lens=ZaberEyeLens()
+            zaber_eye_lens = ZaberEyeLensDummy()
             # zaber_hi=ZaberHumanInterface()
             zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
@@ -307,7 +308,7 @@ class HiBackend:
 
 
     def take_n_images(self, n_images) -> np.ndarray:
-        return np.stack([self._get_andor_camera_snap()[0] for _ in range(n_images)])
+        return np.stack([self._get_andor_camera_snap() for _ in range(n_images)])
 
 
     def take_bg_and_darknoise_images(self):
@@ -383,22 +384,22 @@ class HiBackend:
 
 
     # ---------------- Get Frames  ----------------
-    def _get_andor_camera_snap(self) -> tuple[np.ndarray, float]:
+    def _get_andor_camera_snap(self) -> np.ndarray:
         """Pull a raw frame from the camera.
         Returns: frame, time.time()
         """
-        frame, ts = self.andor_camera.snap()
-        return frame.astype(np.float64), ts
+        frame = self.andor_camera.snap()
+        return frame.astype(np.float64)
 
 
-    def get_andor_frame(self, timeout: float = 3.0) -> tuple[np.ndarray, float]:
+    def get_andor_frame(self, timeout: float = 3.0) -> np.ndarray:
         # Get the frame:
         if self.is_reference_mode or self.is_sample_illumination_continuous:
-            frame, ts = self._get_andor_camera_snap()
+            frame = self._get_andor_camera_snap()
         else:
-            frame, ts = self._open_sample_shutter_get_frame_close_shutter(timeout=timeout)
+            frame = self._open_sample_shutter_get_frame_close_shutter(timeout=timeout)
 
-        return frame, ts
+        return frame
 
     def get_fitted_spectrum(self, frame) -> FittedSpectrum:
         """
@@ -451,7 +452,7 @@ class HiBackend:
                     log.info(f"[Axial Scan] Cancelled during step {i}.")
                     return False
 
-                frame, ts = self._get_andor_camera_snap()
+                frame = self._get_andor_camera_snap()
 
                 self.display_spectrum(frame=frame)
 
@@ -459,7 +460,7 @@ class HiBackend:
                     MeasurementPoint(
                     frame_andor=frame,
                     lens_zaber_position=lens_x0,
-                    time_stamp=ts)
+                    time_stamp=time.perf_counter())
                 )
 
         else:
@@ -503,7 +504,7 @@ class HiBackend:
                     zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
-                    frame, ts = self._get_andor_camera_snap()
+                    frame = self._get_andor_camera_snap()
 
                     self.display_spectrum(frame=frame)
 
@@ -511,7 +512,7 @@ class HiBackend:
                         MeasurementPoint(
                             frame_andor=frame,
                             lens_zaber_position=zaber_pos,
-                            time_stamp=ts)
+                            time_stamp=time.perf_counter())
                     )
 
 
@@ -524,8 +525,6 @@ class HiBackend:
 
         # Move lens back to original position
         self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
-        print(f"Plane forwards: {reflection_result_forwards.event_z_um}")
-        print(f"Plane backwards: {reflection_result_backwards.event_z_um}")
 
         self._i_axial_scans += 1
 
@@ -596,7 +595,7 @@ class HiBackend:
             )
 
 
-    def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> tuple[np.ndarray, float]:
+    def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> np.ndarray:
         """Acquire a frame with temporary shutter open for pulsed mode."""
         timer = threading.Timer(timeout, self.shutter_manager.sample.close)
 
@@ -604,7 +603,7 @@ class HiBackend:
             self.shutter_manager.sample.open()
             timer.start()
             try:
-                frame, ts = self._get_andor_camera_snap()
+                frame = self._get_andor_camera_snap()
             finally:
                 # Always cancel the timer (even if _get_camera_snap() fails)
                 timer.cancel()
@@ -612,7 +611,7 @@ class HiBackend:
             # Always close the shutter at the end (even if an exception occurs)
             self.shutter_manager.sample.close()
 
-        return frame, ts
+        return frame
 
     def set_andor_exposure(self,
                             exposure_time: float,
@@ -673,7 +672,7 @@ class HiBackend:
                             log.info("[Calibration] Cancelled by user.")
                             return False
 
-                        frame, _ = self.get_andor_frame()
+                        frame = self.get_andor_frame()
                         fs = self.get_fitted_spectrum(frame)
 
                         cali_point = CalibrationMeasurementPoint(
