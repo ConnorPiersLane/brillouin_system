@@ -45,13 +45,26 @@ class ZaberEyeLens:
     def move_init(self):
         self.move_abs(10e3)
         # self.move_abs(0)
-    def move_abs(self, position_um: float):
-        self.axis.move_absolute(float(position_um), Units.LENGTH_MICROMETRES)
-        self.axis.wait_until_idle()
+    def move_abs(self,
+                 position_um: float,
+                 velocity_um_s: float = 0):
+        self.axis.move_absolute(position=float(position_um),
+                                unit=Units.LENGTH_MICROMETRES,
+                                wait_until_idle=True,
+                                velocity = velocity_um_s,
+                                velocity_unit = Units.VELOCITY_MICROMETRES_PER_SECOND,
+                                )
 
-    def move_rel(self, delta_um: float):
-        self.axis.move_relative(float(delta_um), Units.LENGTH_MICROMETRES)
-        self.axis.wait_until_idle()
+    def move_rel(self,
+                 delta_um: float,
+                 velocity_um_s: float = 0,
+                 ):
+        self.axis.move_relative(position=float(delta_um),
+                                unit=Units.LENGTH_MICROMETRES,
+                                wait_until_idle=True,
+                                velocity = velocity_um_s,
+                                velocity_unit = Units.VELOCITY_MICROMETRES_PER_SECOND,
+                                )
 
     def get_position(self) -> float:
         return self.axis.get_position(Units.LENGTH_MICROMETRES)

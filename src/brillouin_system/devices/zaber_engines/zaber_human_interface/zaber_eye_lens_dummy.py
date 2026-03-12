@@ -43,12 +43,16 @@ class ZaberEyeLensDummy:
         self.homed = True
         print("[ZaberEyeLensDummy] Homed. Position reset to 100.0 µm")
 
-    def move_abs(self, position_um: float):
-        print(f"[ZaberEyeLensDummy] Moving absolute → {position_um:.2f} µm")
+    def move_abs(self,
+                 position_um: float,
+                 velocity_um_s: float =0):
+        print(f"[ZaberEyeLensDummy] Moving absolute → {position_um:.2f} µm, speed: {velocity_um_s} µm/s")
         self._position = position_um
 
-    def move_rel(self, delta_um: float):
-        print(f"[ZaberEyeLensDummy] Moving relative → {delta_um:+.2f} µm")
+    def move_rel(self,
+                 delta_um: float,
+                 velocity_um_s: float =0):
+        print(f"[ZaberEyeLensDummy] Moving relative → {delta_um:+.2f} µm, speed: {velocity_um_s} µm/s")
         self._position += delta_um
 
     def get_position(self) -> float:

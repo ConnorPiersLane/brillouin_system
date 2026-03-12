@@ -439,6 +439,7 @@ class HiBackend:
     def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan) -> bool:
 
         lens_x0 = self.zaber_eye_lens.get_position()
+        speed_um_s = self._axial_scan_config.speed_um_s
         all_results = []
         reflection_result_forwards: ReflectionResult | None = None
         reflection_result_backwards: ReflectionResult | None = None
@@ -474,9 +475,10 @@ class HiBackend:
             if request_axial_scan.find_reflection_plane:
                 reflection_result_forwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
                 if reflection_result_forwards.found:
-                    self.zaber_eye_lens.move_abs(reflection_result_forwards.event_z_um)
+                    self.zaber_eye_lens.move_abs(position_um=reflection_result_forwards.event_z_um,
+                                                 velocity_um_s=speed_um_s)
                 else:
-                    self.zaber_eye_lens.move_abs(lens_x0)
+                    self.zaber_eye_lens.move_abs(position_um=lens_x0)
                     return False
 
             try:
@@ -500,7 +502,7 @@ class HiBackend:
                         return False
 
                     log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
-                    self.zaber_eye_lens.move_rel(dx)
+                    self.zaber_eye_lens.move_rel(delta_um=dx, velocity_um_s=speed_um_s)
                     zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
