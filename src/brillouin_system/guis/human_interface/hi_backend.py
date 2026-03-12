@@ -78,17 +78,17 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            # camera=IxonUltra(
-            #     index = 0,
-            #     temperature = "off",
-            #     fan_mode = "full",
-            #     x_start = 40, x_end  = 120,
-            #     y_start= 300, y_end  = 315,
-            #     vbin= 1, hbin  = 1,
-            #     verbose = True,
-            #     advanced_gain_option=False
-            # )
-            camera = DummyCamera()
+            camera=IxonUltra(
+                index = 0,
+                temperature = "off",
+                fan_mode = "full",
+                x_start = 40, x_end  = 120,
+                y_start= 300, y_end  = 315,
+                vbin= 1, hbin  = 1,
+                verbose = True,
+                advanced_gain_option=False
+            )
+            # camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
             microwave=Microwave()
@@ -731,6 +731,7 @@ class HiBackend:
             z_poll_s = self._axial_scan_config.z_poll_s
             chunk_size = self._axial_scan_config.chunk_size
             idle_sleep_s = self._axial_scan_config.idle_sleep_s
+            offset_z_um = self._axial_scan_config.z_offset_um
             result: ReflectionResult = find_reflection_realtime(
                 ni=self.ni,
                 zaber=self.zaber_eye_lens,
@@ -744,6 +745,7 @@ class HiBackend:
                 z_poll_s=z_poll_s,
                 chunk_size=chunk_size,
                 idle_sleep_s=idle_sleep_s,
+                z_offset_um=offset_z_um,
             )
             return result
 

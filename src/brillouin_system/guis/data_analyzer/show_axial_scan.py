@@ -270,9 +270,9 @@ class AxialScanViewer(QWidget):
                 print(f'Plane (forwards): None')
         if scan.reflection_result_backwards is not None:
             if scan.reflection_result_backwards.event_z_um is not None:
-                print(f'Plane (forwards): {round(scan.reflection_result_backwards.event_z_um)}')
+                print(f'Plane (backwards): {round(scan.reflection_result_backwards.event_z_um)}')
             else:
-                print(f'Plane (forwards): None')
+                print(f'Plane (backwards): None')
         print("=============================")
 
     def print_measurement_info(self, idx: int):

@@ -6,6 +6,7 @@ from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection
 from zaber_motion.ascii.axis import Axis
 
+import numpy as np
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_position_log import ZaberPositionLog
 
@@ -203,7 +204,7 @@ class ZaberEyeLens:
     from contextlib import contextmanager
 
     @contextmanager
-    def slewing_with_log(self, speed_um_per_s: float, max_distance_um: float, *, poll_s: float = 0.01, alpha: float=0.25):
+    def slewing_with_log(self, speed_um_per_s: float, max_distance_um: float, *, poll_s: float = 0.016, alpha: float=0.25):
         """
         Context manager: starts guarded slewing + position log, then always stops both.
         Yields nothing; collect log with stop_position_log() after exiting.
