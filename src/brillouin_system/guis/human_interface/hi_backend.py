@@ -78,25 +78,25 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            camera=IxonUltra(
-                index = 0,
-                temperature = "off",
-                fan_mode = "full",
-                x_start = 40, x_end  = 120,
-                y_start= 300, y_end  = 315,
-                vbin= 1, hbin  = 1,
-                verbose = True,
-                advanced_gain_option=False
-            )
-            # camera = DummyCamera()
+            # camera=IxonUltra(
+            #     index = 0,
+            #     temperature = "off",
+            #     fan_mode = "full",
+            #     x_start = 40, x_end  = 120,
+            #     y_start= 300, y_end  = 315,
+            #     vbin= 1, hbin  = 1,
+            #     verbose = True,
+            #     advanced_gain_option=False
+            # )
+            camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
-            microwave=Microwave()
-            # microwave = MicrowaveDummy()
+            # microwave=Microwave()
+            microwave = MicrowaveDummy()
             zaber_eye_lens=ZaberEyeLens()
             # zaber_eye_lens = ZaberEyeLensDummy()
-            zaber_hi=ZaberHumanInterface()
-            # zaber_hi = ZaberHumanInterfaceDummy()
+            # zaber_hi=ZaberHumanInterface()
+            zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
             ni = NI6008()
 
