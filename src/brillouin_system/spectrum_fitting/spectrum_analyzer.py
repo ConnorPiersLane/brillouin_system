@@ -109,7 +109,7 @@ class SpectrumAnalyzer:
         s_l, s_r = analyzed_spec.hwhm_left_peak_ghz, analyzed_spec.hwhm_right_peak_ghz
 
         a_l = self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1)
-        a_r = self.calibration_calculator.df_left_peak(px=fs.right_peak_center_px, dpx=1)
+        a_r = self.calibration_calculator.df_right_peak(px=fs.right_peak_center_px, dpx=1)
 
         N_l = photons.left_peak_photons
         N_r = photons.right_peak_photons

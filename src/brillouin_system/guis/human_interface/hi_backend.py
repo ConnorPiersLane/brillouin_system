@@ -78,25 +78,25 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            # camera=IxonUltra(
-            #     index = 0,
-            #     temperature = "off",
-            #     fan_mode = "full",
-            #     x_start = 40, x_end  = 120,
-            #     y_start= 300, y_end  = 315,
-            #     vbin= 1, hbin  = 1,
-            #     verbose = True,
-            #     advanced_gain_option=False
-            # )
-            camera = DummyCamera()
+            camera=IxonUltra(
+                index = 0,
+                temperature = "off",
+                fan_mode = "full",
+                x_start = 40, x_end  = 120,
+                y_start= 300, y_end  = 315,
+                vbin= 1, hbin  = 1,
+                verbose = True,
+                advanced_gain_option=False
+            )
+            # camera = DummyCamera()
 
-            # shutter_manager=ShutterManager('human_interface')
-            # microwave=Microwave()
-            microwave = MicrowaveDummy()
-            # zaber_eye_lens=ZaberEyeLens()
-            zaber_eye_lens = ZaberEyeLensDummy()
-            # zaber_hi=ZaberHumanInterface()
-            zaber_hi = ZaberHumanInterfaceDummy()
+            shutter_manager=ShutterManager('human_interface')
+            microwave=Microwave()
+            # microwave = MicrowaveDummy()
+            zaber_eye_lens=ZaberEyeLens()
+            # zaber_eye_lens = ZaberEyeLensDummy()
+            zaber_hi=ZaberHumanInterface()
+            # zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
             ni = NI6008()
 
@@ -107,6 +107,7 @@ class HiBackend:
         self._axial_scan_config: ScanningConfig = axial_scanning_config.get()
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
+
 
         self.microwave: Microwave | MicrowaveDummy = microwave
 
@@ -475,10 +476,9 @@ class HiBackend:
             if request_axial_scan.find_reflection_plane:
                 reflection_result_forwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
                 if reflection_result_forwards.found:
-                    self.zaber_eye_lens.move_abs(position_um=reflection_result_forwards.event_z_um,
-                                                 velocity_um_s=speed_um_s)
+                    self.zaber_eye_lens.move_abs(reflection_result_forwards.event_z_um)
                 else:
-                    self.zaber_eye_lens.move_abs(position_um=lens_x0)
+                    self.zaber_eye_lens.move_abs(lens_x0)
                     return False
 
             try:
@@ -502,7 +502,7 @@ class HiBackend:
                         return False
 
                     log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
-                    self.zaber_eye_lens.move_rel(delta_um=dx, velocity_um_s=speed_um_s)
+                    self.zaber_eye_lens.move_rel(delta_um=dx)
                     zaber_pos = self.zaber_eye_lens.get_position()
                     self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
