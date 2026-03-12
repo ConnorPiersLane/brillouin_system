@@ -78,17 +78,17 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            camera=IxonUltra(
-                index = 0,
-                temperature = "off",
-                fan_mode = "full",
-                x_start = 40, x_end  = 120,
-                y_start= 300, y_end  = 315,
-                vbin= 1, hbin  = 1,
-                verbose = True,
-                advanced_gain_option=False
-            )
-            # camera = DummyCamera()
+            # camera=IxonUltra(
+            #     index = 0,
+            #     temperature = "off",
+            #     fan_mode = "full",
+            #     x_start = 40, x_end  = 120,
+            #     y_start= 300, y_end  = 315,
+            #     vbin= 1, hbin  = 1,
+            #     verbose = True,
+            #     advanced_gain_option=False
+            # )
+            camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
             microwave=Microwave()
