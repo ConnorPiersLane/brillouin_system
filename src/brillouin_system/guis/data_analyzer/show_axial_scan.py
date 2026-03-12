@@ -105,7 +105,8 @@ class AxialScanViewer(QWidget):
             f"Index: {self.current_index + 1} / {len(self.axial_scan.measurements)} | "
             f"Z pos: {mp.lens_zaber_position:.2f} µm"
         )
-        self.print_theoretical_precision()
+
+
         if self.axial_scan.system_state.is_do_bg_subtraction_active:
             frame = mp.frame_andor - self.axial_scan.system_state.bg_image.median_image
         else:
@@ -115,6 +116,11 @@ class AxialScanViewer(QWidget):
         self.plot_axial_scan()
 
         self.canvas.draw()
+
+
+        fitted_spectrum = self.fitted_axial_scan_data.fitted_spectras[self.current_index]
+        if fitted_spectrum.is_success:
+            self.print_theoretical_precision()
 
     def plot_frame(self, frame: np.ndarray):
         self.ax_img.cla()

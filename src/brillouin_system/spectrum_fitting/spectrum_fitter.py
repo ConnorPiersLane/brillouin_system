@@ -116,8 +116,8 @@ class SpectrumFitter:
 
     def fit(self, px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
         # Select config/model
-        model = (self.reference_config if is_reference_mode else self.sample_config).fitting_model
         config = self.reference_config if is_reference_mode else self.sample_config
+        model = config.fitting_model
 
         # Sanitize input
         sline = np.clip(sline, 0, None)

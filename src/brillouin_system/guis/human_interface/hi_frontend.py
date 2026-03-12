@@ -61,15 +61,15 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 
-#ToDo: calibration scans not loadable
+
 #todo: did not show plane detection
 #todo: reflection plane offset not working
 #todo: illumination mode not correct sometimes
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = False
-use_eye_tracker_dummy = False
+include_eye_tracking = True
+use_eye_tracker_dummy = True
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
