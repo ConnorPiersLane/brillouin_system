@@ -13,6 +13,6 @@ masking_center_right = [
     0,
     0,
 ]
-do_ellipse_fitting = true
+do_ellipse_fitting = false
 overlay_ellipse = true
 frame_returned = "original"

@@ -440,7 +440,6 @@ class HiBackend:
     def take_axial_step_scan(self, request_axial_scan: RequestAxialStepScan) -> bool:
 
         lens_x0 = self.zaber_eye_lens.get_position()
-        speed_um_s = self._axial_scan_config.speed_um_s
         all_results = []
         reflection_result_forwards: ReflectionResult | None = None
         reflection_result_backwards: ReflectionResult | None = None
