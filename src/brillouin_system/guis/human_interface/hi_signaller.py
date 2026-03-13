@@ -491,7 +491,7 @@ class HiSignaller(QObject):
             z0 = self.backend.zaber_eye_lens.get_position()
             result = self.backend.find_reflection_plane()
             if result.found:
-                z = result.event_z_um
+                z = result.event_z_um + result.z_offset_um
             else:
                 z = z0
             self.backend.zaber_eye_lens.move_abs(z)
