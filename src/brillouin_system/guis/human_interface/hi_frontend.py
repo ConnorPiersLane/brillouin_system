@@ -61,11 +61,6 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 
-
-#todo: did not show plane detection
-#todo: reflection plane offset not working
-#todo: illumination mode not correct sometimes
-
 use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = False
