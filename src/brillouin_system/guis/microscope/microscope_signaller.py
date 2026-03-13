@@ -123,7 +123,7 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def emit_is_illumination_continuous(self):
-        self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
+        self.illumination_mode_state.emit(self.backend.is_shutter_open)
 
 
     # Toggle
@@ -164,16 +164,16 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def toggle_illumination_mode(self):
-        if self.backend.is_sample_illumination_continuous:
-            self.backend.change_illumination_mode_to_pulsed()
+        if self.backend.is_shutter_open:
+            self.backend.close_sample_shutter()
             self.stop_live_view()
             self.log_message.emit("Switched to pulsed illumination")
         else:
-            self.backend.change_illumination_mode_to_continuous()
+            self.backend.open_sample_shutter()
             self.start_live_view()
             self.log_message.emit("Switched to continuous illumination")
 
-        self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
+        self.illumination_mode_state.emit(self.backend.is_shutter_open)
 
     @pyqtSlot()
     def toggle_reference_mode(self):
@@ -335,7 +335,7 @@ class BrillouinSignaller(QObject):
 
     @pyqtSlot()
     def start_live_view(self):
-        if not self.backend.is_sample_illumination_continuous:
+        if not self.backend.is_shutter_open:
             self.log_message.emit("Live view not started: illumination mode is pulsed.")
             return
         self.backend.init_shutters()

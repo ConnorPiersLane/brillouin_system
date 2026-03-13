@@ -6,6 +6,7 @@ from PyQt5 import QtCore
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
+from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
@@ -140,7 +141,7 @@ class HiSignaller(QObject):
 
     @pyqtSlot()
     def emit_is_illumination_continuous(self):
-        self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
+        self.illumination_mode_state.emit(self.backend.is_shutter_open)
 
 
     # Toggle
@@ -181,16 +182,16 @@ class HiSignaller(QObject):
 
     @pyqtSlot()
     def toggle_illumination_mode(self):
-        if self.backend.is_sample_illumination_continuous:
-            self.backend.change_illumination_mode_to_pulsed()
+        if self.backend.is_shutter_open:
+            self.backend.close_sample_shutter()
             self.stop_live_view()
             log.info("Switched to pulsed illumination")
         else:
-            self.backend.change_illumination_mode_to_continuous()
+            self.backend.open_sample_shutter()
             self.start_live_view()
             log.info("Switched to continuous illumination")
 
-        self.illumination_mode_state.emit(self.backend.is_sample_illumination_continuous)
+        self.illumination_mode_state.emit(self.backend.is_shutter_open)
 
     @pyqtSlot()
     def toggle_reference_mode(self):
@@ -333,11 +334,13 @@ class HiSignaller(QObject):
             self.backend.take_bg_and_darknoise_images()
             self.background_available_state.emit(self.backend.is_background_image_available())
             log.info("Background image acquired.")
+        except OperationCancelled:
+            log.info("Background acquisition cancelled by user.")
         except Exception as e:
             log.warning(f"Failed to acquire background image: {e}")
 
-
-        self.restart_live_view_when_ready()
+        if self.backend.is_shutter_open:
+            self.restart_live_view_when_ready()
 
     @pyqtSlot()
     def snap_and_fit(self):
