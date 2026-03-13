@@ -1,4 +1,4 @@
-import threading
+
 import time
 from contextlib import contextmanager
 from enum import Enum
@@ -18,6 +18,7 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens_dummy import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
+from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
@@ -120,7 +121,7 @@ class HiBackend:
         self.ni = ni
 
         # State
-        self.is_sample_illumination_continuous: bool = True
+        self.is_shutter_open: bool = True
         self.is_reference_mode: bool = False
         self.do_background_subtraction: bool = False
         self.do_live_fitting = False
@@ -170,7 +171,7 @@ class HiBackend:
             self.shutter_manager.change_to_reference()
         else:
             self.shutter_manager.change_to_objective()
-        if self.is_sample_illumination_continuous:
+        if self.is_shutter_open:
             self.shutter_manager.sample.open()
         else:
             self.shutter_manager.sample.close()
@@ -241,13 +242,13 @@ class HiBackend:
 
     # ---------------- Change Modes ----------------
 
-    def change_illumination_mode_to_continuous(self):
-        self.is_sample_illumination_continuous = True
+    def open_sample_shutter(self):
+        self.is_shutter_open = True
         self.shutter_manager.sample.open()
         log.info("[BrillouinBackend] Switched to continuous illumination mode.")
 
-    def change_illumination_mode_to_pulsed(self):
-        self.is_sample_illumination_continuous = False
+    def close_sample_shutter(self):
+        self.is_shutter_open = False
         self.shutter_manager.sample.close()
         log.info("[BrillouinBackend] Switched to pulsed illumination mode.")
 
@@ -306,10 +307,37 @@ class HiBackend:
             return frame
         return subtract_background(frame=frame, bg_frame=self.bg_image)
 
+    def take_n_images(self, n_images: int) -> np.ndarray:
+        """Acquire up to n_images, with cancel support and progress logging.
 
+        Cancellation is checked between snaps, so Stop/Cancel can interrupt the
+        sequence cleanly. The current in-flight camera snap cannot be interrupted,
+        but acquisition stops before the next frame.
+        """
+        frames: list[np.ndarray] = []
 
-    def take_n_images(self, n_images) -> np.ndarray:
-        return np.stack([self._get_andor_camera_snap() for _ in range(n_images)])
+        if n_images <= 0:
+            log.info("[Acquisition] No images requested.")
+            return np.empty((0,), dtype=np.float64)
+
+        log.info(f"[Acquisition] Starting acquisition of {n_images} image(s).")
+
+        for i in range(n_images):
+            if self.f2b_cancel_callback():
+                log.info(f"[Acquisition] Cancelled at {i}/{n_images} image(s).")
+                raise OperationCancelled()
+
+            frame = self._get_andor_camera_snap()
+            frames.append(frame)
+
+            log.info(f"[Acquisition] Progress: {i + 1}/{n_images}")
+
+        if not frames:
+            log.warning("[Acquisition] No images acquired.")
+            return np.empty((0,), dtype=np.float64)
+
+        log.info(f"[Acquisition] Finished with {len(frames)}/{n_images} image(s) acquired.")
+        return np.stack(frames, axis=0)
 
 
     def take_bg_and_darknoise_images(self):
@@ -323,7 +351,7 @@ class HiBackend:
     def get_bg_image(self, n_images: int) -> ImageStatistics:
         """Capture and average multiple frames to use as background."""
 
-        if self.is_sample_illumination_continuous:
+        if self.is_shutter_open:
             self.shutter_manager.sample.close()
         else:
             pass # shutter should already be closed
@@ -341,10 +369,10 @@ class HiBackend:
         log.info("[BrillouinBackend] ...Background Images acquired.")
 
 
-        if self.is_sample_illumination_continuous:
+        if self.is_shutter_open:
             self.shutter_manager.sample.open()
         else:
-            pass # do not open shutter, we are in snap mode
+            pass # do not open shutter
 
         return generate_image_statistics_dataclass(n_images)
 
@@ -393,14 +421,8 @@ class HiBackend:
         return frame.astype(np.float64)
 
 
-    def get_andor_frame(self, timeout: float = 3.0) -> np.ndarray:
-        # Get the frame:
-        if self.is_reference_mode or self.is_sample_illumination_continuous:
-            frame = self._get_andor_camera_snap()
-        else:
-            frame = self._open_sample_shutter_get_frame_close_shutter(timeout=timeout)
-
-        return frame
+    def get_andor_frame(self) -> np.ndarray:
+        return self._get_andor_camera_snap()
 
     def get_fitted_spectrum(self, frame) -> FittedSpectrum:
         """
@@ -448,9 +470,9 @@ class HiBackend:
             log.info(f"[Axial Scan] Measuring N Times the Reference Signal {request_axial_scan.n_measurements}.")
 
             for i in range(request_axial_scan.n_measurements):
-                log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
+                log.info(f"[Axial Scan] Frame {i+1}/{request_axial_scan.n_measurements}")
                 if self.f2b_cancel_callback():
-                    log.info(f"[Axial Scan] Cancelled during step {i}.")
+                    log.info(f"[Axial Scan] Cancelled during step {i+1}.")
                     return False
 
                 frame = self._get_andor_camera_snap()
@@ -480,46 +502,29 @@ class HiBackend:
                     self.zaber_eye_lens.move_abs(lens_x0)
                     return False
 
-            try:
-                if not self.is_sample_illumination_continuous:
-                    self.shutter_manager.sample.open()
+            for i in range(request_axial_scan.n_measurements):
+                if self.f2b_cancel_callback():
+                    log.info(f"[Axial Scan] Cancelled during step {i+1}. Returning lens to starting position.")
+                    self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+                    return False
 
-                # # First frame at starting position:
-                # frame, ts = self._get_andor_camera_snap()
-                # self.display_spectrum(frame=frame)
-                # all_results.append(
-                #     MeasurementPoint(
-                #         frame_andor=frame,
-                #         lens_zaber_position=lens_x0,
-                #         time_stamp=ts)
-                # )
+                log.info(f"[Axial Scan] Frame {i+1}/{request_axial_scan.n_measurements}")
+                self.zaber_eye_lens.move_rel(delta_um=dx)
+                zaber_pos = self.zaber_eye_lens.get_position()
+                self.b2f_emit_update_zaber_lens_position(zaber_pos)
 
-                for i in range(request_axial_scan.n_measurements):
-                    if self.f2b_cancel_callback():
-                        log.info(f"[Axial Scan] Cancelled during step {i}. Returning lens to starting position.")
-                        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
-                        return False
+                frame = self._get_andor_camera_snap()
 
-                    log.info(f"[Axial Scan] Frame {i}/{request_axial_scan.n_measurements}")
-                    self.zaber_eye_lens.move_rel(delta_um=dx)
-                    zaber_pos = self.zaber_eye_lens.get_position()
-                    self.b2f_emit_update_zaber_lens_position(zaber_pos)
+                self.display_spectrum(frame=frame)
 
-                    frame = self._get_andor_camera_snap()
-
-                    self.display_spectrum(frame=frame)
-
-                    all_results.append(
-                        MeasurementPoint(
-                            frame_andor=frame,
-                            lens_zaber_position=zaber_pos,
-                            time_stamp=time.perf_counter())
-                    )
+                all_results.append(
+                    MeasurementPoint(
+                        frame_andor=frame,
+                        lens_zaber_position=zaber_pos,
+                        time_stamp=time.perf_counter())
+                )
 
 
-            finally:
-                if not self.is_sample_illumination_continuous:
-                    self.shutter_manager.sample.close()
 
         if request_axial_scan.find_reflection_plane:
             reflection_result_backwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=False)
@@ -594,25 +599,6 @@ class HiBackend:
                 x_pixels=fitting.x_pixels,
                 sline=fitting.sline,
             )
-
-
-    def _open_sample_shutter_get_frame_close_shutter(self, timeout: float) -> np.ndarray:
-        """Acquire a frame with temporary shutter open for pulsed mode."""
-        timer = threading.Timer(timeout, self.shutter_manager.sample.close)
-
-        try:
-            self.shutter_manager.sample.open()
-            timer.start()
-            try:
-                frame = self._get_andor_camera_snap()
-            finally:
-                # Always cancel the timer (even if _get_camera_snap() fails)
-                timer.cancel()
-        finally:
-            # Always close the shutter at the end (even if an exception occurs)
-            self.shutter_manager.sample.close()
-
-        return frame
 
     def set_andor_exposure(self,
                             exposure_time: float,
@@ -713,45 +699,37 @@ class HiBackend:
             log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
             return ReflectionResult(found=False)
 
-        try:
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.open()
+        ni_sample_rate_hz = self._axial_scan_config.ni_sample_rate_hz
+        if is_go_forwards:
+            speed_um_s = self._axial_scan_config.speed_um_s
+        else:
+            speed_um_s = -self._axial_scan_config.speed_um_s
+        max_distance_um = self._axial_scan_config.max_distance_um
+        threshold_high_n_sigma = self._axial_scan_config.threshold_high_n_sigma
+        threshold_low_n_sigma = self._axial_scan_config.threshold_low_n_sigma
+        bg_acqui_s = self._axial_scan_config.bg_acqui_s
+        debounce_s = self._axial_scan_config.debounce_s
+        z_poll_s = self._axial_scan_config.z_poll_s
+        chunk_size = self._axial_scan_config.chunk_size
+        idle_sleep_s = self._axial_scan_config.idle_sleep_s
+        offset_z_um = self._axial_scan_config.z_offset_um
+        result: ReflectionResult = find_reflection_realtime(
+            ni=self.ni,
+            zaber=self.zaber_eye_lens,
+            ni_sample_rate_hz=ni_sample_rate_hz,
+            speed_um_s=speed_um_s,
+            max_distance_um=max_distance_um,
+            threshold_high_n_sigma=threshold_high_n_sigma,
+            threshold_low_n_sigma=threshold_low_n_sigma,
+            bg_acqui_s=bg_acqui_s,
+            debounce_s=debounce_s,
+            z_poll_s=z_poll_s,
+            chunk_size=chunk_size,
+            idle_sleep_s=idle_sleep_s,
+            z_offset_um=offset_z_um,
+        )
+        return result
 
-
-            ni_sample_rate_hz = self._axial_scan_config.ni_sample_rate_hz
-            if is_go_forwards:
-                speed_um_s = self._axial_scan_config.speed_um_s
-            else:
-                speed_um_s = -self._axial_scan_config.speed_um_s
-            max_distance_um = self._axial_scan_config.max_distance_um
-            threshold_high_n_sigma = self._axial_scan_config.threshold_high_n_sigma
-            threshold_low_n_sigma = self._axial_scan_config.threshold_low_n_sigma
-            bg_acqui_s = self._axial_scan_config.bg_acqui_s
-            debounce_s = self._axial_scan_config.debounce_s
-            z_poll_s = self._axial_scan_config.z_poll_s
-            chunk_size = self._axial_scan_config.chunk_size
-            idle_sleep_s = self._axial_scan_config.idle_sleep_s
-            offset_z_um = self._axial_scan_config.z_offset_um
-            result: ReflectionResult = find_reflection_realtime(
-                ni=self.ni,
-                zaber=self.zaber_eye_lens,
-                ni_sample_rate_hz=ni_sample_rate_hz,
-                speed_um_s=speed_um_s,
-                max_distance_um=max_distance_um,
-                threshold_high_n_sigma=threshold_high_n_sigma,
-                threshold_low_n_sigma=threshold_low_n_sigma,
-                bg_acqui_s=bg_acqui_s,
-                debounce_s=debounce_s,
-                z_poll_s=z_poll_s,
-                chunk_size=chunk_size,
-                idle_sleep_s=idle_sleep_s,
-                z_offset_um=offset_z_um,
-            )
-            return result
-
-        finally:
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.close()
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""

@@ -68,8 +68,8 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
-use_eye_tracker_dummy = True
+include_eye_tracking = False
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -94,7 +94,6 @@ class HiFrontend(QWidget):
     update_microwave_freq_requested = pyqtSignal(float)
     toggle_illumination_requested = pyqtSignal()
     toggle_bg_subtraction_requested = pyqtSignal()
-    snap_requested = pyqtSignal()
     toggle_reference_mode_requested = pyqtSignal()
     acquire_background_requested = pyqtSignal()
 
@@ -173,7 +172,6 @@ class HiFrontend(QWidget):
         self.update_microwave_freq_requested.connect(self.brillouin_signaller.set_microwave_frequency)
         self.toggle_illumination_requested.connect(self.brillouin_signaller.toggle_illumination_mode)
         self.toggle_bg_subtraction_requested.connect(self.brillouin_signaller.toggle_background_subtraction)
-        self.snap_requested.connect(self.brillouin_signaller.snap_and_fit)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
         self.acquire_background_requested.connect(self.brillouin_signaller.acquire_background_image)
 
@@ -427,8 +425,8 @@ class HiFrontend(QWidget):
         return group
 
     def create_illumination_group(self):
-        self.illum_label_cont = QLabel("● Cont.")
-        self.illum_label_pulse = QLabel("○ Pulsed")
+        self.illum_label_cont = QLabel("● Open")
+        self.illum_label_pulse = QLabel("○ Closed")
 
         self.illum_label_cont.setStyleSheet("color: gray")
         self.illum_label_pulse.setStyleSheet("color: gray")
@@ -436,8 +434,6 @@ class HiFrontend(QWidget):
         self.toggle_illum_btn = QPushButton("Switch")
         self.toggle_illum_btn.clicked.connect(self.toggle_illumination)
 
-        self.snap_once_btn = QPushButton("Take Snap")
-        self.snap_once_btn.clicked.connect(self.run_one_gui_update)
 
         # Row 1: Continuous label and toggle button
         row1 = QHBoxLayout()
@@ -448,7 +444,6 @@ class HiFrontend(QWidget):
         # Row 2: Pulsed label and snap button
         row2 = QHBoxLayout()
         row2.addWidget(self.illum_label_pulse)
-        row2.addWidget(self.snap_once_btn)
         row2.addStretch()
 
         # Combine rows vertically
@@ -1229,18 +1224,17 @@ class HiFrontend(QWidget):
 
     def update_illumination_ui(self, is_cont: bool):
         if is_cont:
-            self.illum_label_cont.setText("● Cont.")
+            self.illum_label_cont.setText("● Open")
             self.illum_label_cont.setStyleSheet("color: green; font-weight: bold")
-            self.illum_label_pulse.setText("○ Pulsed")
+            self.illum_label_pulse.setText("○ Closed")
             self.illum_label_pulse.setStyleSheet("color: gray")
-            self.snap_once_btn.setEnabled(False)
             self.run_gui()  # restart live view
         else:
-            self.illum_label_cont.setText("○ Cont.")
+            self.illum_label_cont.setText("○ Open")
             self.illum_label_cont.setStyleSheet("color: gray")
-            self.illum_label_pulse.setText("● Pulsed")
+            self.illum_label_pulse.setText("● Closed")
             self.illum_label_pulse.setStyleSheet("color: green; font-weight: bold")
-            self.snap_once_btn.setEnabled(True)
+
 
 
 
@@ -1264,9 +1258,6 @@ class HiFrontend(QWidget):
     def run_gui(self):
         self.start_live_requested.emit()
 
-
-    def run_one_gui_update(self):
-        self.snap_requested.emit()
 
     # --- inside HiFrontend ---
     def _display_result_fast(self, dr):
