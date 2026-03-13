@@ -734,52 +734,7 @@ class HiBackend:
         )
         return result
 
-        Returns:
 
-        """
-        if self.is_reference_mode:
-            log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
-            return ReflectionResult(found=False)
-
-        try:
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.open()
-
-
-            ni_sample_rate_hz = self._axial_scan_config.ni_sample_rate_hz
-            if is_go_forwards:
-                speed_um_s = self._axial_scan_config.speed_um_s
-            else:
-                speed_um_s = -self._axial_scan_config.speed_um_s
-            max_distance_um = self._axial_scan_config.max_distance_um
-            threshold_high_n_sigma = self._axial_scan_config.threshold_high_n_sigma
-            threshold_low_n_sigma = self._axial_scan_config.threshold_low_n_sigma
-            bg_acqui_s = self._axial_scan_config.bg_acqui_s
-            debounce_s = self._axial_scan_config.debounce_s
-            z_poll_s = self._axial_scan_config.z_poll_s
-            chunk_size = self._axial_scan_config.chunk_size
-            idle_sleep_s = self._axial_scan_config.idle_sleep_s
-            offset_z_um = self._axial_scan_config.z_offset_um
-            result: ReflectionResult = find_reflection_realtime(
-                ni=self.ni,
-                zaber=self.zaber_eye_lens,
-                ni_sample_rate_hz=ni_sample_rate_hz,
-                speed_um_s=speed_um_s,
-                max_distance_um=max_distance_um,
-                threshold_high_n_sigma=threshold_high_n_sigma,
-                threshold_low_n_sigma=threshold_low_n_sigma,
-                bg_acqui_s=bg_acqui_s,
-                debounce_s=debounce_s,
-                z_poll_s=z_poll_s,
-                chunk_size=chunk_size,
-                idle_sleep_s=idle_sleep_s,
-                z_offset_um=offset_z_um,
-            )
-            return result
-
-        finally:
-            if not self.is_sample_illumination_continuous:
-                self.shutter_manager.sample.close()
 
     def close(self):
         """Cleanly shut down all backend-controlled devices."""
