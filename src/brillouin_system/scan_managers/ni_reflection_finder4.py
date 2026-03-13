@@ -199,8 +199,6 @@ def find_reflection_realtime(
     else:
         z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
 
-    z_event = float(z_event) + float(z_offset_um)
-
     daq_ts = np.asarray(daq.timestamps_perf())
     daq_values = np.asarray(daq.values)
     zaber_lens_ts = np.asarray(zlog.t_perf)

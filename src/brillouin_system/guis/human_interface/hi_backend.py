@@ -475,7 +475,8 @@ class HiBackend:
             if request_axial_scan.find_reflection_plane:
                 reflection_result_forwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
                 if reflection_result_forwards.found:
-                    self.zaber_eye_lens.move_abs(reflection_result_forwards.event_z_um)
+                    z_pos = reflection_result_forwards.event_z_um + reflection_result_forwards.z_offset_um
+                    self.zaber_eye_lens.move_abs(z_pos)
                 else:
                     self.zaber_eye_lens.move_abs(lens_x0)
                     return False
@@ -699,7 +700,7 @@ class HiBackend:
             log.info(f"[Calibration] Exception: {e}")
             return False
 
-    def find_reflection_plane(self, is_go_forwards: bool=True) -> ReflectionResult:
+    def find_reflection_plane(self, is_go_forwards: bool=True) -> ReflectionResult | None:
         """
 
         Args:
