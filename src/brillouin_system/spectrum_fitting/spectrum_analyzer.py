@@ -21,6 +21,7 @@ class TheoreticalPeakStdError:
     right_peak_pixelation: float
     right_peak_bg: float
     right_peak_total: float
+    distance_total: float
 
 
 
@@ -84,11 +85,11 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
-            freq_shift_dc_ghz=self.calibration_calculator.freq_DC_model(
-                D=fitting.inter_peak_distance,
-                C=(fitting.right_peak_center_px+fitting.left_peak_center_px)/2,
-            ),
-            freq_shift_centroid_ghz=self.calibration_calculator.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2)
+            # freq_shift_dc_ghz=self.calibration_calculator.freq_DC_model(
+            #     D=fitting.inter_peak_distance,
+            #     C=(fitting.right_peak_center_px+fitting.left_peak_center_px)/2,
+            # ),
+            # freq_shift_centroid_ghz=self.calibration_calculator.freq_peak_centroid((fitting.right_peak_center_px+fitting.left_peak_center_px)/2)
 
         )
 
@@ -107,8 +108,8 @@ class SpectrumAnalyzer:
         # Lorentzian Profile, approximate std with fwhm
         s_l, s_r = analyzed_spec.hwhm_left_peak_ghz, analyzed_spec.hwhm_right_peak_ghz
 
-        a_l = self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1)
-        a_r = self.calibration_calculator.df_left_peak(px=fs.right_peak_center_px, dpx=1)
+        a_l = abs(self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1))
+        a_r = abs(self.calibration_calculator.df_right_peak(px=fs.right_peak_center_px, dpx=1))
 
         N_l = photons.left_peak_photons
         N_r = photons.right_peak_photons
@@ -130,6 +131,8 @@ class SpectrumAnalyzer:
         dx_r_bg =math.sqrt(  4*math.sqrt(math.pi) * s_r**3*b_r**2 / (a_r * N_r**2) )
         dx_r_total =math.sqrt( dx_r_photons**2 + dx_r_pixelation**2 + dx_r_bg**2)
 
+        distance_total = 0.5*math.sqrt(dx_l_total**2+dx_r_total**2)
+
         return TheoreticalPeakStdError(
             left_peak_photons= dx_l_photons*1000,
             left_peak_pixelation= dx_l_pixelation*1000,
@@ -139,6 +142,7 @@ class SpectrumAnalyzer:
             right_peak_pixelation= dx_r_pixelation*1000,
             right_peak_bg= dx_r_bg*1000,
             right_peak_total= dx_r_total*1000,
+            distance_total=distance_total*1000,
         )
 
 

@@ -1,44 +1,33 @@
 from __future__ import annotations
 
 from PyQt5.QtWidgets import (
+    QApplication,
     QDialog,
-    QVBoxLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
-    QGroupBox,
-    QApplication,
     QMessageBox,
+    QPushButton,
+    QVBoxLayout,
 )
-from PyQt5.QtGui import QIntValidator, QDoubleValidator
+from PyQt5.QtGui import QDoubleValidator, QIntValidator
 
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config import (
-    ScanningConfig,
     AXIAL_SCANNING_TOML_PATH,
+    ScanningConfig,
+    axial_scanning_config,
     load_axial_scanning_config,
     save_config_section,
-    axial_scanning_config,
 )
 
 
 class AxialScanningConfigDialog(QDialog):
-    """
-    Pattern matches AndorConfigDialog:
-      - Apply updates in-memory config, then calls a provided callback
-      - Save updates in-memory config, writes TOML (optionally also calls callback)
-    """
-
-    def __init__(
-        self,
-        cfg_holder: ThreadSafeConfig | None = None,
-        on_apply=None,   # <-- callback: on_apply(ScanningConfig)
-        parent=None,
-    ):
+    def __init__(self, cfg_holder: ThreadSafeConfig | None = None, on_apply=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Axial Scanning Configuration")
-        self.setMinimumSize(360, 320)
+        self.setMinimumSize(430, 500)
 
         self.cfg_holder: ThreadSafeConfig = cfg_holder or axial_scanning_config
         self.on_apply = on_apply
@@ -46,62 +35,74 @@ class AxialScanningConfigDialog(QDialog):
         self.inputs: dict[str, QLineEdit] = {}
 
         layout = QVBoxLayout()
-        layout.addWidget(self._group_find_reflection())
-        layout.addWidget(self._group_scan_settings())
+        layout.addWidget(self._group_axial_scanning())
         layout.addLayout(self._buttons())
         self.setLayout(layout)
 
         self.load_values()
 
     # ------------------------------------------------------------------ #
-    # UI
+    # UI helpers
     # ------------------------------------------------------------------ #
 
-    def _add_row(self, layout: QVBoxLayout, label: str, key: str, widget: QLineEdit) -> None:
+    def _add_row(self, layout: QVBoxLayout, label: str, key: str, widget: QLineEdit):
         self.inputs[key] = widget
         row = QHBoxLayout()
         row.addWidget(QLabel(label))
         row.addWidget(widget, 1)
         layout.addLayout(row)
 
-    def _group_find_reflection(self) -> QGroupBox:
-        g = QGroupBox("Find Reflection Settings")
+    def _group_axial_scanning(self) -> QGroupBox:
+        g = QGroupBox("Reflection Finder")
         v = QVBoxLayout()
 
-        le_exposure = QLineEdit()
-        le_exposure.setValidator(QDoubleValidator(0.0, 1e9, 6))
-        self._add_row(v, "Exposure [s]", "exposure", le_exposure)
-
-        le_gain = QLineEdit()
-        le_gain.setValidator(QIntValidator(0, 1_000_000))
-        self._add_row(v, "Gain", "gain", le_gain)
-
-        le_n_sigma = QLineEdit()
-        le_n_sigma.setValidator(QIntValidator(0, 1_000_000))
-        self._add_row(v, "N Sigma", "n_sigma", le_n_sigma)
+        le_sample_rate = QLineEdit()
+        le_sample_rate.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "NI sample rate [Hz]", "ni_sample_rate_hz", le_sample_rate)
 
         le_speed = QLineEdit()
         le_speed.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "Speed [µm/s]", "speed_um_s", le_speed)
 
-        le_max_search = QLineEdit()
-        le_max_search.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Max search distance [µm]", "max_search_distance_um", le_max_search)
+        le_max_distance = QLineEdit()
+        le_max_distance.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Max distance [µm]", "max_distance_um", le_max_distance)
 
-        le_n_bg = QLineEdit()
-        le_n_bg.setValidator(QIntValidator(0, 1_000_000))
-        self._add_row(v, "N BG images", "n_bg_images", le_n_bg)
+        le_hi_sigma = QLineEdit()
+        le_hi_sigma.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "High threshold [nσ]", "threshold_high_n_sigma", le_hi_sigma)
 
-        g.setLayout(v)
-        return g
+        le_lo_sigma = QLineEdit()
+        le_lo_sigma.setValidator(QIntValidator(0, 1_000_000))
+        self._add_row(v, "Low threshold [nσ]", "threshold_low_n_sigma", le_lo_sigma)
 
-    def _group_scan_settings(self) -> QGroupBox:
-        g = QGroupBox("Scan Settings")
-        v = QVBoxLayout()
+        le_bg_acqui = QLineEdit()
+        le_bg_acqui.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Background acquisition [s]", "bg_acqui_s", le_bg_acqui)
 
-        le_max_scan = QLineEdit()
-        le_max_scan.setValidator(QIntValidator(0, 10_000_000))
-        self._add_row(v, "Max scan distance [µm]", "max_scan_distance_um", le_max_scan)
+        le_debounce = QLineEdit()
+        le_debounce.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Debounce [s]", "debounce_s", le_debounce)
+
+        le_z_poll = QLineEdit()
+        le_z_poll.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Z poll [s]", "z_poll_s", le_z_poll)
+
+        le_alpha = QLineEdit()
+        le_alpha.setValidator(QDoubleValidator(0.0, 1.0, 6))
+        self._add_row(v, "Alpha", "alpha", le_alpha)
+
+        le_chunk_size = QLineEdit()
+        le_chunk_size.setValidator(QIntValidator(1, 1_000_000))
+        self._add_row(v, "Chunk size", "chunk_size", le_chunk_size)
+
+        le_idle_sleep = QLineEdit()
+        le_idle_sleep.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Idle sleep [s]", "idle_sleep_s", le_idle_sleep)
+
+        le_z_offset = QLineEdit()
+        le_z_offset.setValidator(QDoubleValidator(-1e12, 1e12, 6))
+        self._add_row(v, "Z offset [µm]", "z_offset_um", le_z_offset)
 
         g.setLayout(v)
         return g
@@ -110,7 +111,7 @@ class AxialScanningConfigDialog(QDialog):
         h = QHBoxLayout()
 
         apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self.apply_settings)  # <-- andor-like
+        apply_btn.clicked.connect(self.apply_settings)
 
         save_btn = QPushButton("Save")
         save_btn.clicked.connect(self.save_config)
@@ -125,86 +126,66 @@ class AxialScanningConfigDialog(QDialog):
         return h
 
     # ------------------------------------------------------------------ #
-    # Data <-> UI (andor-like naming)
+    # Data <-> UI
     # ------------------------------------------------------------------ #
 
     def load_values(self) -> None:
         cfg: ScanningConfig = self.cfg_holder.get()
-        self.inputs["exposure"].setText(str(cfg.exposure))
-        self.inputs["gain"].setText(str(cfg.gain))
-        self.inputs["n_sigma"].setText(str(cfg.n_sigma))
-        self.inputs["speed_um_s"].setText(str(cfg.speed_um_s))
-        self.inputs["max_search_distance_um"].setText(str(cfg.max_search_distance_um))
-        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images))
-        self.inputs["max_scan_distance_um"].setText(str(cfg.max_scan_distance_um))
+
+        for k, w in self.inputs.items():
+            w.setText(str(getattr(cfg, k)))
 
     def _update_config_from_inputs(self) -> None:
-        """
-        Mirrors AndorConfigDialog._update_config_from_inputs():
-        - Parse widgets
-        - Update ThreadSafeConfig via .update(...)
-        """
-        def _req_text(key: str) -> str:
-            # Keep behavior strict (like Andor: int(...) directly)
+        def _req(key: str) -> str:
             return self.inputs[key].text().strip()
 
         self.cfg_holder.update(
-            exposure=float(_req_text("exposure")),
-            gain=int(_req_text("gain")),
-            n_sigma=int(_req_text("n_sigma")),
-            speed_um_s=float(_req_text("speed_um_s")),
-            max_search_distance_um=float(_req_text("max_search_distance_um")),
-            n_bg_images=int(_req_text("n_bg_images")),
-            max_scan_distance_um=int(_req_text("max_scan_distance_um")),
+            ni_sample_rate_hz=float(_req("ni_sample_rate_hz")),
+            speed_um_s=float(_req("speed_um_s")),
+            max_distance_um=float(_req("max_distance_um")),
+            threshold_high_n_sigma=int(_req("threshold_high_n_sigma")),
+            threshold_low_n_sigma=int(_req("threshold_low_n_sigma")),
+            bg_acqui_s=float(_req("bg_acqui_s")),
+            debounce_s=float(_req("debounce_s")),
+            z_poll_s=float(_req("z_poll_s")),
+            alpha=float(_req("alpha")),
+            chunk_size=max(1, int(_req("chunk_size"))),
+            idle_sleep_s=float(_req("idle_sleep_s")),
+            z_offset_um=float(_req("z_offset_um")),
         )
 
     # ------------------------------------------------------------------ #
-    # Actions (andor-like)
+    # Actions
     # ------------------------------------------------------------------ #
 
     def apply_settings(self) -> None:
-        """
-        Andor-style Apply:
-          - Update in-memory config
-          - Call callback with the updated config (so caller can 'send it')
-        """
         try:
             self._update_config_from_inputs()
-
             if callable(self.on_apply):
                 self.on_apply(self.cfg_holder.get())
-
             print("[Axial Scanning Config] Settings applied.")
         except Exception as e:
-            QMessageBox.critical(self, "Apply Error", f"Failed to apply settings:\n{e}")
+            QMessageBox.critical(self, "Apply Error", str(e))
 
     def save_config(self) -> None:
-        """
-        Save:
-          - Update in-memory config
-          - Persist to TOML
-          - (Optional) call callback too (common in hardware UIs)
-        """
         try:
             self._update_config_from_inputs()
             save_config_section(AXIAL_SCANNING_TOML_PATH, "axial_scanning", self.cfg_holder)
-
             if callable(self.on_apply):
                 self.on_apply(self.cfg_holder.get())
-
             print("[Axial Scanning Config] Settings saved.")
         except Exception as e:
-            QMessageBox.critical(self, "Save Error", f"Failed to save settings:\n{e}")
+            QMessageBox.critical(self, "Save Error", str(e))
 
 
 if __name__ == "__main__":
     import sys
 
-    def example_send_to_system(cfg: ScanningConfig):
-        print("[Function Call] Config updated:\n", cfg)
+    def example_send(cfg: ScanningConfig):
+        print(cfg)
 
-    holder = ThreadSafeConfig(load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning"))
+    holder = ThreadSafeConfig(load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH))
 
     app = QApplication(sys.argv)
-    dlg = AxialScanningConfigDialog(cfg_holder=holder, on_apply=example_send_to_system)
+    dlg = AxialScanningConfigDialog(holder, example_send)
     dlg.exec_()

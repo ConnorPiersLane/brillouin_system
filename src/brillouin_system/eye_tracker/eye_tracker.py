@@ -7,6 +7,7 @@ import numpy as np
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig, eye_tracker_config
+from brillouin_system.eye_tracker.eye_tracker_dataclasses import EyeTrackerSettings, EyeTrackerResultsForGui
 from brillouin_system.eye_tracker.eye_tracker_helpers import scale_image, ensure_uint8, draw_ellipse_rgb, gray_to_rgb, \
     make_black_image
 from brillouin_system.eye_tracker.pupil_fitting.ellipse2D import Ellipse2D
@@ -14,35 +15,11 @@ from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter import EllipseFit
 from brillouin_system.eye_tracker.pupil_fitting.ellipse_fitter_helpers import PupilEllipse
 from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 from brillouin_system.eye_tracker.pupil_fitting.pupil_detector import PupilDetector
-from brillouin_system.eye_tracker.stereo_imaging.calibration_dataclasses import StereoCalibration
+
 from brillouin_system.eye_tracker.stereo_imaging.init_stereo_cameras import stereo_cameras
 from brillouin_system.eye_tracker.stereo_imaging.init_se3 import left_to_ref
-from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 
 
-@dataclass
-class EyeTrackerSettings:
-    config: EyeTrackerConfig
-    stereo_calibration: StereoCalibration
-
-
-@dataclass
-class EyeTrackerRawData:
-    timestamp: float
-    left_img_original: np.ndarray
-    right_img_original: np.ndarray
-    pupil3D: Pupil3D | None
-
-@dataclass
-class EyeTrackerResultsForDiskSave:
-    settings: EyeTrackerSettings
-    rawdata: list[EyeTrackerRawData]
-
-@dataclass
-class EyeTrackerResultsForGui:
-    pupil3D: Pupil3D | None
-    cam_left_img: np.ndarray
-    cam_right_img: np.ndarray
 
 
 IMG_SIZE = (512, 512)
@@ -146,48 +123,6 @@ class EyeTracker:
 
 
         return left_img, right_img
-
-    # def _get_rendered_eye_image(self, pupil3D):
-    #     if pupil3D is None:
-    #         return make_black_image()
-    #
-    #     C, gaze = self._pose_from_pupil3D(pupil3D)
-    #     if C is None:
-    #         return make_black_image()
-    #
-    #     self.renderer.set_eye_pose(C, gaze)
-    #     return ensure_uint8(self.renderer.get_img())
-
-
-
-    # ---------------------------
-    # rate-limited saver
-    # ---------------------------
-
-
-    # def _pose_from_pupil3D(self, pupil3D: Pupil3D):
-    #     """
-    #     Convert Pupil3D (with .center_ref and .normal_ref) into a pose
-    #     for the renderer.
-    #     """
-    #     if pupil3D is None or pupil3D.center_ref is None:
-    #         return None, None
-    #
-    #     C = pupil3D.center_ref.astype(float)
-    #
-    #     if pupil3D.normal_ref is not None:
-    #         gaze = pupil3D.normal_ref.astype(float)
-    #         gaze /= np.linalg.norm(gaze) + 1e-9
-    #     else:
-    #         gaze = np.array([0.0, 0.0, 1.0])  # fallback
-    #
-    #     # Use renderer’s own geometry to push the cornea center slightly forward
-    #     cornea_forward_mm = (
-    #             self.renderer.parts["z_apex"] - self.renderer.parts["z_iris"]
-    #     )
-    #     C_cornea = C + gaze * cornea_forward_mm
-    #
-    #     return C_cornea, gaze
 
     def get_eye_tracker_results_from_original_imgs(self,
                                                    left_img: np.ndarray,

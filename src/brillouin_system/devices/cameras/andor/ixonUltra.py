@@ -301,17 +301,17 @@ class IxonUltra(BaseCamera):
             hstart, hend, vstart, vend, hbin, vbin = self.cam.get_roi()
             return hbin, vbin
 
-    def snap(self) -> tuple[np.ndarray, float]:
+    def snap(self) -> np.ndarray:
         """
 
-        Returns: frame, time.time()
+        Returns: frame, time.perf_counter()
 
         """
         #with self._lock:
         frame = self.cam.snap()
         if self.flip_image_horizontally:
             frame = np.fliplr(frame)
-        return frame, 0#time.time()
+        return frame
 
     def get_frame_shape(self) -> tuple[int, int]:
         #with self._lock:

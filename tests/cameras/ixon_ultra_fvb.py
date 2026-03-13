@@ -14,12 +14,12 @@ def test_ixon_camera():
     cam.set_binning(4,25)
     cam.cam.set_read_mode('fvb')
     # 3) snap one frame
-    cam.snap();
-    t0 = time.perf_counter();
-    cam.snap();
+    cam.snap()
+    t0 = time.perf_counter()
+    cam.snap()
     t1 = time.perf_counter()
-    t2 = time.perf_counter();
-    frame, _ = cam.snap();
+    t2 = time.perf_counter()
+    frame = cam.snap()
     t3 = time.perf_counter()
     print("snap1:", t1 - t0, "snap2:", t3 - t2)
     print("read_mode:", cam.cam.get_read_mode())
@@ -30,12 +30,12 @@ def test_ixon_camera():
     cam.set_roi(2, 73, 5, 30,)
     cam.set_binning(32,21)
     # 3) snap one frame
-    cam.snap();
-    t0 = time.perf_counter();
-    cam.snap();
+    cam.snap()
+    t0 = time.perf_counter()
+    cam.snap()
     t1 = time.perf_counter()
-    t2 = time.perf_counter();
-    frame, _ = cam.snap();
+    t2 = time.perf_counter()
+    frame = cam.snap()
     t3 = time.perf_counter()
     print("snap1:", t1 - t0, "snap2:", t3 - t2)
     print("read_mode:", cam.cam.get_read_mode())
