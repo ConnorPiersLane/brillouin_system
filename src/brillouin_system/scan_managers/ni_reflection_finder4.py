@@ -5,7 +5,6 @@ from dataclasses import dataclass, fields
 from typing import Optional
 
 import numpy as np
-from matplotlib import pyplot as plt
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_position_log import interp_z_positions, ZaberPositionLog
 
@@ -29,10 +28,10 @@ class ReflectionResult:
     threshold_low: Optional[float] = None
     idx_first: Optional[int] = None            # first sample above threshold_high
     idx_last: Optional[int] = None             # last sample above threshold_high (within the interval)
-    daq_ts: np.ndarray | None = None
-    daq_values: np.ndarray | None = None
-    zaber_lens_ts: np.ndarray | None = None
-    zaber_lens_z_um: np.ndarray | None = None
+    daq_ts: Optional[np.ndarray] = None
+    daq_values: Optional[np.ndarray] = None
+    zaber_lens_ts: Optional[np.ndarray] = None
+    zaber_lens_z_um: Optional[np.ndarray] = None
 
 def print_reflection_result(result):
     for f in fields(result):
@@ -186,9 +185,25 @@ def find_reflection_realtime(
             except Exception:
                 daq: None = None
 
-    # Validate detection + acquisition
+
+    daq_ts = np.asarray(daq.timestamps_perf())
+    daq_values = np.asarray(daq.values)
+    zaber_lens_ts = np.asarray(zlog.t_perf)
+    zaber_lens_z_um = np.asarray(zlog.z_um)
+
+
     if (not in_interval) or idx_first is None or idx_last_above is None or daq is None or best_idx is None:
-        return ReflectionResult(found=False)
+        # Validate detection + acquisition
+        # TODO: Change this back to found=False after logging is finished.
+        return ReflectionResult(
+            found=False,
+            threshold_high=th_hi,
+            threshold_low=th_lo,
+            daq_ts=daq_ts,
+            daq_values=daq_values,
+            zaber_lens_ts=zaber_lens_ts,
+            zaber_lens_z_um=zaber_lens_z_um,
+        )
 
     event_i = best_idx
     peak_val = best_v
@@ -200,10 +215,7 @@ def find_reflection_realtime(
     else:
         z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
 
-    daq_ts = np.asarray(daq.timestamps_perf())
-    daq_values = np.asarray(daq.values)
-    zaber_lens_ts = np.asarray(zlog.t_perf)
-    zaber_lens_z_um = np.asarray(zlog.z_um)
+
 
 
     return ReflectionResult(

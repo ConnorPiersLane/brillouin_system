@@ -501,6 +501,11 @@ class HiBackend:
                     self.zaber_eye_lens.move_abs(z_pos)
                 else:
                     self.zaber_eye_lens.move_abs(lens_x0)
+                    print("Did not find Reflection Plane:")
+                    print(f"daq_ts: {reflection_result_forwards.daq_ts}")
+                    print(f"daq_values: {reflection_result_forwards.daq_values}")
+                    print(f"zaber_lens_ts: {reflection_result_forwards.zaber_lens_ts}")
+                    print(f"zaber_lens_z_um: {reflection_result_forwards.zaber_lens_z_um}")
                     return False
 
             for i in range(request_axial_scan.n_measurements):
