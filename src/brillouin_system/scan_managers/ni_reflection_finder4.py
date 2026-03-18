@@ -25,6 +25,8 @@ class ReflectionResult:
     event_z_um: Optional[float] = None         # interpolated z at event time
     z_offset_um: Optional[float] = None
     peak_value: Optional[float] = None         # only meaningful for mode="max"
+    threshold_high: Optional[float] = None
+    threshold_low: Optional[float] = None
     idx_first: Optional[int] = None            # first sample above threshold_high
     idx_last: Optional[int] = None             # last sample above threshold_high (within the interval)
     daq_ts: np.ndarray | None = None
@@ -176,7 +178,6 @@ def find_reflection_realtime(
             except Exception:
                 zlog = None
 
-
             try: err = ni.get_acquiring_error()
             except Exception: err = None
 
@@ -212,6 +213,8 @@ def find_reflection_realtime(
         event_z_um=z_event,
         z_offset_um=z_offset_um,
         peak_value=peak_val,
+        threshold_high=th_hi,
+        threshold_low=th_lo,
         idx_first=int(idx_first),
         idx_last=int(idx_last_above),
         daq_ts = daq_ts,
