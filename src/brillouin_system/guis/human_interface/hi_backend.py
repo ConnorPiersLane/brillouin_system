@@ -1,4 +1,4 @@
-
+import os
 import time
 from contextlib import contextmanager
 from enum import Enum
@@ -500,11 +500,26 @@ class HiBackend:
                     self.zaber_eye_lens.move_abs(z_pos)
                 else:
                     self.zaber_eye_lens.move_abs(lens_x0)
-                    print("Did not find Reflection Plane:")
-                    print(f"daq_ts: {reflection_result_forwards.daq_ts}")
-                    print(f"daq_values: {reflection_result_forwards.daq_values}")
-                    print(f"zaber_lens_ts: {reflection_result_forwards.zaber_lens_ts}")
-                    print(f"zaber_lens_z_um: {reflection_result_forwards.zaber_lens_z_um}")
+                    # File name
+                    filename = "log.txt"
+
+                    # Get the directory where the script is running
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    file_path = os.path.join(script_dir, filename)
+
+                    # Build the single-line message
+                    message = (
+                        f"Did not find Reflection Plane: "
+                        f"laser position: {request_axial_scan.eye_tracker_results.laser_position}, "
+                        f"daq_ts: {reflection_result_forwards.daq_ts}, "
+                        f"daq_values: {reflection_result_forwards.daq_values}, "
+                        f"zaber_lens_ts: {reflection_result_forwards.zaber_lens_ts}, "
+                        f"zaber_lens_z_um: {reflection_result_forwards.zaber_lens_z_um}\n"
+                    )
+
+                    # Open file in append mode (creates it if it doesn't exist)
+                    with open(file_path, "a") as f:
+                        f.write(message)
                     return False
 
             for i in range(request_axial_scan.n_measurements):
