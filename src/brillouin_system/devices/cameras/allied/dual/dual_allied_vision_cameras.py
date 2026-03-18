@@ -4,7 +4,7 @@ import time
 
 import cv2
 import numpy as np
-from vimba import VimbaFeatureError, PixelFormat
+from vimba import VimbaFeatureError, PixelFormat, VimbaCameraError
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig, allied_config
 from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
@@ -202,9 +202,17 @@ class DualAlliedVisionCameras(BaseDualCameras):
         time.sleep(2)  # Let the queues settle
         self._is_streaming = True
 
+
     def stop_stream(self):
-        self.left.camera.stop_streaming()
-        self.right.camera.stop_streaming()
+        for name, cam in (("left", self.left.camera), ("right", self.right.camera)):
+            try:
+                cam.stop_streaming()
+                print(f"[DualCamera] stopped {name} stream")
+            except (VimbaCameraError, VimbaFeatureError) as e:
+                print(f"[DualCamera] ignoring {name} stop error during shutdown: {e}")
+            except Exception as e:
+                print(f"[DualCamera] unexpected {name} stop error: {e}")
+
         self._is_streaming = False
 
     def snap_once(self, timeout: float = 5.0):

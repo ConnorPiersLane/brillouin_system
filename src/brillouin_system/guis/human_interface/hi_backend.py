@@ -78,25 +78,25 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            # camera=IxonUltra(
-            #     index = 0,
-            #     temperature = "off",
-            #     fan_mode = "full",
-            #     x_start = 40, x_end  = 120,
-            #     y_start= 300, y_end  = 315,
-            #     vbin= 1, hbin  = 1,
-            #     verbose = True,
-            #     advanced_gain_option=False
-            # )
-            camera = DummyCamera()
+            camera=IxonUltra(
+                index = 0,
+                temperature = "off",
+                fan_mode = "full",
+                x_start = 40, x_end  = 120,
+                y_start= 300, y_end  = 315,
+                vbin= 1, hbin  = 1,
+                verbose = True,
+                advanced_gain_option=False
+            )
+            # camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
-            # microwave=Microwave()
-            microwave = MicrowaveDummy()
+            microwave=Microwave()
+            # microwave = MicrowaveDummy()
             zaber_eye_lens=ZaberEyeLens()
             # zaber_eye_lens = ZaberEyeLensDummy()
-            # zaber_hi=ZaberHumanInterface()
-            zaber_hi = ZaberHumanInterfaceDummy()
+            zaber_hi=ZaberHumanInterface()
+            # zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
             ni = NI6008()
 
@@ -500,26 +500,6 @@ class HiBackend:
                     self.zaber_eye_lens.move_abs(z_pos)
                 else:
                     self.zaber_eye_lens.move_abs(lens_x0)
-                    # File name
-                    filename = "log.txt"
-
-                    # Get the directory where the script is running
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    file_path = os.path.join(script_dir, filename)
-
-                    # Build the single-line message
-                    message = (
-                        f"Did not find Reflection Plane: "
-                        f"laser position: {request_axial_scan.eye_tracker_results.laser_position}, "
-                        f"daq_ts: {reflection_result_forwards.daq_ts}, "
-                        f"daq_values: {reflection_result_forwards.daq_values}, "
-                        f"zaber_lens_ts: {reflection_result_forwards.zaber_lens_ts}, "
-                        f"zaber_lens_z_um: {reflection_result_forwards.zaber_lens_z_um}\n"
-                    )
-
-                    # Open file in append mode (creates it if it doesn't exist)
-                    with open(file_path, "a") as f:
-                        f.write(message)
                     return False
 
             for i in range(request_axial_scan.n_measurements):

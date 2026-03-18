@@ -1,7 +1,7 @@
 [calibration]
 n_per_freq = 5
-degree = 1
-start = 4.0
-stop = 8.0
-step = 0.5
-reference = "distance"
+degree = 3
+start = 5.6
+stop = 5.8
+step = 0.01
+reference = "left"

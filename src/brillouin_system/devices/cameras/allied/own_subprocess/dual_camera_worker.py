@@ -179,7 +179,17 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
             # ---- streaming loop ----
             if running and cams and left_ring and right_ring:
-                f0, f1 = cams.snap_once(timeout=5.0)
+                try:
+                    f0, f1 = cams.snap_once(timeout=5.0)
+                except queue.Empty:
+                    evt_q.put({"type": "warn", "msg": "dual snap timeout; restarting stream"})
+                    try:
+                        cams.stop_stream()
+                    except Exception:
+                        pass
+                    time.sleep(0.2)
+                    cams.start_dual_cam_stream()
+                    continue
 
                 # accept frames as returned (no dtype/shape normalization here)
                 if hasattr(f0, "as_numpy_ndarray"):
@@ -208,11 +218,28 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
                 ri = (ri + 1) % right_ring.spec.slots
 
     except Exception as e:
-        evt_q.put({"type": "error", "msg": str(e), "tb": traceback.format_exc()})
+        tb = traceback.format_exc()
+        print("[dual_camera_worker] ORIGINAL EXCEPTION:")
+        print(tb, flush=True)
+        evt_q.put({"type": "error", "msg": str(e), "tb": tb})
     finally:
         if cams:
-            cams.close()
+            try:
+                cams.close()
+            except Exception:
+                print("[dual_camera_worker] EXCEPTION DURING cams.close():")
+                print(traceback.format_exc(), flush=True)
         if left_ring:
-            left_ring.close(); left_ring.unlink()
+            try:
+                left_ring.close()
+                left_ring.unlink()
+            except Exception:
+                print("[dual_camera_worker] EXCEPTION DURING left ring cleanup:")
+                print(traceback.format_exc(), flush=True)
         if right_ring:
-            right_ring.close(); right_ring.unlink()
+            try:
+                right_ring.close()
+                right_ring.unlink()
+            except Exception:
+                print("[dual_camera_worker] EXCEPTION DURING right ring cleanup:")
+                print(traceback.format_exc(), flush=True)
