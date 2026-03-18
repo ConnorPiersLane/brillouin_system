@@ -12,11 +12,14 @@ from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AxialScan, fit_axial_scan, analyze_axial_scan, get_freq_shift
+    AxialScan, fit_axial_scan, analyze_axial_scan, get_freq_shift, FittedAxialScan, AnalysedAxialScan
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
     MeasuredStatistics
+
+
+def fmt(val, precision=3): return f"{val:.{precision}f}" if val is not None else "N/A"
 
 
 class AxialScanViewer(QWidget):
@@ -24,15 +27,15 @@ class AxialScanViewer(QWidget):
 
     def __init__(self, axial_scan: AxialScan):
         super().__init__()
-        self.axial_scan = axial_scan
-        self.calc = CalibrationCalculator(self.axial_scan.calibration_params)
-        self.analyzer = SpectrumAnalyzer(self.calc)
+        self.axial_scan: AxialScan = axial_scan
+        self.calc: CalibrationCalculator = CalibrationCalculator(self.axial_scan.calibration_params)
+        self.analyzer: SpectrumAnalyzer = SpectrumAnalyzer(self.calc)
         self.setWindowTitle(f"Axial Scan Viewer - ID: {axial_scan.id}")
 
         # Analysis pipeline
-        self.fitted_axial_scan_data = fit_axial_scan(axial_scan)
-        self.analyzed_data = analyze_axial_scan(self.fitted_axial_scan_data)
-        self.freq_shifts = [get_freq_shift(af) for af in self.analyzed_data.freq_shifts]
+        self.fitted_axial_scan_data: FittedAxialScan = fit_axial_scan(axial_scan)
+        self.analyzed_data: AnalysedAxialScan = analyze_axial_scan(self.fitted_axial_scan_data)
+        self.freq_shifts: list = [get_freq_shift(af) for af in self.analyzed_data.freq_shifts]
 
         # State
         self.current_index = 0
@@ -279,6 +282,16 @@ class AxialScanViewer(QWidget):
                 print(f'Plane (backwards): {round(scan.reflection_result_backwards.event_z_um)}')
             else:
                 print(f'Plane (backwards): None')
+
+        if scan.eye_tracker_results is not None:
+            if scan.eye_tracker_results.laser_position is not None:
+                er = scan.eye_tracker_results
+                print("Laser Position [mm]:")
+                print(f"X: {fmt(er.laser_position[0], precision=2)}")
+                print(f"Y: {fmt(er.laser_position[1], precision=2)}")
+                print(f"Z: {fmt(er.laser_position[2], precision=2)}")
+            else:
+                print(f"Eye Tracker Position is None")
         print("=============================")
 
     def print_measurement_info(self, idx: int):
@@ -286,34 +299,31 @@ class AxialScanViewer(QWidget):
         freq_shift = self.analyzed_data.freq_shifts[idx]
         photons: PhotonsCounts = self.analyzed_data.fitted_scan.fitted_photon_counts[idx]
 
-        def fmt(val, precision=3): return f"{val:.{precision}f}" if val is not None else "N/A"
-
         print(f"--- Measurement {idx} ---")
-        print(f"Zaber position: {mp.lens_zaber_position:.2f} µm")
+        print(f"Zaber position: {fmt(mp.lens_zaber_position, precision=0)} µm")
         print(f"Freq shifts: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
         print(f"HWHM (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
               f"right={fmt(freq_shift.hwhm_right_peak_ghz)}")
-        print(f"Photons: left={fmt(photons.left_peak_photons)}, "
-              f"right={fmt(photons.right_peak_photons)}, "
-              f"total={fmt(photons.total_photons)}")
+        print(f"Photons: left={fmt(photons.left_peak_photons, precision=0)}, "
+              f"right={fmt(photons.right_peak_photons, precision=0)}, "
+              f"total={fmt(photons.total_photons, precision=0)}")
         print("----------------------------")
 
     # --- New helpers ---
     @staticmethod
     def print_tpse(tpse: "TheoreticalPeakStdError"):
-        fmt = AxialScanViewer._fmt
         print("==== Theoretical Peak Std Error (MHz) ====")
-        print(f"Left Peak: photons={fmt(tpse.left_peak_photons)}, "
-              f"pixelation={fmt(tpse.left_peak_pixelation)}, "
-              f"bg={fmt(tpse.left_peak_bg)}, "
-              f"total={fmt(tpse.left_peak_total)}")
-        print(f"Right Peak: photons={fmt(tpse.right_peak_photons)}, "
-              f"pixelation={fmt(tpse.right_peak_pixelation)}, "
-              f"bg={fmt(tpse.right_peak_bg)}, "
-              f"total={fmt(tpse.right_peak_total)}")
-        print(f"Distance: {fmt(tpse.distance_total)}")
+        print(f"Left Peak: photons={fmt(tpse.left_peak_photons, precision=0)}, "
+              f"pixelation={fmt(tpse.left_peak_pixelation, precision=0)}, "
+              f"bg={fmt(tpse.left_peak_bg, precision=0)}, "
+              f"total={fmt(tpse.left_peak_total, precision=0)}")
+        print(f"Right Peak: photons={fmt(tpse.right_peak_photons, precision=0)}, "
+              f"pixelation={fmt(tpse.right_peak_pixelation, precision=0)}, "
+              f"bg={fmt(tpse.right_peak_bg, precision=0)}, "
+              f"total={fmt(tpse.right_peak_total, precision=0)}")
+        print(f"Combined (0.5 sqrt(l**2+r**2)): {fmt(tpse.distance_total, precision=0)}")
         print("===================================")
 
     @staticmethod
