@@ -1,4 +1,4 @@
-import os
+
 import time
 from contextlib import contextmanager
 from enum import Enum
@@ -129,6 +129,7 @@ class HiBackend:
         self.calibration_data: CalibrationData | None = None
         self.calibration_poly_fit_params: CalibrationPolyfitParameters | None = None
         self.calibration_calculator: CalibrationCalculator | None = None
+        self.calibration_config: CalibrationConfig = calibration_config.get()
 
         # Background (BG) Image and dark_image for the sample
         self.bg_image: ImageStatistics | None = None
@@ -200,7 +201,8 @@ class HiBackend:
             andor_camera_info=self.andor_camera.get_camera_info_dataclass()
         )
 
-
+    def update_calibration_config(self, config: CalibrationConfig):
+        self.calibration_config = config
 
     def init_f2b_signals(self, cancel_callback: Callable[[], bool]):
         self.f2b_cancel_callback = cancel_callback
@@ -240,6 +242,8 @@ class HiBackend:
         return z
 
     # ---------------- Change Modes ----------------
+
+
 
     def open_sample_shutter(self):
         self.is_shutter_open = True
@@ -452,8 +456,10 @@ class HiBackend:
             self.calibration_poly_fit_params = None
             self.calibration_calculator = None
         else:
-            self.calibration_poly_fit_params = calibrate(data=self.calibration_data)
-            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(parameters=self.calibration_poly_fit_params)
+            self.calibration_poly_fit_params = calibrate(data=self.calibration_data,
+                                                         poyfit_degree=self.calibration_config.degree)
+            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(
+                parameters=self.calibration_poly_fit_params)
 
 
 
@@ -572,7 +578,9 @@ class HiBackend:
         if self.calibration_calculator is None:
             return None
         else:
-            return self.calibration_calculator.compute_freq_shift(fitting=fitting)
+            return self.calibration_calculator.compute_freq_shift(fitting=fitting,
+                                                                  reference=self.calibration_config.reference,
+                                                                  mode=self.calibration_config.mode)
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:

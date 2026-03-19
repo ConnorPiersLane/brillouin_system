@@ -41,7 +41,7 @@ from brillouin_system.logging_utils.logging_setup import start_logging, install_
 
 log = get_logger(__name__)
 
-from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.calibration.config.calibration_config import calibration_config, CalibrationConfig
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
@@ -51,9 +51,8 @@ from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan
-from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
-    CalibrationImageDialog, CalibrationData, CalibrationCalculator
-
+from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
+from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 ###
 # Add other guis
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
@@ -63,7 +62,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
+include_eye_tracking = False
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -98,6 +97,7 @@ class HiFrontend(QWidget):
     move_zaber_stage_z_requested = pyqtSignal(float)
 
     run_calibration_requested = pyqtSignal()
+    update_calibration_config_requested = pyqtSignal(object)
     take_axial_step_scan_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
@@ -176,11 +176,13 @@ class HiFrontend(QWidget):
         self.move_zaber_stage_z_requested.connect(self.brillouin_signaller.move_zaber_stage_z_relative)
 
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
+        self.update_calibration_config_requested.connect(self.brillouin_signaller.update_calibration_config_backend)
         self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
         self.cancel_requested.connect(self.brillouin_signaller.cancel_operations)
+
         self.update_andor_config_requested.connect(self.brillouin_signaller.update_andor_config_settings)
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
         self.update_fitting_configs_requested.connect(self.brillouin_signaller.update_fitting_configs)
@@ -1179,6 +1181,9 @@ class HiFrontend(QWidget):
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.update_andor_config_requested.emit(andor_config)
 
+    def update_calibration_config(self, calibration_config: CalibrationConfig):
+        self.update_calibration_config_requested.emit(calibration_config)
+
     def request_scanning_config_file_update(self, scanning_config: ScanningConfig):
         self.update_scanning_config_requested.emit(scanning_config)
 
@@ -1190,7 +1195,7 @@ class HiFrontend(QWidget):
         dialog.exec_()
 
     def on_reference_configs_clicked(self):
-        dialog = CalibrationConfigDialog(self)
+        dialog = CalibrationConfigDialog(on_apply=self.update_calibration_config, parent=self)
         dialog.exec_()
 
 
@@ -1463,14 +1468,16 @@ class HiFrontend(QWidget):
         self.save_calib_btn.setEnabled(True)
         log.info(f"[Brillouin Viewer] Calibration available")
 
-    def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationCalculator]):
+    def handle_requested_calibration(self,
+                                     received_cali: tuple[CalibrationData, CalibrationCalculator, CalibrationConfig]):
         cali_data = received_cali[0]
         cali_calculator = received_cali[1]
+        config = received_cali[2]
 
         if self._show_cali:
             try:
                 pixmap = render_calibration_to_pixmap(
-                    cali_data, cali_calculator, calibration_config.get().reference
+                    cali_data, cali_calculator, reference=config.reference, mode=config.mode
                 )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()

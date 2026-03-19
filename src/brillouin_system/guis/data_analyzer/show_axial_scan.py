@@ -12,7 +12,7 @@ from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AxialScan, fit_axial_scan, analyze_axial_scan, get_freq_shift, FittedAxialScan, AnalysedAxialScan
+    AxialScan, fit_axial_scan, FittedAxialScan
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
@@ -266,7 +266,7 @@ class AxialScanViewer(QWidget):
         print(f"ID: {scan.id}, Internal tracker i: {scan.i}")
         print(f"Number of measurements: {len(scan.measurements)}")
 
-        self.calc.print_current_model()
+        self.calc.print_all_models()
         ss = scan.system_state
         print(f"System State: reference_mode={ss.is_reference_mode}, "
               f"bg_subtraction={ss.is_do_bg_subtraction_active}, "

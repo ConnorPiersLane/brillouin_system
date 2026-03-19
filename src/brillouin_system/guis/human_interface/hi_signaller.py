@@ -4,6 +4,7 @@ import threading
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 from PyQt5 import QtCore
 
+from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
@@ -430,7 +431,13 @@ class HiSignaller(QObject):
     @pyqtSlot()
     def get_calibration_results(self):
         self.backend.update_calibration_calculator() # this recalculates the calibration
-        self.calibration_result_ready.emit((self.backend.calibration_data, self.backend.calibration_calculator))
+        self.calibration_result_ready.emit(
+            (self.backend.calibration_data, self.backend.calibration_calculator, self.backend.calibration_config))
+
+
+    @pyqtSlot(object)
+    def update_calibration_config_backend(self, config: CalibrationConfig):
+        self.backend.update_calibration_config(config)
 
     def emit_display_result(self, display: DisplayResults):
         self._mailbox_push_andor_display(display)
