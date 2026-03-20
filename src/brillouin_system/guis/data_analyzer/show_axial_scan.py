@@ -1,22 +1,28 @@
+import os
+from dataclasses import asdict
+
 import numpy as np
+import pandas as pd
 
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QVBoxLayout,
-    QHBoxLayout, QSpinBox, QGroupBox, QPushButton, QMessageBox
+    QHBoxLayout, QSpinBox, QGroupBox, QPushButton, QMessageBox, QFileDialog
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from scipy.stats import norm
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
-from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.calibration.config.calibration_config import CalibrationConfig, calibration_config
+from brillouin_system.guis.data_analyzer.excel_export_axial_scan import get_excel_row_data, BrillouinExport, \
+    load_from_excel
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, AnalyzedSpectrum
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
-    MeasuredStatistics
+    AnalyzedFreqShifts
 
 
 def fmt(val, precision=3): return f"{val:.{precision}f}" if val is not None else "N/A"
@@ -32,9 +38,14 @@ class AxialScanViewer(QWidget):
         self.analyzer: SpectrumAnalyzer = SpectrumAnalyzer(self.calc)
         self.setWindowTitle(f"Axial Scan Viewer - ID: {axial_scan.id}")
 
+        # Get mode and peak side:
+        cal_config: CalibrationConfig = calibration_config.get()
+        self.peak_reference = cal_config.reference
+        self.fitting_mode = cal_config.mode
+
         # Analysis pipeline
         self.list_analyzed_spectras: list[AnalyzedSpectrum] = fit_axial_scan(axial_scan)
-
+        self.freq_shifts: list[float] = [self.get_freq(a.analyzed_shifts) for a in self.list_analyzed_spectras]
         # State
         self.current_index = 0
         self.open_hist_windows = []
@@ -44,7 +55,34 @@ class AxialScanViewer(QWidget):
         self.print_scan_overview()
         self.update_display()
 
+
     # ---------------- UI Setup ----------------
+    def get_freq(self, analyzed_shifts: AnalyzedFreqShifts):
+
+        if self.peak_reference == "left":
+            if self.fitting_mode == "poly":
+                return analyzed_shifts.freq_shift_left_peak_ghz_poly
+            else:
+                return analyzed_shifts.freq_shift_left_peak_ghz_interp
+
+        elif self.peak_reference == "right":
+            if self.fitting_mode == "poly":
+                return analyzed_shifts.freq_shift_right_peak_ghz_poly
+            else:
+                return analyzed_shifts.freq_shift_right_peak_ghz_interp
+
+        elif self.peak_reference == "distance":
+            if self.fitting_mode == "poly":
+                return analyzed_shifts.freq_shift_peak_distance_ghz_poly
+            else:
+                return analyzed_shifts.freq_shift_peak_distance_ghz_interp
+
+        else:
+            raise ValueError(
+                f"Unknown reference '{self.peak_reference}'. Use 'left', 'right', or 'distance'."
+            )
+
+
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -92,6 +130,10 @@ class AxialScanViewer(QWidget):
         self.analyze_btn.clicked.connect(self.on_analyze_snr)
         nav_layout.addWidget(self.analyze_btn)
 
+        self.save_btn = QPushButton("Save to Excel")
+        self.save_btn.clicked.connect(self.save_to_excel)
+        nav_layout.addWidget(self.save_btn)
+
         nav_layout.addStretch()
         return nav_layout
 
@@ -99,7 +141,7 @@ class AxialScanViewer(QWidget):
 
     def update_display(self):
         mp = self.axial_scan.measurements[self.current_index]
-        self.print_measurement_info(self.current_index)
+        self.print_measurement_info()
 
         self.info_label.setText(
             f"ID: {self.axial_scan.id} | "
@@ -113,15 +155,14 @@ class AxialScanViewer(QWidget):
         else:
             frame =mp.frame_andor
         self.plot_frame(frame)
-        self.plot_spectrum(self.current_index)
+        self.plot_spectrum()
         self.plot_axial_scan()
 
         self.canvas.draw()
 
 
-        fitted_spectrum = self.list_analyzed_spectras.fitted_spectras[self.current_index]
-        if fitted_spectrum.is_success:
-            self.print_theoretical_precision()
+        fitted_spectrum = self.list_analyzed_spectras[self.current_index].fitted_spectrum
+
 
     def plot_frame(self, frame: np.ndarray):
         self.ax_img.cla()
@@ -130,16 +171,16 @@ class AxialScanViewer(QWidget):
         self.ax_img.set_xlabel("Pixel (X)")
         self.ax_img.set_ylabel("Pixel (Y)")
 
-    def plot_spectrum(self, idx: int):
+    def plot_spectrum(self):
         self.ax_spec.cla()
-        fit: FittedSpectrum = self.analyzed_data.fitted_scan.fitted_spectras[idx]
+        fit: FittedSpectrum = self.list_analyzed_spectras[self.current_index].fitted_spectrum
         self.ax_spec.plot(fit.x_pixels, fit.sline, 'k.', label="Spectrum")
 
         if fit.is_success:
             self.ax_spec.plot(fit.x_pixels[fit.mask_for_fitting], fit.sline[fit.mask_for_fitting], 'r.', label="Used")
             self.ax_spec.plot(fit.x_fit_refined, fit.y_fit_refined, 'r--', label="Fit")
 
-        self.ax_spec.set_title(f"Spectrum at Z = {round(self.axial_scan.measurements[idx].lens_zaber_position)} µm")
+        self.ax_spec.set_title(f"Spectrum at Z = {round(self.axial_scan.measurements[self.current_index].lens_zaber_position)} µm")
         self.ax_spec.set_xlabel("Pixel (X)")
         self.ax_spec.set_ylabel("Intensity (Σ Y)")
         self.ax_spec.legend()
@@ -148,7 +189,7 @@ class AxialScanViewer(QWidget):
         self.ax_axial.cla()
 
         # Plot frequency shift vs index
-        x = range(len(self.freq_shifts))
+        x = range(len(self.list_analyzed_spectras))
         self.ax_axial.plot(x, self.freq_shifts, 'bo-', label="Frequency Shift")
 
         # Highlight current point
@@ -158,8 +199,8 @@ class AxialScanViewer(QWidget):
             self.ax_axial.set_title(f"Freq (GHz): {y_val:.3f}")
 
         # Set x-axis ticks (index only, downsampled)
-        step = max(1, len(self.freq_shifts) // 20)
-        self.ax_axial.set_xticks(range(0, len(self.freq_shifts), step))
+        step = max(1, len(self.list_analyzed_spectras) // 20)
+        self.ax_axial.set_xticks(range(0, len(self.list_analyzed_spectras), step))
 
         self.ax_axial.set_xlabel("Index")
         self.ax_axial.set_ylabel("Frequency Shift (GHz)")
@@ -234,29 +275,6 @@ class AxialScanViewer(QWidget):
     def print_calibration_models(self):
         self.calc.print_all_models()
 
-    def print_theoretical_precision(self):
-        fit = self.analyzed_data.fitted_scan.fitted_spectras[self.current_index]
-        photons = self.analyzed_data.fitted_scan.fitted_photon_counts[self.current_index]
-
-        if self.axial_scan.system_state.bg_image is None:
-            bg_frame_std = None
-        else:
-            bg_frame_std = self.axial_scan.system_state.bg_image.std_image
-
-        tpse = self.analyzer.theoretical_precision(
-            fs=fit,
-            photons=photons,
-            bg_frame_std=bg_frame_std,
-            preamp_gain=self.axial_scan.system_state.andor_camera_info.preamp_gain,
-            emccd_gain=self.axial_scan.system_state.andor_camera_info.gain
-        )
-        if tpse is not None:
-            self.print_tpse(tpse)
-
-    def print_statistics(self):
-        ms = self.analyzer.measured_precision(self.analyzed_data.freq_shifts)
-        if ms is not None:
-            self.print_measured_precision(ms)
 
     def print_scan_overview(self):
         scan = self.axial_scan
@@ -292,16 +310,19 @@ class AxialScanViewer(QWidget):
                 print(f"Eye Tracker Position is None")
         print("=============================")
 
-    def print_measurement_info(self, idx: int):
-        mp = self.axial_scan.measurements[idx]
-        freq_shift = self.analyzed_data.freq_shifts[idx]
-        photons: PhotonsCounts = self.analyzed_data.fitted_scan.fitted_photon_counts[idx]
+    def print_measurement_info(self):
+        mp = self.axial_scan.measurements[self.current_index]
+        freq_shift = self.list_analyzed_spectras[self.current_index].analyzed_shifts
+        photons: PhotonsCounts = self.list_analyzed_spectras[self.current_index].photons
 
-        print(f"--- Measurement {idx} ---")
+        print(f"--- Measurement {self.current_index} ---")
         print(f"Zaber position: {fmt(mp.lens_zaber_position, precision=0)} µm")
-        print(f"Freq shifts: left={fmt(freq_shift.freq_shift_left_peak_ghz_poly)}, "
+        print(f"Freq shifts poly: left={fmt(freq_shift.freq_shift_left_peak_ghz_poly)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz_poly)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz_poly)}")
+        print(f"Freq shifts interp: left={fmt(freq_shift.freq_shift_left_peak_ghz_interp)}, "
+              f"right={fmt(freq_shift.freq_shift_right_peak_ghz_interp)}, "
+              f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz_interp)}")
         print(f"HWHM (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
               f"right={fmt(freq_shift.hwhm_right_peak_ghz)}")
         print(f"Photons: left={fmt(photons.left_peak_photons, precision=0)}, "
@@ -324,27 +345,61 @@ class AxialScanViewer(QWidget):
         print(f"Combined (0.5 sqrt(l**2+r**2)): {fmt(tpse.distance_total_mhz, precision=0)}")
         print("===================================")
 
-    @staticmethod
-    def print_measured_precision(ms: "MeasuredStatistics"):
-        fmt = AxialScanViewer._fmt
-        print("==== Measured Statistics ====")
-        print(f"Mean Freq shifts (GHz): "
-              f"left={fmt(ms.freq_shift_left_peak_mean_ghz)}, "
-              f"right={fmt(ms.freq_shift_right_peak_mean_ghz)}, "
-              f"distance={fmt(ms.freq_shift_peak_distance_mean_ghz)}, "
-              f"dc={fmt(ms.freq_shift_dc_mean_ghz)}, "
-              f"centroid={fmt(ms.freq_shift_centroid_mean_ghz)}")
-        print(f"STD Freq shifts (MHz): "
-              f"left={fmt(ms.freq_shift_left_peak_mhz_std)}, "
-              f"right={fmt(ms.freq_shift_right_peak_mhz_std)}, "
-              f"distance={fmt(ms.freq_shift_peak_distance_mhz_std)}, "
-              f"dc={fmt(ms.freq_shift_dc_mhz_std)}, "
-              f"centroid={fmt(ms.freq_shift_centroid_mhz_std)}")
-        print(f"Cov(left,right) = {fmt(ms.freq_cov_left_right, unit=' MHz²')}, "
-              f"Corr(left,right) = {fmt(ms.freq_corr_left_right)}")
-        print("===============================")
 
-    @staticmethod
-    def _fmt(val, precision=4, unit=""):
-        """Safe formatter for floats that may be None."""
-        return f"{val:.{precision}g}{unit}" if val is not None else "N/A"
+    # --- Export to Excel ---
+    def _safe_sheet_name(self, name: str) -> str:
+        invalid = ['\\', '/', '*', '?', ':', '[', ']']
+        for ch in invalid:
+            name = name.replace(ch, "_")
+        return name[:31] or "Sheet1"
+
+    def _build_export_rows(self) -> list[BrillouinExport]:
+        rows: list[BrillouinExport] = []
+
+        for i in range(len(self.list_analyzed_spectras)):
+            row = get_excel_row_data(
+                axial_scan=self.axial_scan, analyzed_spectrum=self.list_analyzed_spectras[i], idx=i,
+            )
+
+            rows.append(row)
+
+        return rows
+
+    def save_to_excel(self):
+        try:
+            rows = self._build_export_rows()
+            if not rows:
+                QMessageBox.warning(self, "No Data", "There is no data to export.")
+                return
+
+            default_name = f"{self.axial_scan.id}_brillouin_export.xlsx"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save to Excel",
+                default_name,
+                "Excel Files (*.xlsx)"
+            )
+
+            if not file_path:
+                return
+
+            if not file_path.lower().endswith(".xlsx"):
+                file_path += ".xlsx"
+
+            if os.path.exists(file_path):
+                existing_rows = load_from_excel(file_path, sheet_name=0)
+                rows = existing_rows + rows
+
+            df = pd.DataFrame([asdict(r) for r in rows])
+
+            with pd.ExcelWriter(file_path, engine="openpyxl", mode="w") as writer:
+                df.to_excel(writer, sheet_name="Sheet1", index=False)
+
+            QMessageBox.information(
+                self,
+                "Excel Saved",
+                f"Saved {len(rows)} rows to:\n{file_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")

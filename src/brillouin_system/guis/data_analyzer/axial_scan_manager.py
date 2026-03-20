@@ -26,8 +26,6 @@ class AxialScanManager(QWidget):
         self.scans: dict[int, AxialScan] = {}   # internal tracker → scan
         self.next_index: int = 0
 
-
-
         self.init_ui()
 
     def init_ui(self):
@@ -159,13 +157,19 @@ class AxialScanManager(QWidget):
             self.scan_list.takeItem(row)
 
     def open_calibration_config(self):
-        dlg = CalibrationConfigDialog(self)
+        def on_apply(_):
+            # No need to update anything locally
+            print("[AxialScanManager] Apply has no effect — you need to save the configs to they effect the viewer.")
+        dlg = CalibrationConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
+
+
+
 
     def open_fitting_config(self):
         def on_apply(_):
             # No need to update anything locally
-            print("[AxialScanManager] Pressed Apply — configs are live globally.")
+            print("[AxialScanManager] Apply has no effect — you need to save the configs to they effect the viewer")
 
         dlg = FindPeaksConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()

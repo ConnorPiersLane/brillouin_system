@@ -4,12 +4,11 @@ from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from brillouin_system.calibration.calibration import (
     get_calibration_calculator_from_data,
-    render_calibration_to_pixmap,
-    CalibrationImageDialog,
     CalibrationData,
     MeasurementsPerFreq,
     CalibrationMeasurementPoint,
 )
+from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
