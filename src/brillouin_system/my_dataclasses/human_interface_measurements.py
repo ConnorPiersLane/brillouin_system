@@ -97,8 +97,13 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
                                                                preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
                                                                emccd_gain=scan.system_state.andor_camera_info.gain)
 
+        if scan.system_state.is_do_bg_subtraction_active:
+            bg_frame_std = scan.system_state.bg_image.std_image
+        else:
+            bg_frame_std = None
+
         theoretical_std: TheoreticalPeakStdError = spectrum_analyzer.theoretical_precision(
-            fs=fitting, photons=photons, bg_frame_std=scan.system_state.bg_image.std_image,
+            fs=fitting, photons=photons, bg_frame_std=bg_frame_std,
             preamp_gain = scan.system_state.andor_camera_info.preamp_gain,
         emccd_gain = scan.system_state.andor_camera_info.gain)
 

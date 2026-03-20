@@ -138,7 +138,7 @@ class CalibrationCalculator:
 
     def freq_left_peak(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""
-        return float(np.polyval(self.p.freq_left_peak, px))
+        return np.polyval(self.p.freq_left_peak, px)
 
     def freq_left_peak_interp(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""
@@ -147,11 +147,11 @@ class CalibrationCalculator:
     def dfreq_dpx_left_peak(self, px):
         """Slope d(freq)/d(px) for left peak at pixel position px [GHz/pixel]."""
         coeffs = np.polyder(self.p.freq_left_peak, m=1)
-        return float(np.polyval(coeffs, px))
+        return np.polyval(coeffs, px)
 
     def freq_right_peak(self, px):
         """Frequency of the right Brillouin peak [GHz] at pixel position px."""
-        return float(np.polyval(self.p.freq_right_peak, px))
+        return np.polyval(self.p.freq_right_peak, px)
 
     def freq_right_peak_interp(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""
@@ -160,11 +160,11 @@ class CalibrationCalculator:
     def dfreq_dpx_right_peak(self, px):
         """Slope d(freq)/d(px) for right peak at pixel position px [GHz/pixel]."""
         coeffs = np.polyder(self.p.freq_right_peak, m=1)
-        return float(np.polyval(coeffs, px))
+        return np.polyval(coeffs, px)
 
     def freq_peak_distance(self, px):
         """Frequency distance between left and right peaks [GHz] at pixel position px."""
-        return float(np.polyval(self.p.freq_peak_distance, px))
+        return np.polyval(self.p.freq_peak_distance, px)
 
     def freq_peak_distance_interp(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""
@@ -174,7 +174,7 @@ class CalibrationCalculator:
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
         coeffs = np.polyder(self.p.freq_peak_distance, m=1)
-        return float(np.polyval(coeffs, px))
+        return np.polyval(coeffs, px)
 
     def df_left_peak(self, px, dpx):
         """Convert dpx to GHz using local slope of left peak."""
@@ -193,11 +193,11 @@ class CalibrationCalculator:
 
     def calibration_width_left_peak_dpx(self, px):
         """Ideal FWHM width of the left peak in pixels."""
-        return float(np.polyval(self.p.calibration_width_left_peak, px))
+        return np.polyval(self.p.calibration_width_left_peak, px)
 
     def calibration_width_right_peak_dpx(self, px):
         """Ideal FWHM width of the right peak in pixels."""
-        return float(np.polyval(self.p.calibration_width_right_peak, px))
+        return np.polyval(self.p.calibration_width_right_peak, px)
 
     def calibration_width_left_peak_ghz(self, px):
         """

@@ -77,7 +77,7 @@ class SpectrumAnalyzer:
 
     def theoretical_precision(self, fs: FittedSpectrum,
                               photons: PhotonsCounts,
-                              bg_frame_std: np.ndarray,
+                              bg_frame_std: np.ndarray | None,
                               preamp_gain: int | float,
                               emccd_gain: int | float,
                               ) -> TheoreticalPeakStdError:
