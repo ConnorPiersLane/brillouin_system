@@ -1,6 +1,5 @@
 import math
 from dataclasses import dataclass
-
 import numpy as np
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
@@ -20,7 +19,6 @@ class TheoreticalPeakStdError:
     right_peak_pixelation_mhz: float
     right_peak_bg_mhz: float
     right_peak_total_mhz: float
-    distance_total_mhz: float
 
 @dataclass
 class AnalyzedFreqShifts:
@@ -32,6 +30,35 @@ class AnalyzedFreqShifts:
     freq_shift_left_peak_ghz_interp: float | None = None
     freq_shift_right_peak_ghz_interp: float | None = None
     freq_shift_peak_distance_ghz_interp: float | None = None
+
+
+@dataclass
+class MeasuredStatistics:
+    """Means in GHz, std in MHz, covariance in MHz², correlation dimensionless."""
+    mean_freq_shift_left_peak_ghz_poly: float | None
+    mean_freq_shift_right_peak_ghz_poly: float | None
+    mean_freq_shift_peak_distance_ghz_poly: float | None
+    std_freq_shift_left_peak_ghz_poly: float | None
+    std_freq_shift_right_peak_ghz_poly: float | None
+    std_freq_shift_peak_distance_ghz_poly: float | None
+
+    mean_freq_shift_left_peak_ghz_interp: float | None
+    mean_freq_shift_right_peak_ghz_interp: float | None
+    mean_freq_shift_peak_distance_ghz_interp: float | None
+    std_freq_shift_left_peak_ghz_interp: float | None
+    std_freq_shift_right_peak_ghz_interp: float | None
+    std_freq_shift_peak_distance_ghz_interp: float | None
+
+    mean_hwhm_left_peak_ghz: float | None
+    mean_hwhm_right_peak_ghz: float | None
+    std_hwhm_left_peak_ghz: float | None
+    std_hwhm_right_peak_ghz: float | None
+
+    cov_freq_left_right_poly: float | None   # MHz²
+    corr_freq_left_right_poly: float | None  # dimensionless
+
+    cov_freq_left_right_interp: float | None   # MHz²
+    corr_freq_left_right_interp: float | None  # dimensionless
 
 
 
@@ -112,7 +139,6 @@ class SpectrumAnalyzer:
         dx_r_bg =math.sqrt(  4*math.sqrt(math.pi) * s_r**3*b_r**2 / (a_r * n_r**2) )
         dx_r_total =math.sqrt( dx_r_photons**2 + dx_r_pixelation**2 + dx_r_bg**2)
 
-        distance_total = 0.5*math.sqrt(dx_l_total**2+dx_r_total**2)
 
         return TheoreticalPeakStdError(
             left_peak_photons_mhz=dx_l_photons * 1000,
@@ -123,7 +149,93 @@ class SpectrumAnalyzer:
             right_peak_pixelation_mhz=dx_r_pixelation * 1000,
             right_peak_bg_mhz=dx_r_bg * 1000,
             right_peak_total_mhz=dx_r_total * 1000,
-            distance_total_mhz=distance_total * 1000,
         )
 
 
+def analyze_statistics(
+    shifts: list[AnalyzedFreqShifts],
+) -> MeasuredStatistics | None:
+
+    if not shifts:
+        return None
+
+    def valid_values(values: list[float | None]) -> list[float]:
+        return [v for v in values if v is not None]
+
+    def mean_or_none(values: list[float]) -> float | None:
+        return float(np.mean(values)) if values else None
+
+    def std_mhz_or_none(values: list[float]) -> float | None:
+        return float(np.std(values, ddof=1) * 1e3) if len(values) > 1 else None
+
+    def cov_corr_from_pairs(
+        pairs: list[tuple[float | None, float | None]]
+    ) -> tuple[float | None, float | None]:
+        valid_pairs = [(x, y) for x, y in pairs if x is not None and y is not None]
+        if len(valid_pairs) < 2:
+            return None, None
+
+        x = np.array([p[0] for p in valid_pairs], dtype=float)
+        y = np.array([p[1] for p in valid_pairs], dtype=float)
+
+        cov_ghz2 = np.cov(x, y, ddof=1)[0, 1]
+        cov_mhz2 = float(cov_ghz2 * 1e6)  # GHz² -> MHz²
+
+        std_x_mhz = float(np.std(x, ddof=1) * 1e3)
+        std_y_mhz = float(np.std(y, ddof=1) * 1e3)
+
+        corr = None
+        if std_x_mhz > 0 and std_y_mhz > 0:
+            corr = float(cov_mhz2 / (std_x_mhz * std_y_mhz))
+
+        return cov_mhz2, corr
+
+    # Collect values
+    left_poly = valid_values([s.freq_shift_left_peak_ghz_poly for s in shifts])
+    right_poly = valid_values([s.freq_shift_right_peak_ghz_poly for s in shifts])
+    dist_poly = valid_values([s.freq_shift_peak_distance_ghz_poly for s in shifts])
+
+    left_interp = valid_values([s.freq_shift_left_peak_ghz_interp for s in shifts])
+    right_interp = valid_values([s.freq_shift_right_peak_ghz_interp for s in shifts])
+    dist_interp = valid_values([s.freq_shift_peak_distance_ghz_interp for s in shifts])
+
+    hwhm_left = valid_values([s.hwhm_left_peak_ghz for s in shifts])
+    hwhm_right = valid_values([s.hwhm_right_peak_ghz for s in shifts])
+
+    # Cov/corr from paired valid values only
+    cov_poly, corr_poly = cov_corr_from_pairs([
+        (s.freq_shift_left_peak_ghz_poly, s.freq_shift_right_peak_ghz_poly)
+        for s in shifts
+    ])
+
+    cov_interp, corr_interp = cov_corr_from_pairs([
+        (s.freq_shift_left_peak_ghz_interp, s.freq_shift_right_peak_ghz_interp)
+        for s in shifts
+    ])
+
+    return MeasuredStatistics(
+        mean_freq_shift_left_peak_ghz_poly=mean_or_none(left_poly),
+        mean_freq_shift_right_peak_ghz_poly=mean_or_none(right_poly),
+        mean_freq_shift_peak_distance_ghz_poly=mean_or_none(dist_poly),
+        std_freq_shift_left_peak_ghz_poly=std_mhz_or_none(left_poly),
+        std_freq_shift_right_peak_ghz_poly=std_mhz_or_none(right_poly),
+        std_freq_shift_peak_distance_ghz_poly=std_mhz_or_none(dist_poly),
+
+        mean_freq_shift_left_peak_ghz_interp=mean_or_none(left_interp),
+        mean_freq_shift_right_peak_ghz_interp=mean_or_none(right_interp),
+        mean_freq_shift_peak_distance_ghz_interp=mean_or_none(dist_interp),
+        std_freq_shift_left_peak_ghz_interp=std_mhz_or_none(left_interp),
+        std_freq_shift_right_peak_ghz_interp=std_mhz_or_none(right_interp),
+        std_freq_shift_peak_distance_ghz_interp=std_mhz_or_none(dist_interp),
+
+        mean_hwhm_left_peak_ghz=mean_or_none(hwhm_left),
+        mean_hwhm_right_peak_ghz=mean_or_none(hwhm_right),
+        std_hwhm_left_peak_ghz=std_mhz_or_none(hwhm_left),
+        std_hwhm_right_peak_ghz=std_mhz_or_none(hwhm_right),
+
+        cov_freq_left_right_poly=cov_poly,
+        corr_freq_left_right_poly=corr_poly,
+
+        cov_freq_left_right_interp=cov_interp,
+        corr_freq_left_right_interp=corr_interp,
+    )

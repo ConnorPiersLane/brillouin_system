@@ -48,14 +48,19 @@ def main():
 
     try:
         calibration_data = load_calibration_file(file_path)
+        calib_config = calibration_config.get()
+        reference = calib_config.reference
+        degree = calib_config.degree
+        mode = calib_config.mode
 
-        calculator = get_calibration_calculator_from_data(calibration_data)
-        reference = calibration_config.get().reference
+        calculator = get_calibration_calculator_from_data(calibration_data, degree)
+
 
         pixmap = render_calibration_to_pixmap(
             calibration_data,
             calculator,
             reference,
+            mode=mode,
         )
 
         dlg = CalibrationImageDialog(pixmap)
@@ -64,7 +69,7 @@ def main():
     except Exception as e:
         QMessageBox.critical(None, "Error", str(e))
 
-    sys.exit(app.exec_())
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import os
+import pprint
 from dataclasses import asdict
 
 import numpy as np
@@ -22,7 +23,7 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
-    AnalyzedFreqShifts
+    AnalyzedFreqShifts, MeasuredStatistics, analyze_statistics
 
 
 def fmt(val, precision=3): return f"{val:.{precision}f}" if val is not None else "N/A"
@@ -227,7 +228,10 @@ class AxialScanViewer(QWidget):
     def on_analyze_snr(self):
         """Plot histogram of frequency shifts with Gaussian fit."""
         try:
-            self.print_theoretical_precision()
+            print("==== Analyze SNR ====")
+            shifts: list[AnalyzedFreqShifts] = [s.analyzed_shifts for s in self.list_analyzed_spectras]
+            stats: MeasuredStatistics = analyze_statistics(shifts)
+            pprint.pprint(asdict(stats))
 
             freq_shifts = np.array([fs for fs in self.freq_shifts if fs is not None], dtype=float)
             freq_shifts = freq_shifts[~np.isnan(freq_shifts)]
@@ -237,7 +241,7 @@ class AxialScanViewer(QWidget):
 
             mu, sigma, n = np.mean(freq_shifts), np.std(freq_shifts, ddof=1), len(freq_shifts)
 
-            print("==== Analyze SNR ====")
+
             print(f"Mean: {mu:.3f} GHz")
             print(f"Std: {sigma*1000:.3f} MHz")
             print(f"n: {n}")

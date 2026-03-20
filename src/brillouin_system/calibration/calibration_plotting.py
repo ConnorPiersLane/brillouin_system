@@ -167,7 +167,7 @@ def render_calibration_to_pixmap(
     calibration_data: CalibrationData,
     calculator: CalibrationCalculator,
     reference: str,
-    mode: str = "poly",
+    mode: str,
 ) -> QPixmap:
     fig = get_calibration_fig(
         calibration_data=calibration_data,

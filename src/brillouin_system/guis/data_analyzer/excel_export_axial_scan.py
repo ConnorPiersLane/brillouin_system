@@ -137,7 +137,7 @@ def export_to_excel(data: list[BrillouinExport], output_path: str):
     print(f"Exported {len(df)} rows to {output_path}")
 
 
-def load_from_excel(path: str, sheet_name: str = 0) -> list[BrillouinExport]:
+def load_from_excel(path: str, sheet_name: str | int = 0) -> list[BrillouinExport]:
     df = pd.read_excel(path, sheet_name=sheet_name)
 
     valid_fields = {f.name for f in fields(BrillouinExport)}
