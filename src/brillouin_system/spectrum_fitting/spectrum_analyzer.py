@@ -12,45 +12,27 @@ from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import Ph
 @dataclass
 class TheoreticalPeakStdError:
     """ All Values in MHz"""
-    left_peak_photons: float
-    left_peak_pixelation: float
-    left_peak_bg: float
-    left_peak_total: float
-    right_peak_photons: float
-    right_peak_pixelation: float
-    right_peak_bg: float
-    right_peak_total: float
-    distance_total: float
-
-
-
-@dataclass
-class MeasuredStatistics:
-    """ All Values in MHz, MHz², or -"""
-    freq_shift_left_peak_mean_ghz: float
-    freq_shift_right_peak_mean_ghz: float
-    freq_shift_peak_distance_mean_ghz: float
-    freq_shift_dc_mean_ghz: float
-    freq_shift_centroid_mean_ghz: float
-    freq_shift_left_peak_mhz_std: float
-    freq_shift_right_peak_mhz_std: float
-    freq_shift_peak_distance_mhz_std: float
-    freq_shift_dc_mhz_std: float
-    freq_shift_centroid_mhz_std: float
-    freq_cov_left_right: float  # MHz²
-    freq_corr_left_right: float # Dimensionless
-
+    left_peak_photons_mhz: float
+    left_peak_pixelation_mhz: float
+    left_peak_bg_mhz: float
+    left_peak_total_mhz: float
+    right_peak_photons_mhz: float
+    right_peak_pixelation_mhz: float
+    right_peak_bg_mhz: float
+    right_peak_total_mhz: float
+    distance_total_mhz: float
 
 @dataclass
 class AnalyzedFreqShifts:
-    freq_shift_left_peak_ghz: float | None
-    freq_shift_right_peak_ghz: float | None
-    freq_shift_peak_distance_ghz: float | None
+    freq_shift_left_peak_ghz_poly: float | None
+    freq_shift_right_peak_ghz_poly: float | None
+    freq_shift_peak_distance_ghz_poly: float | None
     hwhm_left_peak_ghz: float | None
     hwhm_right_peak_ghz: float | None
     freq_shift_left_peak_ghz_interp: float | None = None
     freq_shift_right_peak_ghz_interp: float | None = None
     freq_shift_peak_distance_ghz_interp: float | None = None
+
 
 
 class SpectrumAnalyzer:
@@ -60,17 +42,17 @@ class SpectrumAnalyzer:
     def analyze_spectrum(self, fitting: FittedSpectrum) -> AnalyzedFreqShifts:
         if not fitting.is_success:
             return AnalyzedFreqShifts(
-                freq_shift_left_peak_ghz=None,
-                freq_shift_right_peak_ghz=None,
-                freq_shift_peak_distance_ghz=None,
+                freq_shift_left_peak_ghz_poly=None,
+                freq_shift_right_peak_ghz_poly=None,
+                freq_shift_peak_distance_ghz_poly=None,
                 hwhm_left_peak_ghz=None,
                 hwhm_right_peak_ghz=None,
             )
 
         return AnalyzedFreqShifts(
-            freq_shift_left_peak_ghz=self.calibration_calculator.freq_left_peak(fitting.left_peak_center_px),
-            freq_shift_right_peak_ghz=self.calibration_calculator.freq_right_peak(fitting.right_peak_center_px),
-            freq_shift_peak_distance_ghz=self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance),
+            freq_shift_left_peak_ghz_poly=self.calibration_calculator.freq_left_peak(fitting.left_peak_center_px),
+            freq_shift_right_peak_ghz_poly=self.calibration_calculator.freq_right_peak(fitting.right_peak_center_px),
+            freq_shift_peak_distance_ghz_poly=self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance),
             hwhm_left_peak_ghz=float(
                 abs(
                     self.calibration_calculator.df_left_peak(
@@ -98,7 +80,7 @@ class SpectrumAnalyzer:
                               bg_frame_std: np.ndarray,
                               preamp_gain: int | float,
                               emccd_gain: int | float,
-                              ):
+                              ) -> TheoreticalPeakStdError:
         """ See paper: Precise nanometer Localization Analysis for Individual Fluorescent Probes """
 
         analyzed_spec = self.analyze_spectrum(fitting=fs)
@@ -133,15 +115,15 @@ class SpectrumAnalyzer:
         distance_total = 0.5*math.sqrt(dx_l_total**2+dx_r_total**2)
 
         return TheoreticalPeakStdError(
-            left_peak_photons= dx_l_photons*1000,
-            left_peak_pixelation= dx_l_pixelation*1000,
-            left_peak_bg= dx_l_bg*1000,
-            left_peak_total= dx_l_total*1000,
-            right_peak_photons= dx_r_photons*1000,
-            right_peak_pixelation= dx_r_pixelation*1000,
-            right_peak_bg= dx_r_bg*1000,
-            right_peak_total= dx_r_total*1000,
-            distance_total=distance_total*1000,
+            left_peak_photons_mhz=dx_l_photons * 1000,
+            left_peak_pixelation_mhz=dx_l_pixelation * 1000,
+            left_peak_bg_mhz=dx_l_bg * 1000,
+            left_peak_total_mhz=dx_l_total * 1000,
+            right_peak_photons_mhz=dx_r_photons * 1000,
+            right_peak_pixelation_mhz=dx_r_pixelation * 1000,
+            right_peak_bg_mhz=dx_r_bg * 1000,
+            right_peak_total_mhz=dx_r_total * 1000,
+            distance_total_mhz=distance_total * 1000,
         )
 
 

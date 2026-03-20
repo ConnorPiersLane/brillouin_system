@@ -12,7 +12,7 @@ from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AxialScan, fit_axial_scan, FittedAxialScan
+    AxialScan, fit_axial_scan, AnalyzedSpectrum
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
@@ -33,9 +33,7 @@ class AxialScanViewer(QWidget):
         self.setWindowTitle(f"Axial Scan Viewer - ID: {axial_scan.id}")
 
         # Analysis pipeline
-        self.fitted_axial_scan_data: FittedAxialScan = fit_axial_scan(axial_scan)
-        self.analyzed_data: AnalysedAxialScan = analyze_axial_scan(self.fitted_axial_scan_data)
-        self.freq_shifts: list = [get_freq_shift(af) for af in self.analyzed_data.freq_shifts]
+        self.list_analyzed_spectras: list[AnalyzedSpectrum] = fit_axial_scan(axial_scan)
 
         # State
         self.current_index = 0
@@ -121,7 +119,7 @@ class AxialScanViewer(QWidget):
         self.canvas.draw()
 
 
-        fitted_spectrum = self.fitted_axial_scan_data.fitted_spectras[self.current_index]
+        fitted_spectrum = self.list_analyzed_spectras.fitted_spectras[self.current_index]
         if fitted_spectrum.is_success:
             self.print_theoretical_precision()
 
@@ -301,9 +299,9 @@ class AxialScanViewer(QWidget):
 
         print(f"--- Measurement {idx} ---")
         print(f"Zaber position: {fmt(mp.lens_zaber_position, precision=0)} µm")
-        print(f"Freq shifts: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
-              f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
-              f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
+        print(f"Freq shifts: left={fmt(freq_shift.freq_shift_left_peak_ghz_poly)}, "
+              f"right={fmt(freq_shift.freq_shift_right_peak_ghz_poly)}, "
+              f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz_poly)}")
         print(f"HWHM (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
               f"right={fmt(freq_shift.hwhm_right_peak_ghz)}")
         print(f"Photons: left={fmt(photons.left_peak_photons, precision=0)}, "
@@ -315,15 +313,15 @@ class AxialScanViewer(QWidget):
     @staticmethod
     def print_tpse(tpse: "TheoreticalPeakStdError"):
         print("==== Theoretical Peak Std Error (MHz) ====")
-        print(f"Left Peak: photons={fmt(tpse.left_peak_photons, precision=0)}, "
-              f"pixelation={fmt(tpse.left_peak_pixelation, precision=0)}, "
-              f"bg={fmt(tpse.left_peak_bg, precision=0)}, "
-              f"total={fmt(tpse.left_peak_total, precision=0)}")
-        print(f"Right Peak: photons={fmt(tpse.right_peak_photons, precision=0)}, "
-              f"pixelation={fmt(tpse.right_peak_pixelation, precision=0)}, "
-              f"bg={fmt(tpse.right_peak_bg, precision=0)}, "
-              f"total={fmt(tpse.right_peak_total, precision=0)}")
-        print(f"Combined (0.5 sqrt(l**2+r**2)): {fmt(tpse.distance_total, precision=0)}")
+        print(f"Left Peak: photons={fmt(tpse.left_peak_photons_mhz, precision=0)}, "
+              f"pixelation={fmt(tpse.left_peak_pixelation_mhz, precision=0)}, "
+              f"bg={fmt(tpse.left_peak_bg_mhz, precision=0)}, "
+              f"total={fmt(tpse.left_peak_total_mhz, precision=0)}")
+        print(f"Right Peak: photons={fmt(tpse.right_peak_photons_mhz, precision=0)}, "
+              f"pixelation={fmt(tpse.right_peak_pixelation_mhz, precision=0)}, "
+              f"bg={fmt(tpse.right_peak_bg_mhz, precision=0)}, "
+              f"total={fmt(tpse.right_peak_total_mhz, precision=0)}")
+        print(f"Combined (0.5 sqrt(l**2+r**2)): {fmt(tpse.distance_total_mhz, precision=0)}")
         print("===================================")
 
     @staticmethod
