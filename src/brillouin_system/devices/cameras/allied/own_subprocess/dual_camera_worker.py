@@ -179,17 +179,8 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
             # ---- streaming loop ----
             if running and cams and left_ring and right_ring:
-                try:
-                    f0, f1 = cams.snap_once(timeout=5.0)
-                except queue.Empty:
-                    evt_q.put({"type": "warn", "msg": "dual snap timeout; restarting stream"})
-                    try:
-                        cams.stop_stream()
-                    except Exception:
-                        pass
-                    time.sleep(0.2)
-                    cams.start_dual_cam_stream()
-                    continue
+
+                f0, f1 = cams.snap_once(timeout=5.0)
 
                 # accept frames as returned (no dtype/shape normalization here)
                 if hasattr(f0, "as_numpy_ndarray"):

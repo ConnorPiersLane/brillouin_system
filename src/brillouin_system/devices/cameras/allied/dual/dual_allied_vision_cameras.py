@@ -107,8 +107,8 @@ class DualAlliedVisionCameras(BaseDualCameras):
         id0: str = "DEV_000F315BC084",
         id1: str = "DEV_000F315BDC0C",
         *,
-        throughput_MBps_per_cam: float = 45.0,  # ~90 MB/s total budget across both on 1GbE
-        packet_delays: tuple[int | None, int | None] = (1200, 2000),
+        throughput_MBps_per_cam: float = 30.0,  # ~90 MB/s total budget across both on 1GbE
+        packet_delays: tuple[int | None, int | None] = (2000, 4000),
         enable_ptp: bool = False,
         pixel_format = PixelFormat.Mono8,
     ):
@@ -226,8 +226,17 @@ class DualAlliedVisionCameras(BaseDualCameras):
         clear_queues()
         self.trigger_both()
 
-        f0 = frame_q0.get(timeout=timeout)
-        f1 = frame_q1.get(timeout=timeout)
+        import queue
+
+        try:
+            f0 = frame_q0.get(timeout=timeout)
+        except queue.Empty:
+            f0 = _black_from_roi(cam=self.left.camera)
+
+        try:
+            f1 = frame_q1.get(timeout=timeout)
+        except queue.Empty:
+            f1 = _black_from_roi(cam=self.right.camera)
 
         f0 = _to_mono2d(f0)
         f1 = _to_mono2d(f1)
