@@ -532,12 +532,9 @@ class HiBackend:
                 )
 
 
-
         if request_axial_scan.find_reflection_plane:
             reflection_result_backwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=False)
 
-        if request_axial_scan.find_reflection_plane:
-            reflection_result_backwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=False)
 
         # Move lens back to original position
         self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
