@@ -18,6 +18,7 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens_dummy import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
+from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
@@ -215,6 +216,12 @@ class HiBackend:
                                                         emit_update_zaber_lens_position:
                                                         Callable[[float], None]):
         self.b2f_emit_update_zaber_lens_position = emit_update_zaber_lens_position
+
+    def set_eyetracker_results(self, eyetracker_results: EyeTrackerResults):
+        self._eyetracker_results = eyetracker_results
+
+    def get_eyetracker_results(self) -> EyeTrackerResults:
+        return self._eyetracker_results
 
     def move_and_update_gui_zaber_eye_lens_rel(self, dz_um: float) -> float:
         """

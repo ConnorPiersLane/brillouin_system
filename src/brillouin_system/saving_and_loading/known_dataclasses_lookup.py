@@ -1,7 +1,7 @@
 from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorCameraInfo
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
-from brillouin_system.eye_tracker.eye_tracker_dataclasses import EyeTrackerRawData
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 from brillouin_system.eye_tracker.stereo_imaging.calibration_dataclasses import Intrinsics, StereoExtrinsics, \
     StereoCalibration
 from brillouin_system.my_dataclasses.display_results import DisplayResults
@@ -29,7 +29,7 @@ known_classes = {
         FittedSpectrum, DisplayResults,
         AndorCameraInfo,
         Intrinsics, StereoExtrinsics, StereoCalibration,
-        EyeTrackerConfig, EyeTrackerRawData, EyeTrackerResults,
+        EyeTrackerConfig, EyeTrackerResults, Pupil3D,
         ReflectionResult,
     ]
 }

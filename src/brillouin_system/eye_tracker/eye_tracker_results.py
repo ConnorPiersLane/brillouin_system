@@ -4,6 +4,7 @@ import numpy as np
 
 from brillouin_system.eye_tracker.eye_position.coordinates import RigPupilTransform, RigCoord, PupilCoord
 from brillouin_system.eye_tracker.eye_position.cornea_position import calc_distance_laser_corner
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 
 
 @dataclass
@@ -17,6 +18,7 @@ class EyeTrackerResults:
     time_stamp: float
     laser_position: None | tuple[float, float, float] #xyz
     delta_laser_corner: None | float
+    pupil3d: Pupil3D | None = None
 
 def get_eye_tracker_results(left: np.ndarray,
                             right: np.ndarray,
@@ -29,7 +31,7 @@ def get_eye_tracker_results(left: np.ndarray,
       meta     : Dict: {"ts": last["ts"], "idx": last["idx"], "pupil3D": pupil3D}
     """
     ts = meta["ts"]
-    pupil3D = meta["pupil3D"]
+    pupil3D: Pupil3D = meta["pupil3D"]
 
     if pupil3D is not None:
         transform = RigPupilTransform(pupil_center=RigCoord(x=pupil3D.center_ref[0],
@@ -49,4 +51,5 @@ def get_eye_tracker_results(left: np.ndarray,
         time_stamp=ts,
         laser_position=laser_focus_position,
         delta_laser_corner=delta_laser_corner,
+        pupil3d=pupil3D,
     )

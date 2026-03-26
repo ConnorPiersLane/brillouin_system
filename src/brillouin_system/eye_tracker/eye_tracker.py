@@ -138,7 +138,6 @@ class EyeTracker:
             cam_left_img = gray_to_rgb(ensure_uint8(left_img))
             cam_right_img = gray_to_rgb(ensure_uint8(right_img))
 
-
         # Ensure all images are correctly scaled
         # ensure correct scaling and rgb (for shared memory space) for GUI display
         cam_left_img = scale_image(cam_left_img, IMG_SIZE)
@@ -146,8 +145,6 @@ class EyeTracker:
 
         cam_left_img = ensure_uint8(cam_left_img)
         cam_right_img = ensure_uint8(cam_right_img)
-
-
 
         return EyeTrackerResultsForGui(
             pupil3D = pupil_3D,

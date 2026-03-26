@@ -6,6 +6,7 @@ from PyQt5 import QtCore
 
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
+from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
@@ -442,6 +443,9 @@ class HiSignaller(QObject):
     def emit_display_result(self, display: DisplayResults):
         self._mailbox_push_andor_display(display)
 
+    @pyqtSlot(object)
+    def update_latest_eyetracker_results(self, eyetracker_results: EyeTrackerResults):
+        self.backend.set_eyetracker_results(eyetracker_results)
 
     @pyqtSlot()
     def run_calibration(self):

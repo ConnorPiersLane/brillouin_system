@@ -1,3 +1,4 @@
+import math
 import os
 import pprint
 from dataclasses import asdict
@@ -48,6 +49,7 @@ class AxialScanViewer(QWidget):
         self.list_analyzed_spectras: list[AnalyzedSpectrum] = fit_axial_scan(axial_scan)
         self.freq_shifts: list[float] = [self.get_freq(a.analyzed_shifts) for a in self.list_analyzed_spectras]
         # State
+
         self.current_index = 0
         self.open_hist_windows = []
 
@@ -346,7 +348,6 @@ class AxialScanViewer(QWidget):
               f"pixelation={fmt(tpse.right_peak_pixelation_mhz, precision=0)}, "
               f"bg={fmt(tpse.right_peak_bg_mhz, precision=0)}, "
               f"total={fmt(tpse.right_peak_total_mhz, precision=0)}")
-        print(f"Combined (0.5 sqrt(l**2+r**2)): {fmt(tpse.distance_total_mhz, precision=0)}")
         print("===================================")
 
 

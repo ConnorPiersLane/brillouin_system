@@ -108,6 +108,57 @@ class AxialScanManager(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "Load Error", f"Failed to load {path}:\n{e}")
 
+        import math
+        import pandas as pd
+
+        rows = []
+
+        for idx, scan in self.scans.items():  # FIX: items() gives (key, value)
+            try:
+                lp = scan.eye_tracker_results.laser_position
+
+                # Compute values
+                radius = math.sqrt(lp[0] ** 2 + lp[1] ** 2)
+                angle = math.degrees(math.atan2(lp[1], lp[0]))
+
+                # ID
+                scan_id = f"{getattr(scan, 'i', '?')}-{getattr(scan, 'id', 'no-id')}"
+
+                # is_found (adjust if needed)
+                is_found = scan.reflection_result_forwards is not None
+
+                # DAQ values (handle list or scalar)
+                daq = scan.reflection_result_forwards.peak_value if is_found else None
+                threshold_high = scan.reflection_result_forwards.threshold_high
+                threshold_low = scan.reflection_result_forwards.threshold_low
+                if isinstance(daq, (list, tuple)):
+                    max_daq = max(daq) if daq else None
+                else:
+                    max_daq = daq
+
+                # Store row
+                rows.append({
+                    "ID": scan_id,
+                    "Angle": angle,
+                    "Radius": radius,
+                    "is_found": is_found,
+                    "max daq signal [V]": max_daq,
+                    'threshold_high': threshold_high,
+                    "threshold_low": threshold_low,
+                })
+
+            except Exception as e:
+                print(f"Skipping scan {idx}: {e}")
+
+        # Create DataFrame
+        df = pd.DataFrame(rows)
+
+        # Save to Excel
+        output_path = "scan_analysis.xlsx"
+        df.to_excel(output_path, index=False)
+
+        print(f"Saved Excel to: {output_path}")
+
     def show_scan(self):
         items = self.scan_list.selectedItems()
         if not items:

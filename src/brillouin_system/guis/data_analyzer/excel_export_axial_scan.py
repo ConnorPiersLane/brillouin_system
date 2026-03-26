@@ -112,7 +112,6 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         # Distance between peaks
         distance_ghz_poly=shifts.freq_shift_peak_distance_ghz_poly,
         distance_ghz_interp=shifts.freq_shift_peak_distance_ghz_interp,
-        distance_theo_std_mhz=theo.distance_total_mhz,
         ts_frame = axial_scan.measurements[idx].time_stamp,
         ts_pf = ts_pf,
         ts_pb = ts_pb,

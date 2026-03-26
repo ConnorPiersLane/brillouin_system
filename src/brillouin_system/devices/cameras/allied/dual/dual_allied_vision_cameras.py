@@ -14,6 +14,7 @@ from brillouin_system.devices.cameras.allied.single.allied_vision_camera import 
 frame_q0 = queue.Queue(maxsize=20)
 frame_q1 = queue.Queue(maxsize=20)
 
+# TODO: put timestamps time.perfcount() to the frames
 
 def clear_queues():
     while not frame_q0.empty():
@@ -267,37 +268,6 @@ class DualAlliedVisionCameras(BaseDualCameras):
         self.right.close()
         print("[DualCamera] Cameras closed.")
 
-
-    # ToDo: do trigger loop - finish this code and implement into pipeline (remove shmring for cameras)
-    def start_trigger_loop(self, hz=10):
-        self._run = True
-        def loop():
-            period = 1.0 / hz
-            next_t = time.time()
-            while self._run:
-                self.trigger_both()  # concurrent triggers :contentReference[oaicite:3]{index=3}
-                next_t += period
-                time.sleep(max(0.0, next_t - time.time()))
-        self._thread = threading.Thread(target=loop, daemon=True)
-        self._thread.start()
-
-    def stop_trigger_loop(self):
-        self._run = False
-        if hasattr(self, "_thread"):
-            self._thread.join(timeout=1.0)
-
-    def get_latest_from_queues(self):
-        f0 = f1 = None
-        try:
-            while True: f0 = frame_q0.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            while True: f1 = frame_q1.get_nowait()
-        except queue.Empty:
-            pass
-        return (None if f0 is None else _to_mono2d(f0),
-                None if f1 is None else _to_mono2d(f1))
 
 
 

@@ -13,17 +13,6 @@ class EyeTrackerSettings:
     stereo_calibration: StereoCalibration
 
 
-@dataclass
-class EyeTrackerRawData:
-    timestamp: float
-    left_img_original: np.ndarray
-    right_img_original: np.ndarray
-    pupil3D: Pupil3D | None
-
-@dataclass
-class EyeTrackerResultsForDiskSave:
-    settings: EyeTrackerSettings
-    rawdata: list[EyeTrackerRawData]
 
 @dataclass
 class EyeTrackerResultsForGui:

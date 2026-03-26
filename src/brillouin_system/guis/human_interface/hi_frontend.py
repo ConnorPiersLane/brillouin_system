@@ -60,10 +60,10 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = False
+use_eye_tracker_dummy = True
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -110,6 +110,7 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
+    send_eyetracker_result_to_backend = pyqtSignal(object)
 
     # Saving Signals
     save_all_axial_scans_requested = pyqtSignal()
@@ -129,7 +130,7 @@ class HiFrontend(QWidget):
 
 
         self.laser_focus_position: RigCoord | None = None
-        self.last_eye_tracker_results: EyeTrackerResults | None = None
+        self.lastest_eye_tracker_results: EyeTrackerResults | None = None
         self._last_eye_update_monotonic = 0.0
         self._andor_exposure_time: float | None = None
 
@@ -189,6 +190,7 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
+        self.send_eyetracker_result_to_backend.connect(self.brillouin_signaller.update_latest_eyetracker_results)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -1532,7 +1534,7 @@ class HiFrontend(QWidget):
                 n_measurements=n_meas,
                 step_size_um=step,
                 find_reflection_plane=find_reflection_plane,
-                eye_tracker_results=self.last_eye_tracker_results,
+                eye_tracker_results=self.lastest_eye_tracker_results,
             )
 
             self.take_axial_step_scan_requested.emit(request)
@@ -1747,7 +1749,6 @@ class HiFrontend(QWidget):
         )
 
 
-
     @QtCore.pyqtSlot(object, object, dict)
     def on_eye_frames_ready(self, left, right, meta):
         """
@@ -1765,20 +1766,20 @@ class HiFrontend(QWidget):
         self.eye_img[0].setImage(left, autoLevels=True)
         self.eye_img[1].setImage(right, autoLevels=True)
 
-        self.last_eye_tracker_results = get_eye_tracker_results(
+        self.lastest_eye_tracker_results = get_eye_tracker_results(
             left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
         )
-        laser_position = self.last_eye_tracker_results.laser_position
+        laser_position = self.lastest_eye_tracker_results.laser_position
         if laser_position is not None:
             self.update_laser_position_cartesian(x=laser_position[0], y=laser_position[1])
             self.update_laser_position_text_eye_tracker(
                 x=laser_position[0],
                 y=laser_position[1],
                 z=laser_position[2],
-                dc=self.last_eye_tracker_results.delta_laser_corner
+                dc=self.lastest_eye_tracker_results.delta_laser_corner
             )
 
-            self._update_cornea_band(self.last_eye_tracker_results.delta_laser_corner)
+            self._update_cornea_band(self.lastest_eye_tracker_results.delta_laser_corner)
 
         else:
             self.clear_laser_position()
@@ -1794,7 +1795,7 @@ class HiFrontend(QWidget):
         """
         t0 = time.monotonic()
         while time.monotonic() - t0 < timeout_s:
-            r = self.last_eye_tracker_results
+            r = self.lastest_eye_tracker_results
             if r is not None and r.laser_position is not None:
                 age = time.monotonic() - self._last_eye_update_monotonic
                 if age <= max_age_s:

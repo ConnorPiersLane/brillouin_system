@@ -13,8 +13,6 @@ class PupilCoord:
     z: float
 
 
-
-
 class RigPupilTransform:
     """
     Coordinate transform between rig coordinates and pupil coordinates.
