@@ -6,6 +6,7 @@ from PyQt5 import QtCore
 
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
@@ -57,6 +58,7 @@ class HiSignaller(QObject):
     send_message_to_frontend = pyqtSignal(str, str)
     new_andor_display_ready = pyqtSignal()
     close_event_finished = pyqtSignal()
+    laser_coord_calibration_ready = pyqtSignal(object)
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -480,6 +482,10 @@ class HiSignaller(QObject):
             self.update_system_state(new_state=old_state)
             self.restart_live_view_when_ready()
 
+    @pyqtSlot()
+    def calibrate_laser_camera_position_delegate(self):
+        laser_coord: LaserOffset = self.backend.run_laser_xy_calibration()
+        self.laser_coord_calibration_ready.emit(laser_coord)
 
     @pyqtSlot(int)
     def handle_request_axial_scan_data(self, index: int):

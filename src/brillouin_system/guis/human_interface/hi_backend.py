@@ -18,6 +18,8 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens_dummy import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset, \
+    CalibRigLaserPosition, run_full_laser_offset_calibration
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
@@ -746,6 +748,44 @@ class HiBackend:
         )
         return result
 
+
+    def run_laser_xy_calibration(self) -> LaserOffset:
+        """
+        Run the full laser XY calibration from the backend and save offset.toml.
+
+        Returns:
+            LaserCoordSystem
+        """
+        if self.is_reference_mode:
+            raise RuntimeError("Laser XY calibration must be run in sample mode, not reference mode.")
+
+        if not hasattr(self, "_eyetracker_results"):
+            raise RuntimeError("No eye tracker results available. Call set_eyetracker_results(...) first.")
+
+        log.info("[Laser XY Calibration] Starting.")
+
+        calib = CalibRigLaserPosition(
+            ni=self.ni,
+            zaber_eye_lens=self.zaber_eye_lens,
+            zaber_hi=self.zaber_hi,
+            get_eyetracker_results=self.get_eyetracker_results,
+            axial_scan_config=self._axial_scan_config,
+        )
+
+        try:
+            laser_coord_system = run_full_laser_offset_calibration(calib=calib)
+
+            log.info(
+                f"[Laser XY Calibration] Done. "
+                f"dx={laser_coord_system.dx:.3f}, "
+                f"dy={laser_coord_system.dy:.3f}, "
+                f"dz={laser_coord_system.dz:.3f}"
+            )
+            return laser_coord_system
+
+        except Exception as e:
+            log.exception(f"[Laser XY Calibration] Failed: {e}")
+            raise
 
 
     def close(self):

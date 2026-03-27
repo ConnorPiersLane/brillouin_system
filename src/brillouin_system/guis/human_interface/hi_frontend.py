@@ -2,6 +2,7 @@ import logging
 import threading
 import time
 
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
 from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
@@ -111,6 +112,7 @@ class HiFrontend(QWidget):
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
     send_eyetracker_result_to_backend = pyqtSignal(object)
+    calibrate_laser_camera_position_requested = pyqtSignal()
 
     # Saving Signals
     save_all_axial_scans_requested = pyqtSignal()
@@ -183,6 +185,8 @@ class HiFrontend(QWidget):
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
         self.cancel_requested.connect(self.brillouin_signaller.cancel_operations)
+        self.calibrate_laser_camera_position_requested.connect(
+            self.brillouin_signaller.calibrate_laser_camera_position_delegate)
 
         self.update_andor_config_requested.connect(self.brillouin_signaller.update_andor_config_settings)
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
@@ -216,6 +220,7 @@ class HiFrontend(QWidget):
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
         self.brillouin_signaller.send_message_to_frontend.connect(self.message_handler)
         self.brillouin_signaller.close_event_finished.connect(self._finalize_close)
+        self.brillouin_signaller.laser_coord_calibration_ready.connect(self.update_laser_coord_calibration)
 
         # Saving Signals
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
@@ -1517,6 +1522,9 @@ class HiFrontend(QWidget):
 
         self._show_cali = False
         self._save_cali = True
+
+    def update_laser_coord_calibration(self, laser_coord: LaserOffset):
+
 
     def take_axial_step_scan(self, find_reflection_plane: bool = False):
         try:
