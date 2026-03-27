@@ -157,6 +157,7 @@ class CalibRigLaserPosition:
             center = self.get_pupil_center_ref()
             # convert from mm to um
             x, y, z = center[0]*1000, center[1]*1000, center[2]*1000
+            print(f"Moving {x}, {y}, {z}")
 
             # Assumint Rig COS and zaber_lens share same origin
             # Moving the Rig here (not the lens)

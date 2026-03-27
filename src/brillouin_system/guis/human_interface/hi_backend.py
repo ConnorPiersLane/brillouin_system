@@ -81,22 +81,22 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            camera=IxonUltra(
-                index = 0,
-                temperature = "off",
-                fan_mode = "full",
-                x_start = 40, x_end  = 120,
-                y_start= 300, y_end  = 315,
-                vbin= 1, hbin  = 1,
-                verbose = True,
-                advanced_gain_option=False
-            )
-            # camera = DummyCamera()
+            # camera=IxonUltra(
+            #     index = 0,
+            #     temperature = "off",
+            #     fan_mode = "full",
+            #     x_start = 40, x_end  = 120,
+            #     y_start= 300, y_end  = 315,
+            #     vbin= 1, hbin  = 1,
+            #     verbose = True,
+            #     advanced_gain_option=False
+            # )
+            camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
             # shutter_manager = ShutterManager('microscope')
-            microwave=Microwave()
-            # microwave = MicrowaveDummy()
+            # microwave=Microwave()
+            microwave = MicrowaveDummy()
             zaber_eye_lens=ZaberEyeLens()
             # zaber_eye_lens = ZaberEyeLensDummy()
             zaber_hi=ZaberHumanInterface()

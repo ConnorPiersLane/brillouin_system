@@ -62,10 +62,10 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 
-use_backend_dummy = True
+use_backend_dummy = False
 # Eye Tracking
 include_eye_tracking = True
-use_eye_tracker_dummy = True
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 class NotifyingViewBox(pg.ViewBox):
@@ -1762,7 +1762,8 @@ class HiFrontend(QWidget):
         self.lastest_eye_tracker_results = get_eye_tracker_results(
             left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
         )
-        self.send_pupil_center_ref_to_backend.emit(tuple(self.lastest_eye_tracker_results.pupil3d.center_ref))
+        if self.lastest_eye_tracker_results.pupil3d is not None:
+            self.send_pupil_center_ref_to_backend.emit(tuple(self.lastest_eye_tracker_results.pupil3d.center_ref))
 
         laser_position = self.lastest_eye_tracker_results.laser_position
         if laser_position is not None:
