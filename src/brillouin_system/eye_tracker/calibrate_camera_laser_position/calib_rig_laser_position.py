@@ -10,12 +10,14 @@ import tomli_w
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
+from brillouin_system.logging_utils.logging_setup import get_logger
+from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import find_reflection_realtime, ReflectionResult
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 
-
+log = get_logger(__name__)
 SETTINGS_FILE_TOML_PATH = Path(__file__).parent.resolve() / "settings.toml"
-
+FILENAME = "offset.toml"
 
 def load_calibration_settings() -> dict:
     if not SETTINGS_FILE_TOML_PATH.exists():
@@ -32,9 +34,9 @@ def load_calibration_settings() -> dict:
 class LaserOffset:
     def __init__(self, dx, dy, dz):
         """
-        the position of the laser in zaber or rig coordinates
+        [um]: the position of the laser in zaber or rig coordinates
         Args:
-            dx: from rig to laser
+            dx: [um] from rig to laser
             dy: "
             dz: "
         """
@@ -43,16 +45,13 @@ class LaserOffset:
         self.dz = dz
 
 
-    def convert_zaberxyz_to_laserxyz(self, x, y, z) -> tuple[float, float, float]:
-        return x-self.dx, y-self.dy, z-self.dz
 
-
-def load_laser_coord_system_from_toml(filename: str) -> LaserOffset:
+def load_laser_coord_system_from_toml() -> LaserOffset:
     """
     Load LaserCoordSystem from a TOML file in the same directory as this file.
     """
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(current_dir, filename)
+    filepath = os.path.join(current_dir, FILENAME)
 
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"TOML file not found: {filepath}")
@@ -111,8 +110,9 @@ class CalibRigLaserPosition:
         ni,
         zaber_eye_lens,
         zaber_hi,
-        get_eyetracker_results: Callable[[], EyeTrackerResults],
-        axial_scan_config: ScanningConfig
+        get_pupil_center_ref: Callable[[], tuple[float, float, float]],
+        cancel_callback: Callable,
+        axial_scan_config: ScanningConfig,
     ):
         # Load scanning settings:
         settings = load_calibration_settings()
@@ -130,9 +130,10 @@ class CalibRigLaserPosition:
         # Assign
         self.ni = ni
         self.zaber_eye_lens: ZaberEyeLens = zaber_eye_lens
+        self.cancel_callback = cancel_callback
 
         self.zaber_hi: ZaberHumanInterface = zaber_hi
-        self.get_eyetracker_results: Callable[[], EyeTrackerResults] = get_eyetracker_results
+        self.get_pupil_center_ref: Callable[[], tuple[float, float, float]] = get_pupil_center_ref
         self._axial_scan_config: ScanningConfig = axial_scan_config
 
         self._zaber_lens_z0 = self.zaber_eye_lens.get_position()
@@ -148,10 +149,14 @@ class CalibRigLaserPosition:
         Then store the resulting absolute xxyyzz position.
         """
         for _ in range(self._recenter_n_moves):
+            if self.cancel_callback():
+                log.info(f"Cancelled.")
+                raise OperationCancelled()
+
             time.sleep(self._recenter_settle_s)
-            et_result: EyeTrackerResults = self.get_eyetracker_results()
-            center = et_result.pupil3d.center_ref
-            x, y, z = center[0], center[1], center[2]
+            center = self.get_pupil_center_ref()
+            # convert from mm to um
+            x, y, z = center[0]*1000, center[1]*1000, center[2]*1000
 
             # Assumint Rig COS and zaber_lens share same origin
             # Moving the Rig here (not the lens)
@@ -234,6 +239,9 @@ class CalibRigLaserPosition:
         last_not_found_position = start_pos
 
         for _ in range(self._max_steps):
+            if self.cancel_callback():
+                log.info(f"Cancelled.")
+                raise OperationCancelled()
             self.move_dr_at_constant_angle_phi(phi_deg=angle_deg, dr=self._coarse_step_um)
             current_pos = self.zaber_hi.get_position()
 
@@ -268,6 +276,9 @@ class CalibRigLaserPosition:
 
 
         for _ in range(self._max_binary_iters):
+            if self.cancel_callback():
+                log.info(f"Cancelled.")
+                raise OperationCancelled()
             if self._xy_distance(lo, hi) <= self._tolerance_um:
                 break
 
@@ -398,10 +409,10 @@ class CalibRigLaserPosition:
         dy = cy - cam_y
         dz = cz - cam_z
 
-        filename = "offset.toml"
-        save_offset_to_toml(dx=dx, dy=dy, dz=dz, filename=filename)
 
-        print(f"Saved calibration to {filename}")
+        save_offset_to_toml(dx=dx, dy=dy, dz=dz, filename=FILENAME)
+
+        print(f"Saved calibration to {FILENAME}")
         print(f"Center: ({cx:.3f}, {cy:.3f}, {cz:.3f}), Radius: {r:.3f}")
 
         return LaserOffset(dx=dx, dy=dy, dz=dz)

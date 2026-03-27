@@ -2,7 +2,8 @@ import logging
 import threading
 import time
 
-from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset, \
+    load_laser_coord_system_from_toml
 from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
@@ -111,7 +112,7 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
-    send_eyetracker_result_to_backend = pyqtSignal(object)
+    send_pupil_center_ref_to_backend = pyqtSignal(tuple)
     calibrate_laser_camera_position_requested = pyqtSignal()
 
     # Saving Signals
@@ -133,6 +134,10 @@ class HiFrontend(QWidget):
 
         self.laser_focus_position: RigCoord | None = None
         self.lastest_eye_tracker_results: EyeTrackerResults | None = None
+        if include_eye_tracking:
+            self._laser_offset = load_laser_coord_system_from_toml()
+        else:
+            self._laser_offset = LaserOffset(0,0,0)
         self._last_eye_update_monotonic = 0.0
         self._andor_exposure_time: float | None = None
 
@@ -194,7 +199,7 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
-        self.send_eyetracker_result_to_backend.connect(self.brillouin_signaller.update_latest_eyetracker_results)
+        self.send_pupil_center_ref_to_backend.connect(self.brillouin_signaller.update_latest_pupil_center_ref)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -563,11 +568,11 @@ class HiFrontend(QWidget):
         btn_row2 = QHBoxLayout()
         self.btn_restart_eye = QPushButton("ReStart")
         self.btn_close_eye = QPushButton("Shutdown")
-        self.btn_print_pos = QPushButton("Print Pos.")
+        self.btn_cal_laser_offset = QPushButton("Cal. Laser Offset")
 
         btn_row2.addWidget(self.btn_restart_eye)
         btn_row2.addWidget(self.btn_close_eye)
-        btn_row2.addWidget(self.btn_print_pos)
+        btn_row2.addWidget(self.btn_cal_laser_offset)
         btn_row2.addStretch()
 
         # put the row into a real layout and set it on the group
@@ -582,7 +587,7 @@ class HiFrontend(QWidget):
         self.btn_eye_tracking.clicked.connect(self.open_eye_tracker_config_dialog)
         self.btn_restart_eye.clicked.connect(self.on_restart_eye_clicked)
         self.btn_close_eye.clicked.connect(self.shutdown_eye_tracker)
-        self.btn_print_pos.clicked.connect(self.on_print_pos_clicked)
+        self.btn_cal_laser_offset.clicked.connect(self.calibrate_laser_position)
 
         return group
 
@@ -1257,7 +1262,8 @@ class HiFrontend(QWidget):
 
     def update_zaber_lens_position(self, pos: float):
         self.lens_pos_display.setText(f"Lens {pos:.2f} µm")
-        self.laser_focus_position = RigCoord(x=0, y=0, z=pos/1000)
+        dx, dy, dz = self._laser_offset.dx, self._laser_offset.dy, self._laser_offset.dz
+        self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dy/1000)
 
     # ---------------- GUI Update Loop ---------------- #
 
@@ -1523,8 +1529,8 @@ class HiFrontend(QWidget):
         self._show_cali = False
         self._save_cali = True
 
-    def update_laser_coord_calibration(self, laser_coord: LaserOffset):
-
+    def update_laser_coord_calibration(self, laser_offset: LaserOffset):
+        self._laser_offset: LaserOffset = laser_offset
 
     def take_axial_step_scan(self, find_reflection_plane: bool = False):
         try:
@@ -1732,29 +1738,8 @@ class HiFrontend(QWidget):
             f"Δc = {tdc}"
         )
 
-    def on_print_pos_clicked(self):
-        res = getattr(self, "last_eye_tracker_results", None)
-        if res is None:
-            log.info("Print Eye Position requested: No eye-tracker results")
-            return
-
-        laser_position = getattr(res, "laser_position", None)
-        if laser_position is None:
-            log.info("Print Eye Position requested: No Position Available")
-            return
-
-        x = float(laser_position[0])
-        y = float(laser_position[1])
-        z = float(laser_position[2])
-        dc = getattr(res, "delta_laser_corner", None)
-
-        def fmt(v):
-            return f"{v:6.3f}" if v is not None else " " * 6
-
-        log.info(
-            "Eye Position requested: "
-            f"X={fmt(x)}  Y={fmt(y)}  Z={fmt(z)}  ΔCorner={fmt(dc)}"
-        )
+    def calibrate_laser_position(self):
+        self.calibrate_laser_camera_position_requested.emit()
 
 
     @QtCore.pyqtSlot(object, object, dict)
@@ -1777,6 +1762,8 @@ class HiFrontend(QWidget):
         self.lastest_eye_tracker_results = get_eye_tracker_results(
             left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
         )
+        self.send_pupil_center_ref_to_backend.emit(tuple(self.lastest_eye_tracker_results.pupil3d.center_ref))
+
         laser_position = self.lastest_eye_tracker_results.laser_position
         if laser_position is not None:
             self.update_laser_position_cartesian(x=laser_position[0], y=laser_position[1])
@@ -1795,6 +1782,7 @@ class HiFrontend(QWidget):
 
             # IMPORTANT: also hide cornea when laser_position missing
             self._update_cornea_band(None)
+
 
     def _wait_for_eye_result(self, timeout_s: float = 1, max_age_s: float = 0.5) -> EyeTrackerResults | None:
         """

@@ -59,6 +59,7 @@ class HiSignaller(QObject):
     new_andor_display_ready = pyqtSignal()
     close_event_finished = pyqtSignal()
     laser_coord_calibration_ready = pyqtSignal(object)
+    request_pupil3d_from_frontend = pyqtSignal()
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -446,8 +447,8 @@ class HiSignaller(QObject):
         self._mailbox_push_andor_display(display)
 
     @pyqtSlot(object)
-    def update_latest_eyetracker_results(self, eyetracker_results: EyeTrackerResults):
-        self.backend.set_eyetracker_results(eyetracker_results)
+    def update_latest_pupil_center_ref(self, eyetracker_results: EyeTrackerResults):
+        self.backend.set_pupil_center_ref(eyetracker_results)
 
     @pyqtSlot()
     def run_calibration(self):
@@ -484,8 +485,9 @@ class HiSignaller(QObject):
 
     @pyqtSlot()
     def calibrate_laser_camera_position_delegate(self):
-        laser_coord: LaserOffset = self.backend.run_laser_xy_calibration()
-        self.laser_coord_calibration_ready.emit(laser_coord)
+        laser_offset: LaserOffset = self.backend.run_laser_xy_calibration()
+        self.laser_coord_calibration_ready.emit(laser_offset)
+
 
     @pyqtSlot(int)
     def handle_request_axial_scan_data(self, index: int):

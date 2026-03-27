@@ -19,8 +19,8 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset, \
-    CalibRigLaserPosition, run_full_laser_offset_calibration
-from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
+    CalibRigLaserPosition
+
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
@@ -219,11 +219,11 @@ class HiBackend:
                                                         Callable[[float], None]):
         self.b2f_emit_update_zaber_lens_position = emit_update_zaber_lens_position
 
-    def set_eyetracker_results(self, eyetracker_results: EyeTrackerResults):
-        self._eyetracker_results = eyetracker_results
+    def set_pupil_center_ref(self, pupil_center_ref: tuple[float, float, float]):
+        self._pupil_center_ref = pupil_center_ref
 
-    def get_eyetracker_results(self) -> EyeTrackerResults:
-        return self._eyetracker_results
+    def get_pupil_center_ref(self) -> tuple[float, float, float]:
+        return self._pupil_center_ref
 
     def move_and_update_gui_zaber_eye_lens_rel(self, dz_um: float) -> float:
         """
@@ -759,7 +759,7 @@ class HiBackend:
         if self.is_reference_mode:
             raise RuntimeError("Laser XY calibration must be run in sample mode, not reference mode.")
 
-        if not hasattr(self, "_eyetracker_results"):
+        if self.get_pupil_center_ref() is None:
             raise RuntimeError("No eye tracker results available. Call set_eyetracker_results(...) first.")
 
         log.info("[Laser XY Calibration] Starting.")
@@ -768,12 +768,13 @@ class HiBackend:
             ni=self.ni,
             zaber_eye_lens=self.zaber_eye_lens,
             zaber_hi=self.zaber_hi,
-            get_eyetracker_results=self.get_eyetracker_results,
+            get_pupil_center_ref=self.get_pupil_center_ref,
+            cancel_callback=self.f2b_cancel_callback,
             axial_scan_config=self._axial_scan_config,
         )
 
         try:
-            laser_coord_system = run_full_laser_offset_calibration(calib=calib)
+            laser_coord_system = calib.run_calibration()
 
             log.info(
                 f"[Laser XY Calibration] Done. "
