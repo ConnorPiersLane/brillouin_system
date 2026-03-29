@@ -220,6 +220,7 @@ class HiBackend:
         self.b2f_emit_update_zaber_lens_position = emit_update_zaber_lens_position
 
     def set_pupil_center_ref(self, pupil_center_ref: tuple[float, float, float]):
+        print(f"Pupil center backend: {pupil_center_ref}")
         self._pupil_center_ref = pupil_center_ref
 
     def get_pupil_center_ref(self) -> tuple[float, float, float]:

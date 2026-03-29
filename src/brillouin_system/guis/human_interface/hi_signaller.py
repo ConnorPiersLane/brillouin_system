@@ -446,9 +446,9 @@ class HiSignaller(QObject):
     def emit_display_result(self, display: DisplayResults):
         self._mailbox_push_andor_display(display)
 
-    @pyqtSlot(object)
-    def update_latest_pupil_center_ref(self, eyetracker_results: EyeTrackerResults):
-        self.backend.set_pupil_center_ref(eyetracker_results)
+    @pyqtSlot(tuple)
+    def update_latest_pupil_center_ref(self, pupil_center: tuple[float, float, float]):
+        self.backend.set_pupil_center_ref(pupil_center)
 
     @pyqtSlot()
     def run_calibration(self):

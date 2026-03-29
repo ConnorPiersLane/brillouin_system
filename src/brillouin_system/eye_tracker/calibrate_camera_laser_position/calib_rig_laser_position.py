@@ -190,6 +190,7 @@ class CalibRigLaserPosition:
 
             time.sleep(self._recenter_settle_s)
             center = self.get_pupil_center_ref()
+            print(f"Pupil center calib: {center}")
             # convert from mm to um
             x, y, z = center[0]*1000, center[1]*1000, center[2]*1000
 
