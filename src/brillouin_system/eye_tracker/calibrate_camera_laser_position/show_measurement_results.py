@@ -57,7 +57,7 @@ def project_points_to_plane_2d(
 
 
 def main():
-    json_path = Path(__file__).parent / "measured_circle.json"
+    json_path = Path(__file__).parent / "measured_circle4.json"
     data = load_measured_circle(json_path)
 
     # one camera estimate now

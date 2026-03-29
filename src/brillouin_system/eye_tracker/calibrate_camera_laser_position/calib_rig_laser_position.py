@@ -156,9 +156,6 @@ class CalibRigLaserPosition:
         self._max_steps = cfg.get("max_steps")
         self._tolerance_um = cfg.get("tolerance_um")
         self._max_binary_iters = cfg.get("max_binary_iters")
-        self._n_confirmations = cfg.get("n_confirmations")
-        self._recenter_n_moves = cfg.get("recenter_n_moves")
-        self._recenter_settle_s = cfg.get("recenter_settle_s")
         self._backstep_um = cfg.get("backstep_um")
 
         # Assign

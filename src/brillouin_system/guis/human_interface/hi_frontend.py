@@ -1743,12 +1743,25 @@ class HiFrontend(QWidget):
         x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
         if self._zaber_lens_um is None:
             return
-
+        print(f"Pupil Center before moving: {round(float(x)), round(float(y)), round(float(z))}")
         # Assumint Rig COS and zaber_lens share same origin
         # Moving the Rig here (not the lens)
         self.move_zaber_stage_x_requested.emit(x)
         self.move_zaber_stage_y_requested.emit(y)
         self.move_zaber_stage_z_requested.emit(z-self._zaber_lens_um)
+
+        # remov ethie
+        time.sleep(2)
+        et_result = self._wait_for_eye_result()
+        if et_result is None or et_result.pupil3d is None:
+            return
+        pupil_center = et_result.pupil3d.center_ref
+
+        # convert from mm to um
+        x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
+        if self._zaber_lens_um is None:
+            return
+        print(f"Pupil Center after moving: {round(float(x)), round(float(y)), round(float(z))}")
 
         self.calibrate_laser_camera_position_requested.emit()
 
