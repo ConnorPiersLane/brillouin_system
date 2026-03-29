@@ -1,5 +1,4 @@
 import math
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -21,9 +20,10 @@ log = get_logger(__name__)
 SETTINGS_FILE_TOML_PATH = Path(__file__).parent.resolve() / "settings.toml"
 FILENAME = "offset.toml"
 
+
 @dataclass
 class MeasuredCircle:
-    camera_estimates_of_pupil_center_xxyyzz: list[tuple[float, float, float]]
+    camera_estimate_of_pupil_center_xxyyzz: tuple[float, float, float]
     reflection_boundary_points_xxyyzz: list[tuple[float, float, float]]
     center_fitted_from_reflection_boundary_xxyyzz: tuple[float, float, float]
     radius_fitted_from_reflection_boundary: float
@@ -126,6 +126,7 @@ def save_offset_to_toml(dx: float, dy: float, dz: float, filename: str = "offset
 
     return filepath
 
+
 class CalibRigLaserPosition:
     """
     Two coordinate systems are used here:
@@ -144,7 +145,6 @@ class CalibRigLaserPosition:
         ni,
         zaber_eye_lens,
         zaber_hi,
-        get_pupil_center_ref: Callable[[], tuple[float, float, float]],
         cancel_callback: Callable,
         axial_scan_config: ScanningConfig,
     ):
@@ -167,39 +167,12 @@ class CalibRigLaserPosition:
         self.cancel_callback = cancel_callback
 
         self.zaber_hi: ZaberHumanInterface = zaber_hi
-        self.get_pupil_center_ref: Callable[[], tuple[float, float, float]] = get_pupil_center_ref
         self._axial_scan_config: ScanningConfig = axial_scan_config
 
         self._init_zaber_hi_position = zaber_hi.get_position()
         self._zaber_lens_z0 = self.zaber_eye_lens.get_position()
         self._zaber_lens_search_position = self._zaber_lens_z0 - self._backstep_um
-        self._camera_estimates_of_pupil_center_xxyyzz: list[tuple[float, float, float]] = []
         self._reflection_boundary_points_xxyyzz: list[tuple[float, float, float]] = []
-
-
-    def init_position_to_estimated_pupil_center(self) -> tuple[float, float, float]:
-        """
-        Repeatedly use camera estimate to move toward the pupil center.
-        Then store the resulting absolute xxyyzz position.
-        """
-        self.zaber_hi.move_abs(*self._init_zaber_hi_position)
-        for _ in range(self._recenter_n_moves):
-            if self.cancel_callback():
-                log.info(f"Cancelled.")
-                raise OperationCancelled()
-
-            time.sleep(self._recenter_settle_s)
-            center = self.get_pupil_center_ref()
-            print(f"Pupil center calib: {center}")
-            # convert from mm to um
-            x, y, z = center[0]*1000, center[1]*1000, center[2]*1000
-
-            # Assumint Rig COS and zaber_lens share same origin
-            # Moving the Rig here (not the lens)
-            self.zaber_hi.move_rel(dx=x-0, dy=y-0, dz=z-self._zaber_lens_z0)
-
-        return self.zaber_hi.get_position()
-
 
     def move_dr_at_constant_angle_phi(self, phi_deg: float, dr: float):
         phi_rad = math.radians(phi_deg)
@@ -209,7 +182,6 @@ class CalibRigLaserPosition:
 
     def move_to_xxyy(self, xx: float, yy: float):
         self.zaber_hi.move_abs(x=xx, y=yy, z=None)
-
 
     def _interp_xy(
         self,
@@ -276,7 +248,9 @@ class CalibRigLaserPosition:
         Returns:
             (last_not_found_position, first_found_position)
         """
-        start_pos = self.zaber_hi.get_position()
+        # init
+        self.zaber_hi.move_abs(*self._init_zaber_hi_position)
+        start_pos = self._init_zaber_hi_position
 
         if self.is_found_reflection_plane()[0]:
             raise ValueError(
@@ -370,16 +344,12 @@ class CalibRigLaserPosition:
         0, dphi, 2*dphi, ... up to < 360 (or <= 360 if include_endpoint_360=True)
         """
         dphi_deg = self._dphi_deg
-        self._camera_estimates_of_pupil_center_xxyyzz = [] # reset
         self._reflection_boundary_points_xxyyzz = []
 
 
         n_steps = int(math.floor(360.0 / dphi_deg))
         for i in range(n_steps):
             angle_deg = i * dphi_deg
-            # init
-            center = self.init_position_to_estimated_pupil_center()
-            self._camera_estimates_of_pupil_center_xxyyzz.append(center)
 
             boundary = self.scan_boundary_point_at_angle(angle_deg=angle_deg)
             self._reflection_boundary_points_xxyyzz.append(boundary)
@@ -446,14 +416,7 @@ class CalibRigLaserPosition:
         self.scan_boundary_over_angles()
         cx, cy, cz, r = self.fit_circle_3d()
 
-        # Mean camera estimate
-        xs = [p[0] for p in self._camera_estimates_of_pupil_center_xxyyzz]
-        ys = [p[1] for p in self._camera_estimates_of_pupil_center_xxyyzz]
-        zs = [p[2] for p in self._camera_estimates_of_pupil_center_xxyyzz]
-
-        cam_x = sum(xs) / len(xs)
-        cam_y = sum(ys) / len(ys)
-        cam_z = sum(zs) / len(zs)
+        cam_x, cam_y, cam_z = self._init_zaber_hi_position
 
         dx = cx - cam_x
         dy = cy - cam_y
@@ -464,7 +427,7 @@ class CalibRigLaserPosition:
 
         # ---- NEW: create MeasuredCircle ----
         measured = MeasuredCircle(
-            camera_estimates_of_pupil_center_xxyyzz=self._camera_estimates_of_pupil_center_xxyyzz,
+            camera_estimate_of_pupil_center_xxyyzz=self._init_zaber_hi_position,
             reflection_boundary_points_xxyyzz=self._reflection_boundary_points_xxyyzz,
             center_fitted_from_reflection_boundary_xxyyzz=(cx, cy, cz),
             radius_fitted_from_reflection_boundary=r,

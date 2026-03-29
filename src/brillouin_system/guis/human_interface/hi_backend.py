@@ -112,7 +112,6 @@ class HiBackend:
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
 
-
         self.microwave: Microwave | MicrowaveDummy = microwave
 
         self.microwave.set_power(power_dbm=-20)
@@ -218,13 +217,6 @@ class HiBackend:
                                                         emit_update_zaber_lens_position:
                                                         Callable[[float], None]):
         self.b2f_emit_update_zaber_lens_position = emit_update_zaber_lens_position
-
-    def set_pupil_center_ref(self, pupil_center_ref: tuple[float, float, float]):
-        print(f"Pupil center backend: {pupil_center_ref}")
-        self._pupil_center_ref = pupil_center_ref
-
-    def get_pupil_center_ref(self) -> tuple[float, float, float]:
-        return self._pupil_center_ref
 
     def move_and_update_gui_zaber_eye_lens_rel(self, dz_um: float) -> float:
         """
@@ -760,16 +752,12 @@ class HiBackend:
         if self.is_reference_mode:
             raise RuntimeError("Laser XY calibration must be run in sample mode, not reference mode.")
 
-        if self.get_pupil_center_ref() is None:
-            raise RuntimeError("No eye tracker results available. Call set_eyetracker_results(...) first.")
-
         log.info("[Laser XY Calibration] Starting.")
 
         calib = CalibRigLaserPosition(
             ni=self.ni,
             zaber_eye_lens=self.zaber_eye_lens,
             zaber_hi=self.zaber_hi,
-            get_pupil_center_ref=self.get_pupil_center_ref,
             cancel_callback=self.f2b_cancel_callback,
             axial_scan_config=self._axial_scan_config,
         )

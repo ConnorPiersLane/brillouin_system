@@ -43,7 +43,7 @@ from brillouin_system.logging_utils.logging_setup import start_logging, install_
 
 log = get_logger(__name__)
 
-from brillouin_system.calibration.config.calibration_config import calibration_config, CalibrationConfig
+from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
@@ -112,7 +112,6 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
-    send_pupil_center_ref_to_backend = pyqtSignal(tuple)
     calibrate_laser_camera_position_requested = pyqtSignal()
 
     # Saving Signals
@@ -133,6 +132,7 @@ class HiFrontend(QWidget):
 
 
         self.laser_focus_position: RigCoord | None = None
+        self._zaber_lens_um: float | None = None
         self.lastest_eye_tracker_results: EyeTrackerResults | None = None
         if include_eye_tracking:
             self._laser_offset = load_laser_coord_system_from_toml()
@@ -199,7 +199,6 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
-        self.send_pupil_center_ref_to_backend.connect(self.brillouin_signaller.update_latest_pupil_center_ref)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -231,9 +230,6 @@ class HiFrontend(QWidget):
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
         self.save_selected_axial_scans_requested.connect(self.brillouin_signaller.save_multiple_axial_scans)
         self.remove_selected_axial_scans_requested.connect(self.brillouin_signaller.remove_selected_axial_scans)
-
-
-
 
 
         # Connect signals BEFORE starting the thread
@@ -1172,9 +1168,6 @@ class HiFrontend(QWidget):
 
     # ---------------- Signal Handles ---------------- #
 
-
-
-
     def update_system_state_label(self, state):
         if state.name == "IDLE":
             self.state_label.setText("● IDLE")
@@ -1261,6 +1254,7 @@ class HiFrontend(QWidget):
 
 
     def update_zaber_lens_position(self, pos: float):
+        self._zaber_lens_um = pos
         self.lens_pos_display.setText(f"Lens {pos:.2f} µm")
         dx, dy, dz = self._laser_offset.dx, self._laser_offset.dy, self._laser_offset.dz
         self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dy/1000)
@@ -1739,6 +1733,23 @@ class HiFrontend(QWidget):
         )
 
     def calibrate_laser_position(self):
+
+        et_result = self._wait_for_eye_result()
+        if et_result is None or et_result.pupil3d is None:
+            return
+        pupil_center = et_result.pupil3d.center_ref
+
+        # convert from mm to um
+        x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
+        if self._zaber_lens_um is None:
+            return
+
+        # Assumint Rig COS and zaber_lens share same origin
+        # Moving the Rig here (not the lens)
+        self.move_zaber_stage_x_requested.emit(x)
+        self.move_zaber_stage_y_requested.emit(y)
+        self.move_zaber_stage_z_requested.emit(z-self._zaber_lens_um)
+
         self.calibrate_laser_camera_position_requested.emit()
 
 
@@ -1762,8 +1773,6 @@ class HiFrontend(QWidget):
         self.lastest_eye_tracker_results = get_eye_tracker_results(
             left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
         )
-        if self.lastest_eye_tracker_results.pupil3d is not None:
-            self.send_pupil_center_ref_to_backend.emit(tuple(self.lastest_eye_tracker_results.pupil3d.center_ref))
 
         laser_position = self.lastest_eye_tracker_results.laser_position
         if laser_position is not None:

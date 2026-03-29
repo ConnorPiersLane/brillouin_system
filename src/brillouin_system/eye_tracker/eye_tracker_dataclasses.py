@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,3 +20,5 @@ class EyeTrackerResultsForGui:
     pupil3D: Pupil3D | None
     cam_left_img: np.ndarray
     cam_right_img: np.ndarray
+
+

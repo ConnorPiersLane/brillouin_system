@@ -7,7 +7,6 @@ from PyQt5 import QtCore
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
-from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
@@ -59,7 +58,6 @@ class HiSignaller(QObject):
     new_andor_display_ready = pyqtSignal()
     close_event_finished = pyqtSignal()
     laser_coord_calibration_ready = pyqtSignal(object)
-    request_pupil3d_from_frontend = pyqtSignal()
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -445,10 +443,6 @@ class HiSignaller(QObject):
 
     def emit_display_result(self, display: DisplayResults):
         self._mailbox_push_andor_display(display)
-
-    @pyqtSlot(tuple)
-    def update_latest_pupil_center_ref(self, pupil_center: tuple[float, float, float]):
-        self.backend.set_pupil_center_ref(pupil_center)
 
     @pyqtSlot()
     def run_calibration(self):

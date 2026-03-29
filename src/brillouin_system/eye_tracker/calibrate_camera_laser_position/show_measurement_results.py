@@ -1,5 +1,4 @@
 import json
-import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -61,7 +60,10 @@ def main():
     json_path = Path(__file__).parent / "measured_circle.json"
     data = load_measured_circle(json_path)
 
-    camera_pts = np.array(data["camera_estimates_of_pupil_center_xxyyzz"], dtype=float)
+    # one camera estimate now
+    camera_pt = np.array(
+        data["camera_estimate_of_pupil_center_xxyyzz"], dtype=float
+    )  # shape (3,)
     boundary_pts = np.array(data["reflection_boundary_points_xxyyzz"], dtype=float)
     fitted_center = np.array(
         data["center_fitted_from_reflection_boundary_xxyyzz"], dtype=float
@@ -77,13 +79,16 @@ def main():
 
     # 2D projection in fitted plane coordinates, centered on fitted center
     boundary_2d = project_points_to_plane_2d(boundary_pts, fitted_center, e1, e2)
-    camera_2d = project_points_to_plane_2d(camera_pts, fitted_center, e1, e2)
+    camera_2d = project_points_to_plane_2d(
+        camera_pt[np.newaxis, :], fitted_center, e1, e2
+    )
     center_2d = np.array([[0.0, 0.0]])
     circle_2d = project_points_to_plane_2d(circle_3d, fitted_center, e1, e2)
 
     print("Loaded:", json_path)
-    print(f"Number of camera points:   {len(camera_pts)}")
+    print("Number of camera points:   1")
     print(f"Number of boundary points: {len(boundary_pts)}")
+    print(f"Camera estimate:           {camera_pt}")
     print(f"Fitted center:             {fitted_center}")
     print(f"Fitted radius:             {radius:.3f}")
     print(f"Laser offset (dx,dy,dz):   {laser_offset}")
@@ -94,10 +99,10 @@ def main():
     # 3D view
     ax3d = fig.add_subplot(2, 2, 1, projection="3d")
     ax3d.scatter(
-        camera_pts[:, 0], camera_pts[:, 1], camera_pts[:, 2],
-        label="Camera estimates",
+        [camera_pt[0]], [camera_pt[1]], [camera_pt[2]],
+        label="Camera estimate",
         marker="o",
-        s=30,
+        s=50,
     )
     ax3d.scatter(
         boundary_pts[:, 0], boundary_pts[:, 1], boundary_pts[:, 2],
@@ -123,7 +128,7 @@ def main():
 
     # XY top-down
     ax_xy = fig.add_subplot(2, 2, 2)
-    ax_xy.scatter(camera_pts[:, 0], camera_pts[:, 1], label="Camera estimates", s=30)
+    ax_xy.scatter([camera_pt[0]], [camera_pt[1]], label="Camera estimate", s=50)
     ax_xy.scatter(boundary_pts[:, 0], boundary_pts[:, 1], label="Boundary points", s=40)
     ax_xy.scatter(
         [fitted_center[0]], [fitted_center[1]],
@@ -140,7 +145,7 @@ def main():
 
     # XZ
     ax_xz = fig.add_subplot(2, 2, 3)
-    ax_xz.scatter(camera_pts[:, 0], camera_pts[:, 2], label="Camera estimates", s=30)
+    ax_xz.scatter([camera_pt[0]], [camera_pt[2]], label="Camera estimate", s=50)
     ax_xz.scatter(boundary_pts[:, 0], boundary_pts[:, 2], label="Boundary points", s=40)
     ax_xz.scatter(
         [fitted_center[0]], [fitted_center[2]],
@@ -156,7 +161,7 @@ def main():
 
     # Plane-local 2D view
     ax_plane = fig.add_subplot(2, 2, 4)
-    ax_plane.scatter(camera_2d[:, 0], camera_2d[:, 1], label="Camera estimates", s=30)
+    ax_plane.scatter(camera_2d[:, 0], camera_2d[:, 1], label="Camera estimate", s=50)
     ax_plane.scatter(boundary_2d[:, 0], boundary_2d[:, 1], label="Boundary points", s=40)
     ax_plane.scatter(center_2d[:, 0], center_2d[:, 1], label="Fitted center", marker="x", s=100)
     ax_plane.plot(circle_2d[:, 0], circle_2d[:, 1], label="Fitted circle")
