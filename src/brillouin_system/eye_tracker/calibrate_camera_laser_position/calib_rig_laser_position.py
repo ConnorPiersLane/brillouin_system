@@ -1,15 +1,17 @@
 import math
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 import numpy as np
 import os
 import tomli
 import tomli_w
+import json
+from dataclasses import asdict
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface
-from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import find_reflection_realtime, ReflectionResult
@@ -18,6 +20,38 @@ from brillouin_system.scan_managers.scanning_config.scanning_config import Scann
 log = get_logger(__name__)
 SETTINGS_FILE_TOML_PATH = Path(__file__).parent.resolve() / "settings.toml"
 FILENAME = "offset.toml"
+
+@dataclass
+class MeasuredCircle:
+    camera_estimates_of_pupil_center_xxyyzz: list[tuple[float, float, float]]
+    reflection_boundary_points_xxyyzz: list[tuple[float, float, float]]
+    center_fitted_from_reflection_boundary_xxyyzz: tuple[float, float, float]
+    radius_fitted_from_reflection_boundary: float
+    laser_offset_dxdydz: tuple[float, float, float]
+
+
+
+def save_measured_circle_to_json(measured: MeasuredCircle, filename: str = "measured_circle.json"):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(current_dir, filename)
+
+    # Convert dataclass → dict
+    data = asdict(measured)
+
+    # Ensure tuples → lists (JSON-safe)
+    def convert(obj):
+        if isinstance(obj, tuple):
+            return list(obj)
+        if isinstance(obj, list):
+            return [convert(x) for x in obj]
+        return obj
+
+    data = convert(data)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+    return filepath
 
 def load_calibration_settings() -> dict:
     if not SETTINGS_FILE_TOML_PATH.exists():
@@ -141,7 +175,6 @@ class CalibRigLaserPosition:
         self._zaber_lens_search_position = self._zaber_lens_z0 - self._backstep_um
         self._camera_estimates_of_pupil_center_xxyyzz: list[tuple[float, float, float]] = []
         self._reflection_boundary_points_xxyyzz: list[tuple[float, float, float]] = []
-        self._pupil_center_fitted_from_reflection_boundary_xxyyzz: tuple[float, float, float] | None = None
 
 
     def init_position_to_estimated_pupil_center(self) -> tuple[float, float, float]:
@@ -216,9 +249,20 @@ class CalibRigLaserPosition:
 
         return result
 
-    def is_found_reflection_plane(self):
+    def is_found_reflection_plane(self) -> tuple[bool, tuple[float, float, float] | None]:
         result = self.find_reflection_plane()
-        return result.found
+        if result.found:
+            z0 = self._zaber_lens_z0 # this is where the plane should be
+            z_is = result.event_z_um # this is where the plane is found
+            zaber_hi_pos = self.zaber_hi.get_position()
+            pos_plane = (
+                zaber_hi_pos[0],
+                zaber_hi_pos[1],
+                zaber_hi_pos[2] + (z_is - z0),
+            )
+        else:
+            pos_plane = None
+        return result.found, pos_plane
 
 
     def move_out_until_reflection_plane(
@@ -233,7 +277,7 @@ class CalibRigLaserPosition:
         """
         start_pos = self.zaber_hi.get_position()
 
-        if self.is_found_reflection_plane():
+        if self.is_found_reflection_plane()[0]:
             raise ValueError(
                 f"Starting position at angle {angle_deg} deg already appears to be inside the reflection region."
             )
@@ -247,8 +291,9 @@ class CalibRigLaserPosition:
             self.move_dr_at_constant_angle_phi(phi_deg=angle_deg, dr=self._coarse_step_um)
             current_pos = self.zaber_hi.get_position()
 
-            if self.is_found_reflection_plane():
-                first_found_position = current_pos
+            is_found, pos = self.is_found_reflection_plane()
+            if is_found:
+                first_found_position = pos
                 return last_not_found_position, first_found_position
 
             last_not_found_position = current_pos
@@ -286,15 +331,16 @@ class CalibRigLaserPosition:
 
             mid_x, mid_y = self._interp_xy(lo, hi)
             self.move_to_xxyy(mid_x, mid_y)
-            mid_pos = self.zaber_hi.get_position()
+            mid_pos = (mid_x, mid_y, hi[2])
 
-            if self.is_found_reflection_plane():
-                hi = mid_pos
+            is_found, pos = self.is_found_reflection_plane()
+            if is_found:
+                hi = pos
             else:
                 lo = mid_pos
 
         self.move_to_xxyy(hi[0], hi[1])
-        return self.zaber_hi.get_position()
+        return hi
 
     def scan_boundary_point_at_angle(self, angle_deg: float) -> tuple[float, float, float]:
         """
@@ -398,6 +444,7 @@ class CalibRigLaserPosition:
     def run_calibration(self):
         self.scan_boundary_over_angles()
         cx, cy, cz, r = self.fit_circle_3d()
+
         # Mean camera estimate
         xs = [p[0] for p in self._camera_estimates_of_pupil_center_xxyyzz]
         ys = [p[1] for p in self._camera_estimates_of_pupil_center_xxyyzz]
@@ -411,10 +458,22 @@ class CalibRigLaserPosition:
         dy = cy - cam_y
         dz = cz - cam_z
 
-
+        # Save offset (existing)
         save_offset_to_toml(dx=dx, dy=dy, dz=dz, filename=FILENAME)
 
+        # ---- NEW: create MeasuredCircle ----
+        measured = MeasuredCircle(
+            camera_estimates_of_pupil_center_xxyyzz=self._camera_estimates_of_pupil_center_xxyyzz,
+            reflection_boundary_points_xxyyzz=self._reflection_boundary_points_xxyyzz,
+            center_fitted_from_reflection_boundary_xxyyzz=(cx, cy, cz),
+            radius_fitted_from_reflection_boundary=r,
+            laser_offset_dxdydz=(dx, dy, dz),
+        )
+
+        save_measured_circle_to_json(measured)
+
         print(f"Saved calibration to {FILENAME}")
+        print(f"Saved measured circle to measured_circle.json")
         print(f"Center: ({cx:.3f}, {cy:.3f}, {cz:.3f}), Radius: {r:.3f}")
 
         return LaserOffset(dx=dx, dy=dy, dz=dz)
