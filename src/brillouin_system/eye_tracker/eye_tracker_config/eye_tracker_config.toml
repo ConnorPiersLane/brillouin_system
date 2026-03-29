@@ -1,6 +1,6 @@
 [eye_tracker]
-binary_threshold_left = 75
-binary_threshold_right = 70
+binary_threshold_left = 150
+binary_threshold_right = 150
 fill_n_vetical_dark_pixels_left = 5
 fill_n_vetical_dark_pixels_right = 5
 masking_radius_left = 400

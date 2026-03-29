@@ -136,6 +136,7 @@ class CalibRigLaserPosition:
         self.get_pupil_center_ref: Callable[[], tuple[float, float, float]] = get_pupil_center_ref
         self._axial_scan_config: ScanningConfig = axial_scan_config
 
+        self._init_zaber_hi_position = zaber_hi.get_position()
         self._zaber_lens_z0 = self.zaber_eye_lens.get_position()
         self._zaber_lens_search_position = self._zaber_lens_z0 - self._backstep_um
         self._camera_estimates_of_pupil_center_xxyyzz: list[tuple[float, float, float]] = []
@@ -148,6 +149,7 @@ class CalibRigLaserPosition:
         Repeatedly use camera estimate to move toward the pupil center.
         Then store the resulting absolute xxyyzz position.
         """
+        self.zaber_hi.move_abs(*self._init_zaber_hi_position)
         for _ in range(self._recenter_n_moves):
             if self.cancel_callback():
                 log.info(f"Cancelled.")
