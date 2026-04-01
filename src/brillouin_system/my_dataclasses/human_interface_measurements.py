@@ -62,8 +62,6 @@ class AnalyzedSpectrum:
     theoretical_precisions: TheoreticalPeakStdError
 
 
-
-
 # -------------- Functions --------------
 def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()

@@ -38,21 +38,21 @@ class MeasuredStatistics:
     mean_freq_shift_left_peak_ghz_poly: float | None
     mean_freq_shift_right_peak_ghz_poly: float | None
     mean_freq_shift_peak_distance_ghz_poly: float | None
-    std_freq_shift_left_peak_ghz_poly: float | None
-    std_freq_shift_right_peak_ghz_poly: float | None
-    std_freq_shift_peak_distance_ghz_poly: float | None
+    std_freq_shift_left_peak_mhz_poly: float | None
+    std_freq_shift_right_peak_mhz_poly: float | None
+    std_freq_shift_peak_distance_mhz_poly: float | None
 
     mean_freq_shift_left_peak_ghz_interp: float | None
     mean_freq_shift_right_peak_ghz_interp: float | None
     mean_freq_shift_peak_distance_ghz_interp: float | None
-    std_freq_shift_left_peak_ghz_interp: float | None
-    std_freq_shift_right_peak_ghz_interp: float | None
-    std_freq_shift_peak_distance_ghz_interp: float | None
+    std_freq_shift_left_peak_mhz_interp: float | None
+    std_freq_shift_right_peak_mhz_interp: float | None
+    std_freq_shift_peak_distance_mhz_interp: float | None
 
     mean_hwhm_left_peak_ghz: float | None
     mean_hwhm_right_peak_ghz: float | None
-    std_hwhm_left_peak_ghz: float | None
-    std_hwhm_right_peak_ghz: float | None
+    std_hwhm_left_peak_mhz: float | None
+    std_hwhm_right_peak_mhz: float | None
 
     cov_freq_left_right_poly: float | None   # MHz²
     corr_freq_left_right_poly: float | None  # dimensionless
@@ -217,21 +217,21 @@ def analyze_statistics(
         mean_freq_shift_left_peak_ghz_poly=mean_or_none(left_poly),
         mean_freq_shift_right_peak_ghz_poly=mean_or_none(right_poly),
         mean_freq_shift_peak_distance_ghz_poly=mean_or_none(dist_poly),
-        std_freq_shift_left_peak_ghz_poly=std_mhz_or_none(left_poly),
-        std_freq_shift_right_peak_ghz_poly=std_mhz_or_none(right_poly),
-        std_freq_shift_peak_distance_ghz_poly=std_mhz_or_none(dist_poly),
+        std_freq_shift_left_peak_mhz_poly=std_mhz_or_none(left_poly),
+        std_freq_shift_right_peak_mhz_poly=std_mhz_or_none(right_poly),
+        std_freq_shift_peak_distance_mhz_poly=std_mhz_or_none(dist_poly),
 
         mean_freq_shift_left_peak_ghz_interp=mean_or_none(left_interp),
         mean_freq_shift_right_peak_ghz_interp=mean_or_none(right_interp),
         mean_freq_shift_peak_distance_ghz_interp=mean_or_none(dist_interp),
-        std_freq_shift_left_peak_ghz_interp=std_mhz_or_none(left_interp),
-        std_freq_shift_right_peak_ghz_interp=std_mhz_or_none(right_interp),
-        std_freq_shift_peak_distance_ghz_interp=std_mhz_or_none(dist_interp),
+        std_freq_shift_left_peak_mhz_interp=std_mhz_or_none(left_interp),
+        std_freq_shift_right_peak_mhz_interp=std_mhz_or_none(right_interp),
+        std_freq_shift_peak_distance_mhz_interp=std_mhz_or_none(dist_interp),
 
         mean_hwhm_left_peak_ghz=mean_or_none(hwhm_left),
         mean_hwhm_right_peak_ghz=mean_or_none(hwhm_right),
-        std_hwhm_left_peak_ghz=std_mhz_or_none(hwhm_left),
-        std_hwhm_right_peak_ghz=std_mhz_or_none(hwhm_right),
+        std_hwhm_left_peak_mhz=std_mhz_or_none(hwhm_left),
+        std_hwhm_right_peak_mhz=std_mhz_or_none(hwhm_right),
 
         cov_freq_left_right_poly=cov_poly,
         corr_freq_left_right_poly=corr_poly,

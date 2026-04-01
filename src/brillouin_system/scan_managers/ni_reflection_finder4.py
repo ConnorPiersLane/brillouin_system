@@ -23,7 +23,9 @@ class ReflectionResult:
     event_time_perf: Optional[float] = None    # perf_counter time_of(event_index)
     event_z_um: Optional[float] = None         # interpolated z at event time
     z_offset_um: Optional[float] = None
-    peak_value: Optional[float] = None         # only meaningful for mode="max"
+    peak_value: Optional[float] = None
+    background_mean: Optional[float] = None
+    background_std: Optional[float] = None
     threshold_high: Optional[float] = None
     threshold_low: Optional[float] = None
     idx_first: Optional[int] = None            # first sample above threshold_high
@@ -194,15 +196,8 @@ def find_reflection_realtime(
 
     if (not in_interval) or idx_first is None or idx_last_above is None or daq is None or best_idx is None:
         # Validate detection + acquisition
-        # TODO: Change this back to found=False after logging is finished.
         return ReflectionResult(
             found=False,
-            threshold_high=th_hi,
-            threshold_low=th_lo,
-            daq_ts=daq_ts,
-            daq_values=daq_values,
-            zaber_lens_ts=zaber_lens_ts,
-            zaber_lens_z_um=zaber_lens_z_um,
         )
 
     event_i = best_idx
@@ -225,6 +220,8 @@ def find_reflection_realtime(
         event_z_um=z_event,
         z_offset_um=z_offset_um,
         peak_value=peak_val,
+        background_mean=av,
+        background_std=sigma,
         threshold_high=th_hi,
         threshold_low=th_lo,
         idx_first=int(idx_first),

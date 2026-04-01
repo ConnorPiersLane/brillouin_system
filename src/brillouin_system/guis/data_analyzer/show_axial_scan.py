@@ -37,6 +37,7 @@ class AxialScanViewer(QWidget):
         super().__init__()
         self.axial_scan: AxialScan = axial_scan
         self.calc: CalibrationCalculator = CalibrationCalculator(self.axial_scan.calibration_params)
+
         self.analyzer: SpectrumAnalyzer = SpectrumAnalyzer(self.calc)
         self.setWindowTitle(f"Axial Scan Viewer - ID: {axial_scan.id}")
 

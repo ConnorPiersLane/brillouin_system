@@ -7,33 +7,53 @@ import pandas as pd
 
 @dataclass
 class BrillouinExport:
-    axial_scan_i: int
-    id: str
-    measurement_index: int
-    x_mm: Optional[float] = None
-    y_mm: Optional[float] = None
-    z_mm: Optional[float] = None
-    pf_um: Optional[float] = None
-    pb_um: Optional[float] = None
-    m_um: Optional[float] = None
-    lp_ghz_poly: Optional[float] = None
-    lp_ghz_interp: Optional[float] = None
+    """
+    lp = left peak
+    rp = right peak
+    distance = distance btw. peaks
+    theo = theoretical value
+    bg = background
+    ts = timestamp
+    pf = found reflection plane going forwards (into the cornea) pf=plane forward
+    bg = plane backward
+    """
+
+    axial_scan_i: int   # Axial scan id: start=0
+    id: str  # User specified id
+    measurement_index: int  # Index of the measurement taken for that scan. start=0 index = 3 -> fourth measurement
+    x_mm: Optional[float] = None # Position in Pupil coordinates. x-> to the right (persons right eye, towards the nose)
+    y_mm: Optional[float] = None #upwards
+    z_mm: Optional[float] = None # from pupil plane towards laser (looking into the laser)
+    pf_um: Optional[float] = None # position of zaber lens when plane was found moving forwards pf=plane forwards
+    pb_um: Optional[float] = None # position plane backwards
+    m_um: Optional[float] = None # position where the measurement was taken.
+    # Ideal (m_um-pf_um) = (m_um-pb_um) = scan depth
+
+    reflection_signal_pf_V: Optional[float] = None # measured reflection signal of the photodiode / daq
+    reflection_signal_pb_V: Optional[float] = None
+
+    reflection_signal_bg_mean_V: Optional[float] = None # background of the signal used for pf and pb
+    reflection_signal_bg_std_V: Optional[float] = None
+
+
+    lp_ghz: Optional[float] = None
+    # lp_ghz_interp: Optional[float] = None
     lp_hwhm_ghz: Optional[float] = None
     lp_photons: Optional[float] = None
     lp_theo_std_photons_mhz: Optional[float] = None
     lp_theo_std_pixelation_mhz: Optional[float] = None
     lp_theo_std_bg_mhz: Optional[float] = None
     lp_theo_std_total_mhz: Optional[float] = None
-    rp_ghz_poly: Optional[float] = None
-    rp_ghz_interp: Optional[float] = None
+    rp_ghz: Optional[float] = None
+    # rp_ghz_interp: Optional[float] = None
     rp_hwhm_ghz: Optional[float] = None
     rp_photons: Optional[float] = None
     rp_theo_std_photons_mhz: Optional[float] = None
     rp_theo_std_pixelation_mhz: Optional[float] = None
     rp_theo_std_bg_mhz: Optional[float] = None
     rp_theo_std_total_mhz: Optional[float] = None
-    distance_ghz_poly: Optional[float] = None
-    distance_ghz_interp: Optional[float] = None
+    distance_ghz: Optional[float] = None
+    # distance_ghz_interp: Optional[float] = None
     distance_theo_std_mhz: Optional[float] = None
     ts_frame: Optional[float] = None
     ts_pf: Optional[float] = None
@@ -59,15 +79,28 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
 
     pf_um = None
     ts_pf = None
+    reflection_signal_pf_v = None
+    pf_background_mean = None
+    pf_background_std = None
+    reflection_signal_pf_v = None
     if axial_scan.reflection_result_forwards is not None:
         ts_pf = axial_scan.reflection_result_forwards.event_time_perf
         pf_um = axial_scan.reflection_result_forwards.event_z_um
+        reflection_signal_pf_v = axial_scan.reflection_result_forwards.peak_value
+        pf_background_mean = axial_scan.reflection_result_forwards.background_mean
+        pf_background_std = axial_scan.reflection_result_forwards.background_std
 
     pb_um = None
     ts_pb = None
+    reflection_signal_pb_v = None
+    pb_background_mean = None
+    pb_background_std = None
     if axial_scan.reflection_result_backwards is not None:
         ts_pb = axial_scan.reflection_result_backwards.event_time_perf
         pb_um = axial_scan.reflection_result_backwards.event_z_um
+        reflection_signal_pb_v = axial_scan.reflection_result_backwards.peak_value
+        pb_background_mean = axial_scan.reflection_result_backwards.background_mean
+        pb_background_std = axial_scan.reflection_result_backwards.background_std
 
     measurement_um = axial_scan.measurements[idx].lens_zaber_position
 
@@ -77,17 +110,31 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         axial_scan_i = axial_scan.i,
         id = axial_scan.id,
         measurement_index = idx,
+
+        # Eye Position
         x_mm = x_mm,
         y_mm = y_mm,
         z_mm = z_mm,
+
+        # Reflection Plane finding forwards
         pf_um = pf_um,
+        reflection_signal_pf_V = reflection_signal_pf_v,
+
+        # Reflection Plane finding backwards
         pb_um = pb_um,
-        m_um = measurement_um,
+        reflection_signal_pb_V=reflection_signal_pb_v,
+
+        reflection_signal_bg_mean_V=pf_background_mean,
+        reflection_signal_bg_std_V=pf_background_std,
+
+        # Measurement axial position
+        m_um=measurement_um,
+
         # Peak frequencies
-        lp_ghz_poly=shifts.freq_shift_left_peak_ghz_poly,
-        lp_ghz_interp=shifts.freq_shift_left_peak_ghz_interp,
-        rp_ghz_poly=shifts.freq_shift_right_peak_ghz_poly,
-        rp_ghz_interp=shifts.freq_shift_right_peak_ghz_interp,
+        lp_ghz=shifts.freq_shift_left_peak_ghz_poly,
+        # lp_ghz_interp=shifts.freq_shift_left_peak_ghz_interp,
+        rp_ghz=shifts.freq_shift_right_peak_ghz_poly,
+        # rp_ghz_interp=shifts.freq_shift_right_peak_ghz_interp,
 
         # Widths
         lp_hwhm_ghz=shifts.hwhm_left_peak_ghz,
@@ -110,8 +157,8 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
 
 
         # Distance between peaks
-        distance_ghz_poly=shifts.freq_shift_peak_distance_ghz_poly,
-        distance_ghz_interp=shifts.freq_shift_peak_distance_ghz_interp,
+        distance_ghz=shifts.freq_shift_peak_distance_ghz_poly,
+        # distance_ghz_interp=shifts.freq_shift_peak_distance_ghz_interp,
         ts_frame = axial_scan.measurements[idx].time_stamp,
         ts_pf = ts_pf,
         ts_pb = ts_pb,
