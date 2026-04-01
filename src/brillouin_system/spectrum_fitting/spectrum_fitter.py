@@ -23,7 +23,21 @@ def _2Lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
     return (amp1 * wid1**2 / ((x - cen1)**2 + wid1**2)) + \
            (amp2 * wid2**2 / ((x - cen2)**2 + wid2**2)) + offset
 
+def _lorentzian_pixel_integrated(x, amp, cen, wid):
+    x = np.asarray(x, dtype=float)
+    left = x - 0.5
+    right = x + 0.5
+    return amp * wid * (
+        np.arctan((right - cen) / wid) -
+        np.arctan((left - cen) / wid)
+    )
 
+def _2Lorentzian_binned(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
+    return (
+        _lorentzian_pixel_integrated(x, amp1, cen1, wid1) +
+        _lorentzian_pixel_integrated(x, amp2, cen2, wid2) +
+        offset
+    )
 
 class SpectrumFitter:
 
@@ -144,7 +158,8 @@ class SpectrumFitter:
                 [0, x_min, 0, 0, x_min, 0, 0],
                 [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf]
             )
-            model_func = _2Lorentzian
+            # model_func = _2Lorentzian
+            model_func = _2Lorentzian_binned
 
         elif model == "lorentzian_quad_bg":
             p0_bg = [0.0, 0.0, 0.0]
@@ -155,7 +170,7 @@ class SpectrumFitter:
             )
 
             def model_func(x, *params):
-                return _2Lorentzian(x, *params[:7]) + _quadratic(x, *params[7:])
+                return _2Lorentzian_binned(x, *params[:7]) + _quadratic(x, *params[7:])
 
         elif model == "lorentzian_window":
             p0 = [amp[0], cen[0], wid[0], amp[1], cen[1], wid[1], offset]
@@ -163,7 +178,8 @@ class SpectrumFitter:
                 [0, x_min, 0, 0, x_min, 0, 0],
                 [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf]
             )
-            model_func = _2Lorentzian
+            # model_func = _2Lorentzian
+            model_func = _2Lorentzian_binned
         else:
             raise ValueError(f"Unknown model: '{model}'")
 
@@ -212,7 +228,7 @@ class SpectrumFitter:
             heights = np.array([pk_info['peak_heights'][0] / 2] * 2)
         else:
             widths = 0.5 * pk_info['widths']
-            heights = np.pi * widths * pk_info['peak_heights']
+            heights = pk_info['peak_heights']
         pk_ind = np.asarray(pk_ind, dtype=int)
         pk_ind = np.clip(pk_ind, 0, len(px) - 1)
         centers = px[pk_ind].astype(float)
