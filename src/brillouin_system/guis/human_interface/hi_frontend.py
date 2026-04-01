@@ -64,7 +64,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 #todo: flip img image y axis
 use_backend_dummy = False
 # Eye Tracking
-include_eye_tracking = False
+include_eye_tracking = True
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -856,6 +856,7 @@ class HiFrontend(QWidget):
 
         # -------- Row 1: Live image --------
         self.vb_img = self.glw.addViewBox(lockAspect=True, enableMenu=False)
+        self.vb_img.invertY(True)
         self.img_item = pg.ImageItem(autoDownsample=True)
         self.vb_img.addItem(self.img_item)
         self.vb_img.setBorder((170, 170, 170))
