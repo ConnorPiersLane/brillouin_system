@@ -5,7 +5,7 @@ import numpy as np
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
-
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
 @dataclass
@@ -280,8 +280,14 @@ def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParamet
 
     for freq_block in data.measured_freqs:
         for point in freq_block.cali_meas_points:
-            if point.fitting_results.is_success:
-                all_fits.append(point.fitting_results)
+            # if point.fitting_results.is_success:
+            #     all_fits.append(point.fitting_results)
+            #     freqs_all.append(point.microwave_freq)
+            sf = SpectrumFitter()
+            px, sline = sf.get_px_sline_from_image(point.frame)
+            fs = sf.fit(px, sline, is_reference_mode=True)
+            if fs.is_success:
+                all_fits.append(fs)
                 freqs_all.append(point.microwave_freq)
 
     if not all_fits:

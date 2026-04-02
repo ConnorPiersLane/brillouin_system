@@ -29,5 +29,5 @@ min_peak_width = 1
 min_peak_height = 800
 rel_height = 0.5
 wlen_pixels = 40
-fitting_model = "lorentzian"
-beta = 1
+fitting_model = "lorentzian_window"
+beta = 3

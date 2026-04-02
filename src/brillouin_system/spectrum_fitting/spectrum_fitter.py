@@ -19,7 +19,7 @@ from brillouin_system.spectrum_fitting.fit_util import (
 def _quadratic(x, a, b, c):
     return a * x**2 + b * x + c
 
-def _2Lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
+def _2lorentzian(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
     return (amp1 * wid1**2 / ((x - cen1)**2 + wid1**2)) + \
            (amp2 * wid2**2 / ((x - cen2)**2 + wid2**2)) + offset
 
@@ -32,12 +32,13 @@ def _lorentzian_pixel_integrated(x, amp, cen, wid):
         np.arctan((left - cen) / wid)
     )
 
-def _2Lorentzian_binned(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
+def _2lorentzian_binned(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
     return (
         _lorentzian_pixel_integrated(x, amp1, cen1, wid1) +
         _lorentzian_pixel_integrated(x, amp2, cen2, wid2) +
         offset
     )
+
 
 class SpectrumFitter:
 
@@ -127,7 +128,6 @@ class SpectrumFitter:
         return np.sum(sline)
 
 
-
     def fit(self, px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
         # Select config/model
         config = self.reference_config if is_reference_mode else self.sample_config
@@ -159,7 +159,7 @@ class SpectrumFitter:
                 [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf]
             )
             # model_func = _2Lorentzian
-            model_func = _2Lorentzian_binned
+            model_func = _2lorentzian_binned
 
         elif model == "lorentzian_quad_bg":
             p0_bg = [0.0, 0.0, 0.0]
@@ -170,7 +170,7 @@ class SpectrumFitter:
             )
 
             def model_func(x, *params):
-                return _2Lorentzian_binned(x, *params[:7]) + _quadratic(x, *params[7:])
+                return _2lorentzian_binned(x, *params[:7]) + _quadratic(x, *params[7:])
 
         elif model == "lorentzian_window":
             p0 = [amp[0], cen[0], wid[0], amp[1], cen[1], wid[1], offset]
@@ -179,7 +179,7 @@ class SpectrumFitter:
                 [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf]
             )
             # model_func = _2Lorentzian
-            model_func = _2Lorentzian_binned
+            model_func = _2lorentzian_binned
         else:
             raise ValueError(f"Unknown model: '{model}'")
 
@@ -231,7 +231,17 @@ class SpectrumFitter:
             heights = pk_info['peak_heights']
         pk_ind = np.asarray(pk_ind, dtype=int)
         pk_ind = np.clip(pk_ind, 0, len(px) - 1)
-        centers = px[pk_ind].astype(float)
+
+
+        # estimat the center positions:
+        if 'left_ips' in pk_info and 'right_ips' in pk_info:
+            centers = 0.5 * (
+                    np.asarray(pk_info['left_ips'], dtype=float) +
+                    np.asarray(pk_info['right_ips'], dtype=float)
+            )
+            centers = px[0] + centers
+        else:
+            centers = px[pk_ind].astype(float)
 
         return heights, centers, widths
 

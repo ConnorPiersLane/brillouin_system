@@ -1,10 +1,11 @@
-import math
+
 import os
 import pprint
 from dataclasses import asdict
 
 import numpy as np
 import pandas as pd
+from tifffile import imwrite
 
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QVBoxLayout,
@@ -137,6 +138,10 @@ class AxialScanViewer(QWidget):
         self.save_btn = QPushButton("Save to Excel")
         self.save_btn.clicked.connect(self.save_to_excel)
         nav_layout.addWidget(self.save_btn)
+
+        self.export_frame_btn = QPushButton("Export Frame (uint8)")
+        self.export_frame_btn.clicked.connect(self.export_current_frame)
+        nav_layout.addWidget(self.export_frame_btn)
 
         nav_layout.addStretch()
         return nav_layout
@@ -409,3 +414,50 @@ class AxialScanViewer(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")
+
+
+    def export_current_frame(self):
+        try:
+            mp = self.axial_scan.measurements[self.current_index]
+
+            if self.axial_scan.system_state.is_do_bg_subtraction_active:
+                frame = mp.frame_andor - self.axial_scan.system_state.bg_image.median_image
+            else:
+                frame = mp.frame_andor
+
+            # Normalize → uint8
+            frame = np.array(frame, dtype=float)
+
+            # Avoid division by zero
+            if frame.max() > frame.min():
+                norm = (frame - frame.min()) / (frame.max() - frame.min())
+            else:
+                norm = np.zeros_like(frame)
+
+            frame_uint8 = (norm * 255).astype(np.uint8)
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Frame",
+                f"frame_{self.current_index}.tiff",
+                "TIFF (*.tiff *.tif);;PNG (*.png)"
+            )
+
+            if not file_path:
+                return
+
+            if file_path.lower().endswith((".tif", ".tiff")):
+                imwrite(file_path, frame_uint8)
+
+            elif file_path.lower().endswith(".png"):
+                from PIL import Image
+                Image.fromarray(frame_uint8).save(file_path)
+
+            else:
+                file_path += ".tiff"
+                imwrite(file_path, frame_uint8)
+
+            QMessageBox.information(self, "Saved", f"Saved to:\n{file_path}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed:\n{e}")
