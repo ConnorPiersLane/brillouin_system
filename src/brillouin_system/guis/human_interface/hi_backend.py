@@ -81,17 +81,17 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            camera=IxonUltra(
-                index = 0,
-                temperature = "off",
-                fan_mode = "full",
-                x_start = 40, x_end  = 120,
-                y_start= 300, y_end  = 315,
-                vbin= 1, hbin  = 1,
-                verbose = True,
-                advanced_gain_option=False
-            )
-            # camera = DummyCamera()
+            # camera=IxonUltra(
+            #     index = 0,
+            #     temperature = "off",
+            #     fan_mode = "full",
+            #     x_start = 40, x_end  = 120,
+            #     y_start= 300, y_end  = 315,
+            #     vbin= 1, hbin  = 1,
+            #     verbose = True,
+            #     advanced_gain_option=False
+            # )
+            camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
             # shutter_manager = ShutterManager('microscope')
@@ -657,12 +657,16 @@ class HiBackend:
             with self.force_reference_mode():
                 measured_freqs = []
 
+                i = 0
+                n = len(config.calibration_freqs)
                 for freq in config.calibration_freqs:
                     if self.f2b_cancel_callback():
                         log.info("[Calibration] Cancelled by user.")
                         return False
 
                     self.microwave.set_frequency(freq)
+                    i += 1
+                    log.info(f"Freq {i}/{n}")
                     freq_points = []
 
                     for _ in range(config.n_per_freq):

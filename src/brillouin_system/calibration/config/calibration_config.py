@@ -1,5 +1,7 @@
 from dataclasses import dataclass, asdict
 from pathlib import Path
+import random
+
 import tomli
 import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
@@ -17,53 +19,19 @@ class CalibrationConfig:
     reference: str  # "left", "right", or "distance"
     mode: str  # "poly" or "interp"
 
-    # @property
-    # def calibration_freqs(self) -> list[float]:
-    #     # compute frequencies on the fly
-    #     return [
-    #         round(self.start + i * self.step, 6)
-    #         for i in range(1000)
-    #         if self.start + i * self.step <= self.stop
-    #     ]
     @property
     def calibration_freqs(self) -> list[float]:
-        """
-        start = 4
-        stop = 6
-        step = 0.1
-        gives [4.0, 5.0,
-             4.1, 5.1,
-             4.2, 5.2,
-             ...
-             4.9, 5.9,
-             5.0]
-        Returns:
+        n_steps = int(round((self.stop - self.start) / self.step))
 
-        """
-        freqs = []
+        freqs = [
+            round(self.start + i * self.step, 6)
+            for i in range(n_steps + 1)
+            if self.start + i * self.step <= self.stop + 1e-9
+        ]
 
-        base = int(self.start)
-        bands = list(range(base, int(self.stop)))  # e.g., [4, 5]
-
-        i = 0
-        while True:
-            offset = i * self.step
-            added_any = False
-
-            for b in bands:
-                val = b + offset
-                if val < self.start:
-                    continue
-                if val <= self.stop:
-                    freqs.append(round(val, 6))
-                    added_any = True
-
-            if not added_any:
-                break
-
-            i += 1
-
+        random.shuffle(freqs)
         return freqs
+
 
 
 def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationConfig:

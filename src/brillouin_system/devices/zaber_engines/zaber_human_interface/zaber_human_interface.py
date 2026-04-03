@@ -34,7 +34,7 @@ class ZaberHumanInterface:
         self.z_axis.wait_until_idle()
 
     def move_to_init_position(self):
-        self.move_abs(12e3, 10e3, 12e3)
+        self.move_abs(12e3, 10e3, 5e3)
 
     def move_rel(self, dx: float = None, dy: float = None, dz: float = None):
         # queue moves

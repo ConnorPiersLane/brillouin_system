@@ -21,7 +21,7 @@ min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
 fitting_model = "lorentzian_window"
-beta = 3
+beta = 4
 
 [reference]
 prominence_fraction = 0.05
@@ -30,4 +30,4 @@ min_peak_height = 800
 rel_height = 0.5
 wlen_pixels = 40
 fitting_model = "lorentzian_window"
-beta = 3
+beta = 4
