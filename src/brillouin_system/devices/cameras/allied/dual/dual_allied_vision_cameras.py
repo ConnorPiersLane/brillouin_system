@@ -1,5 +1,4 @@
 import queue
-import threading
 import time
 
 import cv2
@@ -108,7 +107,7 @@ class DualAlliedVisionCameras(BaseDualCameras):
         id0: str = "DEV_000F315BC084",
         id1: str = "DEV_000F315BDC0C",
         *,
-        throughput_MBps_per_cam: float = 30.0,  # ~90 MB/s total budget across both on 1GbE
+        throughput_MBps_per_cam: float = 20.0,  # ~90 MB/s total budget across both on 1GbE
         packet_delays: tuple[int | None, int | None] = (2000, 4000),
         enable_ptp: bool = False,
         pixel_format = PixelFormat.Mono8,
@@ -192,9 +191,12 @@ class DualAlliedVisionCameras(BaseDualCameras):
 
     def trigger_both(self):
         # Fire software triggers concurrently for tighter sync
-        t1 = threading.Thread(target=lambda: self.left.camera.get_feature_by_name("TriggerSoftware").run())
-        t2 = threading.Thread(target=lambda: self.right.camera.get_feature_by_name("TriggerSoftware").run())
-        t1.start(); t2.start(); t1.join(); t2.join()
+        # t1 = threading.Thread(target=lambda: self.left.camera.get_feature_by_name("TriggerSoftware").run())
+        # t2 = threading.Thread(target=lambda: self.right.camera.get_feature_by_name("TriggerSoftware").run())
+        # t1.start(); t2.start(); t1.join(); t2.join()
+
+        self.left.camera.get_feature_by_name("TriggerSoftware").run()
+        self.right.camera.get_feature_by_name("TriggerSoftware").run()
 
     def start_dual_cam_stream(self):
         """Start streaming once and keep queues ready."""
