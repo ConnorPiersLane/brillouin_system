@@ -13,7 +13,6 @@ from brillouin_system.spectrum_fitting.fit_util import (
 )
 
 
-
 # === Fitting model functions ===
 
 def _quadratic(x, a, b, c):
@@ -48,6 +47,7 @@ class SpectrumFitter:
         self.sline_config: SlineFromFrameConfig = sline_from_frame_config.get()
         self.sample_config: FindPeaksConfig = find_peaks_sample_config.get()
         self.reference_config: FindPeaksConfig = find_peaks_reference_config.get()
+
 
     def update_configs(self, configs: FittingConfigs):
         self.update_sline_config(configs.sline_config)

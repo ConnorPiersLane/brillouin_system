@@ -243,6 +243,22 @@ class CalibrationCalculator:
         # self._print_dc_model()
         print("================================")
 
+    def get_str_all_models(self) -> str:
+        """Return all available calibration models as a formatted string."""
+        lines = []
+        lines.append("==== All Calibration Models ====")
+        lines.append(self._poly_to_line("Left Peak", self.p.freq_left_peak))
+        lines.append(self._poly_to_line("Right Peak", self.p.freq_right_peak))
+        lines.append(self._poly_to_line("Inter-Peak Distance", self.p.freq_peak_distance))
+        # lines.append(self._poly_to_line("Centroid", self.p.freq_peak_centroid))
+        # lines.append(self._dc_model_to_line())
+        lines.append("================================")
+        return "\n".join(lines)
+
+    def _poly_to_line(self, name: str, coeffs: np.ndarray) -> str:
+        eq = self._poly_to_str(coeffs)
+        return f"{name}: f(x) ≈ {eq}  [GHz]"
+
     # --- Internal helpers ---
     @staticmethod
     def _poly_to_str(coeffs: np.ndarray) -> str:
@@ -272,6 +288,8 @@ def sort_xy(x, y):
     idx = np.argsort(x)
     return np.asarray(x)[idx], np.asarray(y)[idx]
 
+sf = SpectrumFitter()
+
 def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParameters:
     degree = poyfit_degree
 
@@ -280,15 +298,14 @@ def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParamet
 
     for freq_block in data.measured_freqs:
         for point in freq_block.cali_meas_points:
-            # if point.fitting_results.is_success:
-            #     all_fits.append(point.fitting_results)
-            #     freqs_all.append(point.microwave_freq)
-            sf = SpectrumFitter()
-            px, sline = sf.get_px_sline_from_image(point.frame)
-            fs = sf.fit(px, sline, is_reference_mode=True)
-            if fs.is_success:
-                all_fits.append(fs)
+            if point.fitting_results.is_success:
+                all_fits.append(point.fitting_results)
                 freqs_all.append(point.microwave_freq)
+            # px, sline = sf.get_px_sline_from_image(point.frame)
+            # fs = sf.fit(px, sline, is_reference_mode=True)
+            # if fs.is_success:
+            #     all_fits.append(fs)
+            #     freqs_all.append(point.microwave_freq)
 
     if not all_fits:
         raise ValueError("No successful fits found in calibration data.")

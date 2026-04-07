@@ -11,7 +11,12 @@ from brillouin_system.calibration.config.calibration_config_gui import Calibrati
 
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, fit_axial_scan
+from brillouin_system.guis.data_analyzer.excel_export_axial_scan import (
+    BrillouinExport,
+    get_excel_row_data,
+    export_to_excel,
+)
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
@@ -49,6 +54,9 @@ class AxialScanManager(QWidget):
         self.show_btn.clicked.connect(self.show_scan)
         btn_row.addWidget(self.show_btn)
 
+        self.save_all_btn = QPushButton("Save All to Excel")
+        self.save_all_btn.clicked.connect(self.save_all_to_excel)
+        btn_row.addWidget(self.save_all_btn)
 
         self.remove_btn = QPushButton("Remove Selected")
         self.remove_btn.clicked.connect(self.remove_selected)
@@ -108,56 +116,6 @@ class AxialScanManager(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "Load Error", f"Failed to load {path}:\n{e}")
 
-        import math
-        import pandas as pd
-
-        rows = []
-
-        for idx, scan in self.scans.items():  # FIX: items() gives (key, value)
-            try:
-                lp = scan.eye_tracker_results.laser_position
-
-                # Compute values
-                radius = math.sqrt(lp[0] ** 2 + lp[1] ** 2)
-                angle = math.degrees(math.atan2(lp[1], lp[0]))
-
-                # ID
-                scan_id = f"{getattr(scan, 'i', '?')}-{getattr(scan, 'id', 'no-id')}"
-
-                # is_found (adjust if needed)
-                is_found = scan.reflection_result_forwards is not None
-
-                # DAQ values (handle list or scalar)
-                daq = scan.reflection_result_forwards.peak_value if is_found else None
-                threshold_high = scan.reflection_result_forwards.threshold_high
-                threshold_low = scan.reflection_result_forwards.threshold_low
-                if isinstance(daq, (list, tuple)):
-                    max_daq = max(daq) if daq else None
-                else:
-                    max_daq = daq
-
-                # Store row
-                rows.append({
-                    "ID": scan_id,
-                    "Angle": angle,
-                    "Radius": radius,
-                    "is_found": is_found,
-                    "max daq signal [V]": max_daq,
-                    'threshold_high': threshold_high,
-                    "threshold_low": threshold_low,
-                })
-
-            except Exception as e:
-                print(f"Skipping scan {idx}: {e}")
-
-        # Create DataFrame
-        df = pd.DataFrame(rows)
-
-        # Save to Excel
-        output_path = "scan_analysis.xlsx"
-        df.to_excel(output_path, index=False)
-
-        print(f"Saved Excel to: {output_path}")
 
     def show_scan(self):
         items = self.scan_list.selectedItems()
@@ -225,6 +183,67 @@ class AxialScanManager(QWidget):
         dlg = FindPeaksConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
 
+
+    def _build_export_rows_for_scan(self, scan: AxialScan) -> list[BrillouinExport]:
+        rows: list[BrillouinExport] = []
+
+        analyzed_spectra = fit_axial_scan(scan)
+
+        for idx, analyzed_spectrum in enumerate(analyzed_spectra):
+            row = get_excel_row_data(
+                axial_scan=scan,
+                analyzed_spectrum=analyzed_spectrum,
+                idx=idx,
+            )
+            rows.append(row)
+
+        return rows
+
+    def _build_export_rows_for_all_scans(self) -> list[BrillouinExport]:
+        all_rows: list[BrillouinExport] = []
+
+        # sort by manager index for predictable export order
+        for idx in sorted(self.scans.keys()):
+            scan = self.scans[idx]
+            scan_rows = self._build_export_rows_for_scan(scan)
+            all_rows.extend(scan_rows)
+
+        return all_rows
+
+    def save_all_to_excel(self):
+        try:
+            if not self.scans:
+                QMessageBox.information(self, "No Scans", "There are no loaded scans to export.")
+                return
+
+            rows = self._build_export_rows_for_all_scans()
+            if not rows:
+                QMessageBox.warning(self, "No Data", "There is no data to export.")
+                return
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save All to Excel",
+                "all_axial_scans_brillouin_export.xlsx",
+                "Excel Files (*.xlsx)"
+            )
+
+            if not file_path:
+                return
+
+            if not file_path.lower().endswith(".xlsx"):
+                file_path += ".xlsx"
+
+            export_to_excel(rows, file_path)
+
+            QMessageBox.information(
+                self,
+                "Excel Saved",
+                f"Saved {len(rows)} rows from {len(self.scans)} scan(s) to:\n{file_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
