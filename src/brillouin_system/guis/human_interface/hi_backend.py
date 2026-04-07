@@ -693,7 +693,7 @@ class HiBackend:
 
                 self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
                 self.update_calibration_calculator()
-                log.info("[Calibration] Completed successfully.")
+                log.info(self.calibration_calculator.get_str_all_models())
                 return True
 
         except Exception as e:

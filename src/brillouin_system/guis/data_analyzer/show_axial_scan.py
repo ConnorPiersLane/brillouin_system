@@ -17,8 +17,12 @@ from scipy.stats import norm
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig, calibration_config
-from brillouin_system.guis.data_analyzer.excel_export_axial_scan import get_excel_row_data, BrillouinExport, \
-    load_from_excel
+from brillouin_system.guis.data_analyzer.excel_export_axial_scan import (
+    get_excel_row_data,
+    BrillouinExport,
+    load_from_excel,
+    export_to_excel,
+)
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, AnalyzedSpectrum
@@ -135,9 +139,13 @@ class AxialScanViewer(QWidget):
         self.analyze_btn.clicked.connect(self.on_analyze_snr)
         nav_layout.addWidget(self.analyze_btn)
 
-        self.save_btn = QPushButton("Save to Excel")
-        self.save_btn.clicked.connect(self.save_to_excel)
-        nav_layout.addWidget(self.save_btn)
+        self.save_new_btn = QPushButton("Save New Excel")
+        self.save_new_btn.clicked.connect(self.save_new_excel)
+        nav_layout.addWidget(self.save_new_btn)
+
+        self.add_existing_btn = QPushButton("Add to Existing Excel")
+        self.add_existing_btn.clicked.connect(self.add_to_existing_excel)
+        nav_layout.addWidget(self.add_existing_btn)
 
         self.export_frame_btn = QPushButton("Export Frame (uint8)")
         self.export_frame_btn.clicked.connect(self.export_current_frame)
@@ -376,45 +384,75 @@ class AxialScanViewer(QWidget):
 
         return rows
 
-    def save_to_excel(self):
+    def _get_default_excel_name(self) -> str:
+        return f"{self.axial_scan.id}_brillouin_export.xlsx"
+
+    def _write_rows_to_excel(self, file_path: str, rows: list[BrillouinExport]):
+        if not file_path.lower().endswith(".xlsx"):
+            file_path += ".xlsx"
+
+        export_to_excel(rows, file_path)
+        return file_path
+
+    def save_new_excel(self):
         try:
             rows = self._build_export_rows()
             if not rows:
                 QMessageBox.warning(self, "No Data", "There is no data to export.")
                 return
 
-            default_name = f"{self.axial_scan.id}_brillouin_export.xlsx"
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
-                "Save to Excel",
-                default_name,
+                "Save New Excel",
+                self._get_default_excel_name(),
                 "Excel Files (*.xlsx)"
             )
 
             if not file_path:
                 return
 
-            if not file_path.lower().endswith(".xlsx"):
-                file_path += ".xlsx"
-
-            if os.path.exists(file_path):
-                existing_rows = load_from_excel(file_path, sheet_name=0)
-                rows = existing_rows + rows
-
-            df = pd.DataFrame([asdict(r) for r in rows])
-
-            with pd.ExcelWriter(file_path, engine="openpyxl", mode="w") as writer:
-                df.to_excel(writer, sheet_name="Sheet1", index=False)
+            file_path = self._write_rows_to_excel(file_path, rows)
 
             QMessageBox.information(
                 self,
                 "Excel Saved",
-                f"Saved {len(rows)} rows to:\n{file_path}"
+                f"Saved {len(rows)} rows to new file:\n{file_path}"
             )
 
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")
 
+    def add_to_existing_excel(self):
+        try:
+            new_rows = self._build_export_rows()
+            if not new_rows:
+                QMessageBox.warning(self, "No Data", "There is no data to export.")
+                return
+
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Add to Existing Excel",
+                "",
+                "Excel Files (*.xlsx)"
+            )
+
+            if not file_path:
+                return
+
+            existing_rows = load_from_excel(file_path, sheet_name=0)
+            combined_rows = existing_rows + new_rows
+
+            self._write_rows_to_excel(file_path, combined_rows)
+
+            QMessageBox.information(
+                self,
+                "Excel Updated",
+                f"Added {len(new_rows)} rows.\n"
+                f"Workbook now contains {len(combined_rows)} rows:\n{file_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Append Failed", f"Could not update Excel file:\n{e}")
 
     def export_current_frame(self):
         try:

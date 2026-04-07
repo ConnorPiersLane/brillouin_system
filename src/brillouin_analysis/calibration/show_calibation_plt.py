@@ -9,6 +9,7 @@ from brillouin_system.calibration.calibration import (
     get_calibration_calculator_from_data,
     CalibrationData,
 )
+from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
     load_dict_from_hdf5,
     dict_to_dataclass_tree,
@@ -138,16 +139,16 @@ def main():
 
     calibration_data = load_calibration_file(file_path)
 
-    degree = 1
-    mode = "poly"
+    config = calibration_config.get()
 
-    calculator = get_calibration_calculator_from_data(calibration_data, degree)
+    calculator = get_calibration_calculator_from_data(calibration_data, poyfit_degree=config.degree)
+    calculator.print_all_models()
 
     # Plot all
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
     for ax, ref in zip(axes, ["left", "right", "distance"]):
-        plot_reference(ax, calibration_data, calculator, ref, mode)
+        plot_reference(ax, calibration_data, calculator, ref, config.mode)
 
     plt.tight_layout()
     plt.show()

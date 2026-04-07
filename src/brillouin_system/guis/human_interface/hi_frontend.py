@@ -62,9 +62,9 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
+include_eye_tracking = False
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -1476,10 +1476,12 @@ class HiFrontend(QWidget):
         self.save_calib_btn.setEnabled(True)
         log.info(f"[Brillouin Viewer] Calibration available")
 
+
     def handle_requested_calibration(self,
                                      received_cali: tuple[CalibrationData, CalibrationCalculator, CalibrationConfig]):
         cali_data = received_cali[0]
         cali_calculator = received_cali[1]
+        log.info(cali_calculator.get_str_all_models())
         config = received_cali[2]
 
         if self._show_cali:
