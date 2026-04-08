@@ -1,10 +1,10 @@
 
-import os
+
 import pprint
 from dataclasses import asdict
 
 import numpy as np
-import pandas as pd
+
 from tifffile import imwrite
 
 from PyQt5.QtWidgets import (
@@ -28,7 +28,7 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, AnalyzedSpectrum
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
-from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer, TheoreticalPeakStdError, \
+from brillouin_system.spectrum_fitting.spectrum_analyzer import TheoreticalPeakStdError, \
     AnalyzedFreqShifts, MeasuredStatistics, analyze_statistics
 
 
@@ -43,7 +43,6 @@ class AxialScanViewer(QWidget):
         self.axial_scan: AxialScan = axial_scan
         self.calc: CalibrationCalculator = CalibrationCalculator(self.axial_scan.calibration_params)
 
-        self.analyzer: SpectrumAnalyzer = SpectrumAnalyzer(self.calc)
         self.setWindowTitle(f"Axial Scan Viewer - ID: {axial_scan.id}")
 
         # Get mode and peak side:
@@ -70,19 +69,19 @@ class AxialScanViewer(QWidget):
 
         if self.peak_reference == "left":
             if self.fitting_mode == "poly":
-                return analyzed_shifts.freq_shift_left_peak_ghz_poly
+                return analyzed_shifts.freq_shift_left_peak_ghz
             else:
                 return analyzed_shifts.freq_shift_left_peak_ghz_interp
 
         elif self.peak_reference == "right":
             if self.fitting_mode == "poly":
-                return analyzed_shifts.freq_shift_right_peak_ghz_poly
+                return analyzed_shifts.freq_shift_right_peak_ghz
             else:
                 return analyzed_shifts.freq_shift_right_peak_ghz_interp
 
         elif self.peak_reference == "distance":
             if self.fitting_mode == "poly":
-                return analyzed_shifts.freq_shift_peak_distance_ghz_poly
+                return analyzed_shifts.freq_shift_peak_distance_ghz
             else:
                 return analyzed_shifts.freq_shift_peak_distance_ghz_interp
 
@@ -337,9 +336,9 @@ class AxialScanViewer(QWidget):
 
         print(f"--- Measurement {self.current_index} ---")
         print(f"Zaber position: {fmt(mp.lens_zaber_position, precision=0)} µm")
-        print(f"Freq shifts poly: left={fmt(freq_shift.freq_shift_left_peak_ghz_poly)}, "
-              f"right={fmt(freq_shift.freq_shift_right_peak_ghz_poly)}, "
-              f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz_poly)}")
+        print(f"Freq shifts poly: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
+              f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
+              f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
         print(f"Freq shifts interp: left={fmt(freq_shift.freq_shift_left_peak_ghz_interp)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz_interp)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz_interp)}")
