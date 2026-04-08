@@ -224,8 +224,8 @@ class SpectrumFitter:
         if len(pk_ind) == 1:
             offset = max(int(0.02 * len(sline)), 1)
             pk_ind = np.array([pk_ind[0] - offset, pk_ind[0] + offset])
-            widths = np.array([pk_info['widths'][0]] * 2)
-            heights = np.array([pk_info['peak_heights'][0] / 2] * 2)
+            widths = np.array([0.5*pk_info['widths'][0], 0.5*pk_info['widths'][0]])
+            heights = np.array([pk_info['peak_heights'][0] / 2, pk_info['peak_heights'][0] / 2])
         else:
             widths = 0.5 * pk_info['widths']
             heights = pk_info['peak_heights']
