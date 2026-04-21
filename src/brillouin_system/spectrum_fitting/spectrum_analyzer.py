@@ -11,14 +11,14 @@ from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import Ph
 @dataclass
 class TheoreticalPeakStdError:
     """ All Values in MHz"""
-    left_peak_photons_mhz: float
-    left_peak_pixelation_mhz: float
-    left_peak_bg_mhz: float
-    left_peak_total_mhz: float
-    right_peak_photons_mhz: float
-    right_peak_pixelation_mhz: float
-    right_peak_bg_mhz: float
-    right_peak_total_mhz: float
+    left_peak_photons_mhz: float | None =  None
+    left_peak_pixelation_mhz: float | None =  None
+    left_peak_bg_mhz: float | None =  None
+    left_peak_total_mhz: float | None =  None
+    right_peak_photons_mhz: float | None =  None
+    right_peak_pixelation_mhz: float | None =  None
+    right_peak_bg_mhz: float | None =  None
+    right_peak_total_mhz: float | None =  None
 
 @dataclass
 class AnalyzedFreqShifts:
@@ -84,9 +84,6 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
-            freq_shift_left_peak_ghz_interp=self.calibration_calculator.freq_left_peak_interp(fitting.left_peak_center_px),
-            freq_shift_right_peak_ghz_interp=self.calibration_calculator.freq_right_peak_interp(fitting.right_peak_center_px),
-            freq_shift_peak_distance_ghz_interp=self.calibration_calculator.freq_peak_distance_interp(fitting.inter_peak_distance),
         )
 
 
@@ -97,6 +94,9 @@ class SpectrumAnalyzer:
                               emccd_gain: int | float,
                               ) -> TheoreticalPeakStdError:
         """ See paper: Precise nanometer Localization Analysis for Individual Fluorescent Probes """
+        if not fs.is_success:
+            return TheoreticalPeakStdError()
+
 
         analyzed_spec = self.analyze_spectrum(fitting=fs)
 
@@ -183,9 +183,6 @@ def analyze_statistics(
     right_poly = valid_values([s.freq_shift_right_peak_ghz for s in shifts])
     dist_poly = valid_values([s.freq_shift_peak_distance_ghz for s in shifts])
 
-    left_interp = valid_values([s.freq_shift_left_peak_ghz_interp for s in shifts])
-    right_interp = valid_values([s.freq_shift_right_peak_ghz_interp for s in shifts])
-    dist_interp = valid_values([s.freq_shift_peak_distance_ghz_interp for s in shifts])
 
     hwhm_left = valid_values([s.hwhm_left_peak_ghz for s in shifts])
     hwhm_right = valid_values([s.hwhm_right_peak_ghz for s in shifts])
@@ -196,10 +193,6 @@ def analyze_statistics(
         for s in shifts
     ])
 
-    cov_interp, corr_interp = cov_corr_from_pairs([
-        (s.freq_shift_left_peak_ghz_interp, s.freq_shift_right_peak_ghz_interp)
-        for s in shifts
-    ])
 
     return MeasuredStatistics(
         mean_freq_shift_left_peak_ghz=mean_or_none(left_poly),
@@ -209,12 +202,6 @@ def analyze_statistics(
         std_freq_shift_right_peak_mhz=std_mhz_or_none(right_poly),
         std_freq_shift_peak_distance_mhz=std_mhz_or_none(dist_poly),
 
-        mean_freq_shift_left_peak_ghz_interp=mean_or_none(left_interp),
-        mean_freq_shift_right_peak_ghz_interp=mean_or_none(right_interp),
-        mean_freq_shift_peak_distance_ghz_interp=mean_or_none(dist_interp),
-        std_freq_shift_left_peak_mhz_interp=std_mhz_or_none(left_interp),
-        std_freq_shift_right_peak_mhz_interp=std_mhz_or_none(right_interp),
-        std_freq_shift_peak_distance_mhz_interp=std_mhz_or_none(dist_interp),
 
         mean_hwhm_left_peak_ghz=mean_or_none(hwhm_left),
         mean_hwhm_right_peak_ghz=mean_or_none(hwhm_right),
@@ -223,7 +210,4 @@ def analyze_statistics(
 
         cov_freq_left_right=cov_poly,
         corr_freq_left_right=corr_poly,
-
-        cov_freq_left_right_interp=cov_interp,
-        corr_freq_left_right_interp=corr_interp,
     )
