@@ -68,22 +68,15 @@ class AxialScanViewer(QWidget):
     def get_freq(self, analyzed_shifts: AnalyzedFreqShifts):
 
         if self.peak_reference == "left":
-            if self.fitting_mode == "poly":
-                return analyzed_shifts.freq_shift_left_peak_ghz
-            else:
-                return analyzed_shifts.freq_shift_left_peak_ghz_interp
+            return analyzed_shifts.freq_shift_left_peak_ghz
+
 
         elif self.peak_reference == "right":
-            if self.fitting_mode == "poly":
-                return analyzed_shifts.freq_shift_right_peak_ghz
-            else:
-                return analyzed_shifts.freq_shift_right_peak_ghz_interp
+            return analyzed_shifts.freq_shift_right_peak_ghz
+
 
         elif self.peak_reference == "distance":
-            if self.fitting_mode == "poly":
-                return analyzed_shifts.freq_shift_peak_distance_ghz
-            else:
-                return analyzed_shifts.freq_shift_peak_distance_ghz_interp
+            return analyzed_shifts.freq_shift_peak_distance_ghz
 
         else:
             raise ValueError(
@@ -339,9 +332,6 @@ class AxialScanViewer(QWidget):
         print(f"Freq shifts poly: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
-        print(f"Freq shifts interp: left={fmt(freq_shift.freq_shift_left_peak_ghz_interp)}, "
-              f"right={fmt(freq_shift.freq_shift_right_peak_ghz_interp)}, "
-              f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz_interp)}")
         print(f"HWHM (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
               f"right={fmt(freq_shift.hwhm_right_peak_ghz)}")
         print(f"Photons: left={fmt(photons.left_peak_photons, precision=0)}, "
