@@ -5,4 +5,4 @@ start = 5.0
 stop = 7.0
 step = 0.01
 reference = "distance"
-mode = "poly"
+mode = "interp"
