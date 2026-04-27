@@ -55,7 +55,7 @@ def brillouin_shift_ratio_exact(
     arg = 0.5 * (
         1.0
         + np.cos(u) * np.cos(v)
-        + np.sin(u) * np.sin(v) * np.cos(phi)
+        - np.sin(u) * np.sin(v) * np.cos(phi)
     )
     return np.sqrt(np.clip(arg, 0.0, None))
 
@@ -208,15 +208,15 @@ def spectrum_lorentzian_gaussian_pupil_limited(
 
 
 if __name__ == "__main__":
-    f180 = 5.104  # GHz
+    f180 = 5.10  # GHz
 
     # Example 5X
     result_5x = absolute_shift_gaussian_pupil_limited(
         f180=f180,
-        beam_diameter_in=6.,       # mm, your incoming 1/e^2 beam diameter
-        beam_diameter_out=7.5,      # mm, F810 output 1/e^2 beam diameter
+        beam_diameter_in=6,       # mm, your incoming 1/e^2 beam diameter
+        beam_diameter_out=6,      # mm, F810 output 1/e^2 beam diameter
         pupil_diameter_in=11.2,     # mm, 5X pupil diameter
-        pupil_diameter_out=11.2,    # mm, 5X pupil diameter
+        pupil_diameter_out=9,    # mm, 5X pupil diameter
         focal_length_in=40.0,       # mm, 5X focal length
         focal_length_out=40.0,      # mm, 5X focal length
     )
@@ -228,10 +228,10 @@ if __name__ == "__main__":
     # Example 20X
     result_20x = absolute_shift_gaussian_pupil_limited(
         f180=f180,
-        beam_diameter_in=6.0,       # mm, incoming 1/e^2 beam diameter
-        beam_diameter_out=7.5,      # mm, F810 output 1/e^2 beam diameter
-        pupil_diameter_in=8.2,      # mm, 20X pupil diameter
-        pupil_diameter_out=8.2,     # mm, 20X pupil diameter
+        beam_diameter_in=6,       # mm, incoming 1/e^2 beam diameter
+        beam_diameter_out=6,      # mm, F810 output 1/e^2 beam diameter
+        pupil_diameter_in=8.4,      # mm, 20X pupil diameter
+        pupil_diameter_out=8.4,     # mm, 20X pupil diameter
         focal_length_in=10.0,       # mm, 20X focal length
         focal_length_out=10.0,      # mm, 20X focal length
     )

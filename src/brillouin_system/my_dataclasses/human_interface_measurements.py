@@ -25,6 +25,11 @@ class RequestAxialStepScan:
     eye_tracker_results: EyeTrackerResults | None = None
 
 @dataclass
+class RequestNStreamImages:
+    id: str
+    n_measurements: int
+
+@dataclass
 class RequestAxialContScan:
     id: str
     speed_um_s: float

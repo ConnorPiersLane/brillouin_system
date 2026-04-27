@@ -2,6 +2,7 @@
 pixel_offset_left = 0
 pixel_offset_right = 0
 selected_rows = [
+    2,
     3,
     4,
     5,
@@ -21,7 +22,7 @@ min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
 fitting_model = "lorentzian_window"
-beta = 4
+beta = 3
 
 [reference]
 prominence_fraction = 0.05

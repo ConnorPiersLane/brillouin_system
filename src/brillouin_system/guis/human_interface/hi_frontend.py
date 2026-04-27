@@ -52,7 +52,8 @@ from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan, \
+    RequestNStreamImages
 from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
 from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 ###
@@ -113,6 +114,7 @@ class HiFrontend(QWidget):
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
     calibrate_laser_camera_position_requested = pyqtSignal()
+    take_n_streaming_images_requested = pyqtSignal(object)
 
     # Saving Signals
     save_all_axial_scans_requested = pyqtSignal()
@@ -199,6 +201,7 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
+        self.take_n_streaming_images_requested.connect(self.brillouin_signaller.take_n_images_streaming)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -628,6 +631,7 @@ class HiFrontend(QWidget):
         self.axial_steps_scanned_dist_label.setFixedWidth(80)
 
 
+
         layout.addRow("ID:", self.axial_id_input)
         layout.addRow("Num Meas:", self.axial_num_input)
         layout.addRow("Step Size (µm):", self.axial_step_input)
@@ -645,6 +649,17 @@ class HiFrontend(QWidget):
         btn_row.addStretch()
 
         layout.addRow(btn_row)
+
+
+        self.stream_images_btn = QPushButton("Stream N")
+        self.stream_images_btn.clicked.connect(self.take_n_streaming_images)
+
+        stream_row = QHBoxLayout()
+        stream_row.addWidget(QLabel("N Images:"))
+        stream_row.addWidget(self.stream_images_btn)
+        stream_row.addStretch()
+
+        layout.addRow(stream_row)
 
         group.setLayout(layout)
         return group
@@ -1553,6 +1568,22 @@ class HiFrontend(QWidget):
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
+    def take_n_streaming_images(self):
+        try:
+            id_str = self.axial_id_input.text().strip()
+            n_meas = int(self.axial_num_input.text())
+
+
+            request = RequestNStreamImages(
+                id=id_str,
+                n_measurements=n_meas,
+            )
+
+
+            log.info(f"[Brillouin Viewer] Streaming acquisition request | N: {n_meas}")
+            self.take_n_streaming_images_requested.emit(request)
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to start streaming acquisition: {e}")
 
     def clear_measurements(self):
         self._stored_measurements.clear()

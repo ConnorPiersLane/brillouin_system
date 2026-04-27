@@ -14,7 +14,7 @@ from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestNStreamImages
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
 log = get_logger(__name__)
@@ -493,6 +493,27 @@ class HiSignaller(QObject):
             self.axial_scan_data_ready.emit(scan_data)
         else:
             log.warning(f"Requested scan index {index} not found.")
+
+    @pyqtSlot(int)
+    def take_n_images_streaming(self, request: RequestNStreamImages):
+        old_state = self.system_state
+        was_running = self._running
+
+        self.stop_live_view()
+        self.update_system_state(new_state=SystemState.BUSY)
+        QCoreApplication.processEvents()
+
+        try:
+            self.backend.take_n_images_streaming(request)
+
+        except OperationCancelled:
+            log.info("[Streaming Acquisition] Cancelled by user.")
+        except Exception as e:
+            log.warning(f"[Streaming Acquisition] Failed: {e}")
+        finally:
+            self.update_system_state(new_state=old_state)
+            if was_running:
+                self.restart_live_view_when_ready()
 
     @pyqtSlot()
     def delegate_find_reflection_plane(self):

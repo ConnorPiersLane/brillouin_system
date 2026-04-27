@@ -538,10 +538,11 @@ if __name__ == "__main__":
     #   collecting NA = 0.4
     #   sample is water, n ≈ 1.33
     # ------------------------------------------------------------
+    f180 = 5.103  # GHz, just as an example
+    # f180 = 5.1
+
     na_in = 3/40
-    na_out = 0.14
-    na_in = 3/10
-    na_out = 0.42
+    na_out = 3/40
     n_sample = 1.328 #1.33 water
 
     # fill_factor = 1.0 means the incoming Gaussian roughly fills the input NA.
@@ -564,16 +565,54 @@ if __name__ == "__main__":
         fill_factor=fill_factor,
     )
 
-    print("=== Relative peak shift ===")
+    print("=== 5x ===")
     print(f"Exact   <f_B>/f180 = {ratio_exact:.8f}")
-    print(f"Approx  <f_B>/f180 = {ratio_approx:.8f}")
     print(f"Exact relative shift = {ratio_exact - 1:.8e}")
-    print(f"Approx relative shift = {ratio_approx - 1:.8e}")
 
-    # If you know the nominal backscattering Brillouin shift, give it here.
-    # Example only:
-    f180 = 5.104  # GHz, just as an example
-    # f180 = 5.1
+
+
+    result = na_shift_absolute(
+        f180=f180,
+        na_in=na_in,
+        na_out=na_out,
+        n_sample=n_sample,
+        fill_factor=fill_factor,
+        use_exact=True,
+    )
+
+    print("\n=== Absolute peak shift ===")
+    print(f"f180       = {result['f180']:.6f} GHz")
+    print(f"mean shift = {result['mean_shift']:.6f} GHz")
+    print(f"delta_f_NA = {result['delta_f_na']:.6f} GHz")
+
+    na_in = 0.3
+    na_out = 0.3
+    n_sample = 1.328 #1.33 water
+
+    # fill_factor = 1.0 means the incoming Gaussian roughly fills the input NA.
+    # Try smaller values like 0.6 to simulate underfilling.
+    fill_factor = 1.0
+
+    # Exact mean shift ratio
+    ratio_exact = mean_shift_ratio_exact(
+        na_in=na_in,
+        na_out=na_out,
+        n_sample=n_sample,
+        fill_factor=fill_factor,
+    )
+
+    # Small-angle approximation
+    ratio_approx = mean_shift_ratio_small_angle(
+        na_in=na_in,
+        na_out=na_out,
+        n_sample=n_sample,
+        fill_factor=fill_factor,
+    )
+
+    print("=== 20x ===")
+    print(f"Exact   <f_B>/f180 = {ratio_exact:.8f}")
+    print(f"Exact relative shift = {ratio_exact - 1:.8e}")
+
 
     result = na_shift_absolute(
         f180=f180,

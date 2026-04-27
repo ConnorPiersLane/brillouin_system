@@ -30,7 +30,7 @@ from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, MeasurementPoint, \
-    AxialScan
+    AxialScan, RequestNStreamImages
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
@@ -557,6 +557,104 @@ class HiBackend:
 
         return True
 
+    def take_n_images_streaming_as_scan(
+            self,
+            request: RequestNStreamImages
+    ) -> bool:
+        lens_x0 = self.zaber_eye_lens.get_position()
+        frames: list[np.ndarray] = []
+
+        n_images = request.n_measurements
+        scan_id = request.id
+
+        if n_images <= 0:
+            log.info("[Streaming Acquisition] No images requested.")
+            return False
+
+        log.info(f"[Streaming Acquisition] Starting {n_images} image(s), ID: {scan_id}")
+
+        try:
+            # -------- Acquire only --------
+            if hasattr(self.andor_camera, "streaming") and hasattr(self.andor_camera, "get_next_streaming_image"):
+                with self.andor_camera.streaming():
+                    for i in range(n_images):
+                        if self.f2b_cancel_callback():
+                            log.info(f"[Streaming Acquisition] Cancelled during frame {i + 1}.")
+                            return False
+
+                        frame = self.andor_camera.get_next_streaming_image(timeout_s=20)
+                        frames.append(frame)
+
+                        log.info(f"[Streaming Acquisition] Acquired frame {i + 1}/{n_images}")
+
+            else:
+                log.info("[Streaming Acquisition] Camera has no streaming API; falling back to snap loop.")
+
+                for i in range(n_images):
+                    if self.f2b_cancel_callback():
+                        log.info(f"[Streaming Acquisition] Cancelled during frame {i + 1}.")
+                        return False
+
+                    frame = self._get_andor_camera_snap()
+                    frames.append(frame)
+
+                    log.info(f"[Streaming Acquisition] Acquired frame {i + 1}/{n_images}")
+
+        except OperationCancelled:
+            log.info("[Streaming Acquisition] Cancelled by user.")
+            return False
+
+        except Exception as e:
+            log.warning(f"[Streaming Acquisition] Failed during acquisition: {e}")
+            return False
+
+        if not frames:
+            log.warning("[Streaming Acquisition] No images acquired.")
+            return False
+
+        # -------- Postprocess only after acquisition --------
+        log.info(f"[Streaming Acquisition] Postprocessing {len(frames)} frame(s).")
+
+        all_results: list[MeasurementPoint] = []
+
+        for i, frame in enumerate(frames):
+            if self.f2b_cancel_callback():
+                log.info(f"[Streaming Acquisition] Cancelled during postprocessing at frame {i + 1}.")
+                return False
+
+            self.display_spectrum(frame=frame)
+
+            all_results.append(
+                MeasurementPoint(
+                    frame_andor=frame,
+                    lens_zaber_position=lens_x0,
+                    time_stamp=time.perf_counter(),
+                )
+            )
+
+            log.info(f"[Streaming Acquisition] Postprocessed frame {i + 1}/{len(frames)}")
+
+        self._i_axial_scans += 1
+
+        axial_scan = AxialScan(
+            i=self._i_axial_scans,
+            id=scan_id,
+            measurements=all_results,
+            system_state=self.get_current_system_state(),
+            calibration_params=self.calibration_poly_fit_params,
+            eye_tracker_results=None,
+            reflection_result_forwards=None,
+            reflection_result_backwards=None,
+        )
+
+        self.axial_scan_dict[axial_scan.i] = axial_scan
+
+        log.info(
+            f"[Streaming Acquisition] Finished {len(all_results)}/{n_images} image(s). "
+            f"Stored as axial scan #{axial_scan.i}, ID: {scan_id}"
+        )
+
+        return True
 
     def display_spectrum(self, frame):
         if self.do_background_subtraction:
