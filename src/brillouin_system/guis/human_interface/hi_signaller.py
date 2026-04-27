@@ -494,7 +494,7 @@ class HiSignaller(QObject):
         else:
             log.warning(f"Requested scan index {index} not found.")
 
-    @pyqtSlot(int)
+    @pyqtSlot(object)
     def take_n_images_streaming(self, request: RequestNStreamImages):
         old_state = self.system_state
         was_running = self._running
@@ -504,7 +504,10 @@ class HiSignaller(QObject):
         QCoreApplication.processEvents()
 
         try:
-            self.backend.take_n_images_streaming(request)
+            success = self.backend.take_n_images_streaming_as_scan(request)
+
+            if success:
+                self.update_stored_axial_scans()
 
         except OperationCancelled:
             log.info("[Streaming Acquisition] Cancelled by user.")

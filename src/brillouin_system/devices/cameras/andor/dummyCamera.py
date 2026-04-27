@@ -239,18 +239,21 @@ class DummyCamera(BaseCamera):
         print("Ended Streaming")
 
     def get_newest_streaming_image(self):
-        """
-        only when streaming
-        Return the newest frame available (non-blocking).
-        Returns None if no *new* frame since last call.
-        """
-        if self._streaming_img_count < 100:
-            self._streaming_img_count += 1
-            return self.snap()[0]
-        else:
-            self._streaming_img_count = 0
-            return 1000 * self.snap()[0]
+        if not self._is_streaming:
+            raise RuntimeError("DummyCamera is not streaming")
 
+        return self.snap()
+
+    def get_next_streaming_image(self, timeout_s: float = 5.0) -> np.ndarray:
+        """
+        Match IxonUltra streaming API.
+        Blocks like a real exposure, then returns one full 2D frame.
+        """
+        if not self._is_streaming:
+            raise RuntimeError("DummyCamera is not streaming")
+
+        self._streaming_img_count += 1
+        return self.snap()
 
     @contextmanager
     def streaming(self):
