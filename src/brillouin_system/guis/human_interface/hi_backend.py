@@ -81,17 +81,17 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            # camera=IxonUltra(
-            #     index = 0,
-            #     temperature = "off",
-            #     fan_mode = "full",
-            #     x_start = 40, x_end  = 120,
-            #     y_start= 300, y_end  = 315,
-            #     vbin= 1, hbin  = 1,
-            #     verbose = True,
-            #     advanced_gain_option=False
-            # )
-            camera = DummyCamera()
+            camera=IxonUltra(
+                index = 0,
+                temperature = "off",
+                fan_mode = "full",
+                x_start = 40, x_end  = 120,
+                y_start= 300, y_end  = 315,
+                vbin= 1, hbin  = 1,
+                verbose = True,
+                advanced_gain_option=False
+            )
+            # camera = DummyCamera()
 
             shutter_manager=ShutterManager('human_interface')
             # shutter_manager = ShutterManager('microscope')
@@ -99,8 +99,8 @@ class HiBackend:
             # microwave = MicrowaveDummy()
             zaber_eye_lens=ZaberEyeLens()
             # zaber_eye_lens = ZaberEyeLensDummy()
-            zaber_hi=ZaberHumanInterface()
-            # zaber_hi = ZaberHumanInterfaceDummy()
+            # zaber_hi=ZaberHumanInterface()
+            zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
             ni = NI6008()
 
@@ -250,12 +250,12 @@ class HiBackend:
 
     def open_sample_shutter(self):
         self.is_shutter_open = True
-        self.shutter_manager.sample.open()
+        self.shutter_manager.objective.open()
         log.info("[BrillouinBackend] Switched to continuous illumination mode.")
 
     def close_sample_shutter(self):
         self.is_shutter_open = False
-        self.shutter_manager.sample.close()
+        self.shutter_manager.objective.close()
         log.info("[BrillouinBackend] Switched to pulsed illumination mode.")
 
     def change_system_state(self, state_mode: SystemState):
@@ -288,7 +288,9 @@ class HiBackend:
     def change_to_sample_mode(self):
         # Store current state mode of the sample for future:
         self.reference_state_mode = self.get_current_system_state()
-        self.shutter_manager.change_to_objective()
+        self.shutter_manager.reference.close()
+        if self.is_shutter_open:
+            self.shutter_manager.objective.open()
         self.change_system_state(state_mode=self.sample_state_mode)
         log.info("[BrillouinBackend] Switched to sample mode.")
 
