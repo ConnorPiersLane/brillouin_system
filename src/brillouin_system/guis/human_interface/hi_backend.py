@@ -582,14 +582,45 @@ class HiBackend:
                                                                   reference=self.calibration_config.reference,
                                                                   mode=self.calibration_config.mode)
 
+    def get_hwhm_shift(self, fitting: FittedSpectrum) -> tuple:
+        """
+
+        Args:
+            fitting:
+
+        Returns: hwhm_left_peak_ghz, hwhm_right_peak_ghz
+
+        """
+        if self.calibration_calculator is None:
+            return None, None
+        else:
+            hwhm_left_peak_ghz = float(
+                abs(
+                    self.calibration_calculator.df_left_peak(
+                        fitting.left_peak_center_px,
+                        fitting.left_peak_width_px
+                    )))
+            hwhm_right_peak_ghz = float(
+                abs(
+                    self.calibration_calculator.df_right_peak(
+                        fitting.right_peak_center_px,
+                        fitting.right_peak_width_px
+                    )))
+
+            return hwhm_left_peak_ghz, hwhm_right_peak_ghz
+
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
         if self.is_reference_mode:
             freq_shift_ghz = self.microwave.get_frequency()
+            hwhm_lp_ghz, hwhm_rp_ghz = self.get_hwhm_shift(fitting)
+
         elif fitting.is_success:
             freq_shift_ghz = self.get_freq_shift(fitting)
+            hwhm_lp_ghz, hwhm_rp_ghz = self.get_hwhm_shift(fitting)
         else:
             freq_shift_ghz = None
+            hwhm_lp_ghz, hwhm_rp_ghz = None, None
 
         if fitting.is_success:
             return DisplayResults(
@@ -602,6 +633,8 @@ class HiBackend:
                 y_fit_refined=fitting.y_fit_refined,
                 inter_peak_distance=fitting.inter_peak_distance,
                 freq_shift_ghz=freq_shift_ghz,
+                hwhm_left_peak=hwhm_lp_ghz,
+                hwhm_right_peak=hwhm_rp_ghz,
             )
         else:
             return DisplayResults(

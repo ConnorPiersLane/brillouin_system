@@ -14,3 +14,5 @@ class DisplayResults:
     y_fit_refined: np.ndarray = field(default=None)
     inter_peak_distance: float = None
     freq_shift_ghz: float = None
+    hwhm_left_peak: float | None = None
+    hwhm_right_peak: float | None = None

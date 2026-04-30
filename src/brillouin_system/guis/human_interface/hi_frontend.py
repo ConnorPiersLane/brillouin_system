@@ -833,6 +833,16 @@ class HiFrontend(QWidget):
         group.setLayout(layout)
         return group
 
+
+    def _fmt_plot_val(self, value, unit="GHz"):
+        try:
+            value = float(value)
+            if np.isfinite(value):
+                return f"{value:.3f} {unit}"
+        except Exception:
+            pass
+        return "—"
+
     # --- inside HiFrontend ---
     def create_andor_display_group(self):
         # White theme + fast options
@@ -875,14 +885,12 @@ class HiFrontend(QWidget):
         self.spec_plot.getViewBox().setBorder((170, 170, 170))
         self.spec_vb.userScaled.connect(self._on_spec_user_scaled)
 
-        # Fit: red dashed line (no symbols)
         self.fit_curve = pg.PlotDataItem(
             pen=pg.mkPen('r', width=1.5, style=QtCore.Qt.DashLine)
         )
         self.fit_curve.setZValue(0)
         self.spec_plot.addItem(self.fit_curve)
 
-        # All measurement samples: black dots (no connecting line)
         self.spec_points = pg.PlotDataItem(
             pen=None,
             symbol='o',
@@ -893,7 +901,6 @@ class HiFrontend(QWidget):
         self.spec_points.setZValue(1)
         self.spec_plot.addItem(self.spec_points)
 
-        # Points used for fitting: red dots overlay
         self.mask_points = pg.PlotDataItem(
             pen=None,
             symbol='o',
@@ -903,6 +910,15 @@ class HiFrontend(QWidget):
         )
         self.mask_points.setZValue(2)
         self.spec_plot.addItem(self.mask_points)
+
+        # Important: ignoreBounds=True prevents this overlay from changing plot autoscale
+        self.live_fit_text = pg.TextItem(
+            text="",
+            color=(0, 0, 0),
+            anchor=(1, 0)
+        )
+        self.live_fit_text.setZValue(10)
+        self.spec_plot.addItem(self.live_fit_text, ignoreBounds=True)
 
         # -------- Row 3: History --------
         self.glw.nextRow()
@@ -924,10 +940,9 @@ class HiFrontend(QWidget):
         self._spec_init_done = False
         self._spec_user_zoomed = False
         self._hist_user_zoomed = False
-        self.HIST_WINDOW = 200  # trailing window size for scrolling
+        self.HIST_WINDOW = 200
 
         return group
-
     # --- inside HiFrontend ---
     def _on_spec_user_scaled(self):
         self._spec_user_zoomed = True
@@ -1293,6 +1308,30 @@ class HiFrontend(QWidget):
             self.fit_curve.setData(xf, yf)
         else:
             self.fit_curve.setData([], [])
+
+        # -------- Live fit values drawn on Spectrum + Fit plot --------
+        if getattr(dr, "is_fitting_available", False):
+            freq_shift = getattr(dr, "freq_shift_ghz", None)
+            left_hwhm = getattr(dr, "hwhm_left_peak", None)
+            right_hwhm = getattr(dr, "hwhm_right_peak", None)
+
+            self.live_fit_text.setText(
+                "Freq shift: {}\nLeft HWHM: {}\nRight HWHM: {}".format(
+                    self._fmt_plot_val(freq_shift),
+                    self._fmt_plot_val(left_hwhm),
+                    self._fmt_plot_val(right_hwhm),
+                )
+            )
+            self.live_fit_text.setVisible(True)
+
+            # Keep text in upper-right corner of current view
+            vb = self.spec_plot.getViewBox()
+            (x_min, x_max), (y_min, y_max) = vb.viewRange()
+            self.live_fit_text.setPos(x_max, y_max)
+
+        else:
+            self.live_fit_text.setText("")
+            self.live_fit_text.setVisible(False)
 
         mask = getattr(dr, "mask_for_fitting", None)
         if mask is not None and x.size and y.size:
