@@ -85,7 +85,7 @@ if __name__ == "__main__":
     result_5x = absolute_shift_collection_only_gaussian(
         f180=f180,
         beam_diameter_out=7.5,      # mm, Gaussian collection mode at pupil
-        pupil_diameter_out=9.0,     # mm, clipped collection aperture mapped to pupil
+        pupil_diameter_out=7.5,     # mm, clipped collection aperture mapped to pupil
         focal_length_out=40.0,      # mm
         n_sample=n_sample,
     )
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     result_20x = absolute_shift_collection_only_gaussian(
         f180=f180,
         beam_diameter_out=7.5,      # mm, Gaussian collection mode at pupil
-        pupil_diameter_out=8.4,     # mm, objective pupil / collection aperture
+        pupil_diameter_out=7.5,     # mm, objective pupil / collection aperture
         focal_length_out=10.0,      # mm
         n_sample=n_sample,
     )
