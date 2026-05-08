@@ -7,11 +7,13 @@ import numpy as np
 
 from tifffile import imwrite
 
+
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QVBoxLayout,
     QHBoxLayout, QSpinBox, QGroupBox, QPushButton, QMessageBox, QFileDialog
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from scipy.stats import norm
 
@@ -92,7 +94,11 @@ class AxialScanViewer(QWidget):
         layout.addWidget(self.info_label)
 
         layout.addWidget(self.setup_plot_area())
-        layout.addLayout(self.setup_navigation())
+
+        controls = QVBoxLayout()
+        controls.addLayout(self.setup_navigation())
+        controls.addLayout(self.setup_second_row_controls())
+        layout.addLayout(controls)
 
     def setup_plot_area(self) -> QGroupBox:
         group = QGroupBox("Axial Scan Data")
@@ -146,6 +152,15 @@ class AxialScanViewer(QWidget):
         nav_layout.addStretch()
         return nav_layout
 
+    def setup_second_row_controls(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+
+        self.show_cal_plot_btn = QPushButton("Show Calibration Plot")
+        self.show_cal_plot_btn.clicked.connect(self.on_show_calibration_plot)
+        row.addWidget(self.show_cal_plot_btn)
+
+        row.addStretch()
+        return row
     # ---------------- Plotting ----------------
 
     def update_display(self):
@@ -488,3 +503,159 @@ class AxialScanViewer(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed:\n{e}")
+
+    def on_show_calibration_plot(self):
+        """
+        Show calibration plot for current reference:
+          reference == "left"     -> left peak px vs GHz
+          reference == "right"    -> right peak px vs GHz
+          reference == "distance" -> inter-peak distance px vs GHz
+
+        Also plots:
+          - corresponding interpolation/reference points
+          - corresponding polynomial fit model
+          - current fitted peak pixel value
+        """
+        try:
+            ref = calibration_config.get().reference
+            p = self.calc.p
+
+            fit: FittedSpectrum = self.list_analyzed_spectras[
+                self.current_index
+            ].fitted_spectrum
+
+            if ref == "left":
+                px_points = p.left_px_points
+                freq_points = p.left_freq_points
+                poly_coeffs = p.freq_left_peak
+                current_px = fit.left_peak_center_px
+                title = "Calibration Plot - Left Peak"
+                xlabel = "Left peak center px"
+
+            elif ref == "right":
+                px_points = p.right_px_points
+                freq_points = p.right_freq_points
+                poly_coeffs = p.freq_right_peak
+                current_px = fit.right_peak_center_px
+                title = "Calibration Plot - Right Peak"
+                xlabel = "Right peak center px"
+
+            elif ref == "distance":
+                px_points = p.dist_px_points
+                freq_points = p.dist_freq_points
+                poly_coeffs = p.freq_peak_distance
+                current_px = fit.inter_peak_distance
+                title = "Calibration Plot - Peak Distance"
+                xlabel = "Inter-peak distance px"
+
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Unknown Reference",
+                    f"Unknown calibration reference: {ref}"
+                )
+                return
+
+            if px_points is None or freq_points is None:
+                QMessageBox.warning(
+                    self,
+                    "No Calibration Points",
+                    f"No interpolation/reference points found for reference '{ref}'."
+                )
+                return
+
+            px_points = np.asarray(px_points, dtype=float)
+            freq_points = np.asarray(freq_points, dtype=float)
+
+            valid = np.isfinite(px_points) & np.isfinite(freq_points)
+            px_points = px_points[valid]
+            freq_points = freq_points[valid]
+
+            if px_points.size == 0:
+                QMessageBox.warning(
+                    self,
+                    "No Valid Calibration Points",
+                    f"No valid calibration points found for reference '{ref}'."
+                )
+                return
+
+            fig = Figure(figsize=(7, 5))
+            ax = fig.add_subplot(111)
+
+            # Calibration reference / interpolation points
+            ax.plot(
+                px_points,
+                freq_points,
+                "ko",
+                label="Calibration reference points"
+            )
+
+            # Fitted polynomial model
+            if poly_coeffs is not None and np.all(np.isfinite(poly_coeffs)):
+                x_min = float(np.min(px_points))
+                x_max = float(np.max(px_points))
+
+                if current_px is not None and np.isfinite(current_px):
+                    x_min = min(x_min, float(current_px))
+                    x_max = max(x_max, float(current_px))
+
+                x_fit = np.linspace(x_min, x_max, 300)
+                y_fit = np.polyval(poly_coeffs, x_fit)
+
+                ax.plot(
+                    x_fit,
+                    y_fit,
+                    "r--",
+                    label=f"Polynomial fit, degree={len(poly_coeffs) - 1}"
+                )
+
+            # Current fitted peak pixel value
+            if fit.is_success and current_px is not None and np.isfinite(current_px):
+                if ref == "left":
+                    current_freq = self.calc.compute_freq_shift(fit, "left", self.fitting_mode)
+                elif ref == "right":
+                    current_freq = self.calc.compute_freq_shift(fit, "right", self.fitting_mode)
+                else:
+                    current_freq = self.calc.compute_freq_shift(fit, "distance", self.fitting_mode)
+
+                if current_freq is not None and np.isfinite(current_freq):
+                    ax.axvline(
+                        current_px,
+                        color="b",
+                        linestyle=":",
+                        label=f"Current fitted px = {current_px:.2f}"
+                    )
+                    ax.plot(
+                        current_px,
+                        current_freq,
+                        "bo",
+                        markersize=9,
+                        label=f"Current freq = {current_freq:.4f} GHz"
+                    )
+
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Frequency shift / microwave freq (GHz)")
+            ax.grid(True)
+            ax.legend()
+
+            cal_window = QWidget()
+            cal_window.setWindowTitle(title)
+            canvas = FigureCanvas(fig)
+            toolbar = NavigationToolbar(canvas, cal_window)
+
+            layout = QVBoxLayout(cal_window)
+            layout.addWidget(toolbar)
+            layout.addWidget(canvas)
+            cal_window.setLayout(layout)
+            cal_window.resize(750, 550)
+            cal_window.show()
+
+            self.open_hist_windows.append(cal_window)
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to show calibration plot:\n{e}"
+            )
