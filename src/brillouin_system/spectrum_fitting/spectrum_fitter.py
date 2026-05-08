@@ -17,16 +17,19 @@ from brillouin_system.spectrum_fitting.fit_util import (
     refine_fitted_spectrum,
 )
 
+from brillouin_system.spectrum_fitting.voigt_model import (
+    _1voigt_binned,
+    _2voigt_binned,
+)
 
-# === Fitting model functions ===
 
 def _lorentzian_pixel_integrated(x, amp, cen, wid):
     x = np.asarray(x, dtype=float)
     left = x - 0.5
     right = x + 0.5
     return amp * wid * (
-        np.arctan((right - cen) / wid) -
-        np.arctan((left - cen) / wid)
+        np.arctan((right - cen) / wid)
+        - np.arctan((left - cen) / wid)
     )
 
 
@@ -36,9 +39,9 @@ def _1lorentzian_binned(x, amp, cen, wid, offset):
 
 def _2lorentzian_binned(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
     return (
-        _lorentzian_pixel_integrated(x, amp1, cen1, wid1) +
-        _lorentzian_pixel_integrated(x, amp2, cen2, wid2) +
-        offset
+        _lorentzian_pixel_integrated(x, amp1, cen1, wid1)
+        + _lorentzian_pixel_integrated(x, amp2, cen2, wid2)
+        + offset
     )
 
 
@@ -69,16 +72,6 @@ class SpectrumFitter:
         self.reference_config = reference_config
 
     def get_px_sline_from_image(self, frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Sum the specified vertical rows in the image to produce the Brillouin sline.
-        If the row list is invalid or empty, use the full vertical range.
-
-        Parameters:
-            frame (np.ndarray): 2D image from the camera
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: Pixel axis and summed/cropped spectrum.
-        """
         left_offset = self.sline_config.pixel_offset_left
         right_offset = self.sline_config.pixel_offset_right
 
@@ -109,28 +102,24 @@ class SpectrumFitter:
         )
 
     def get_total_sline_value(self, sline) -> float:
-        """
-        Return the total integrated intensity of the sline.
-
-        Parameters:
-            sline (np.ndarray): 1D spectrum intensity array
-
-        Returns:
-            float: Total summed intensity
-        """
         if sline is None:
             return 0.0
-
         return float(np.sum(sline))
 
     def fit(self, px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
         config = self.reference_config if is_reference_mode else self.sample_config
         requested_model = config.fitting_model
 
-        if requested_model not in ("lorentzian", "lorentzian_window"):
+        if requested_model not in (
+            "lorentzian",
+            "lorentzian_window",
+            "voigt",
+            "voigt_window",
+        ):
             raise ValueError(
                 f"Unknown model: '{requested_model}'. "
-                f"Supported models are 'lorentzian' and 'lorentzian_window'."
+                f"Supported models are 'lorentzian', 'lorentzian_window', "
+                f"'voigt', and 'voigt_window'."
             )
 
         sline = np.clip(sline, 0, None)
@@ -141,7 +130,7 @@ class SpectrumFitter:
                 is_success=False,
                 sline=sline,
                 x_pixels=px,
-                model=requested_model
+                model=requested_model,
             )
 
         pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
@@ -153,7 +142,7 @@ class SpectrumFitter:
                 is_success=False,
                 sline=sline,
                 x_pixels=px,
-                model=requested_model
+                model=requested_model,
             )
 
         x_min = float(np.min(px))
@@ -162,30 +151,69 @@ class SpectrumFitter:
         offset = float(np.amin(sline))
 
         if n_peaks == 1:
-            fit_kind = "1lorentzian"
-            if requested_model == "lorentzian_window":
-                fit_kind = "1lorentzian_window"
+            if requested_model in ("lorentzian", "lorentzian_window"):
+                fit_kind = "1lorentzian"
+                if requested_model == "lorentzian_window":
+                    fit_kind = "1lorentzian_window"
 
-            p0 = [amp[0], cen[0], wid[0], offset]
-            bounds = (
-                [0, x_min, 1e-12, 0],
-                [np.inf, x_max, x_span / 2, np.inf]
-            )
-            model_func = _1lorentzian_binned
+                p0 = [amp[0], cen[0], wid[0], offset]
+                bounds = (
+                    [0, x_min, 1e-12, 0],
+                    [np.inf, x_max, x_span / 2, np.inf],
+                )
+                model_func = _1lorentzian_binned
+
+            elif requested_model in ("voigt", "voigt_window"):
+                fit_kind = "1voigt"
+                if requested_model == "voigt_window":
+                    fit_kind = "1voigt_window"
+
+                p0 = [amp[0], cen[0], wid[0], 0.25, offset]
+                bounds = (
+                    [0, x_min, 0.03, 0.0, -np.inf],
+                    [np.inf, x_max, x_span / 2, 5.0, np.inf],
+                )
+                model_func = _1voigt_binned
 
         else:
-            fit_kind = "2lorentzian"
-            if requested_model == "lorentzian_window":
-                fit_kind = "2lorentzian_window"
+            if requested_model in ("lorentzian", "lorentzian_window"):
+                fit_kind = "2lorentzian"
+                if requested_model == "lorentzian_window":
+                    fit_kind = "2lorentzian_window"
 
-            p0 = [amp[0], cen[0], wid[0], amp[1], cen[1], wid[1], offset]
-            bounds = (
-                [0, x_min, 1e-12, 0, x_min, 1e-12, 0],
-                [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf]
-            )
-            model_func = _2lorentzian_binned
+                p0 = [amp[0], cen[0], wid[0], amp[1], cen[1], wid[1], offset]
+                bounds = (
+                    [0, x_min, 1e-12, 0, x_min, 1e-12, 0],
+                    [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf],
+                )
+                model_func = _2lorentzian_binned
 
-        if requested_model == "lorentzian_window":
+            elif requested_model in ("voigt", "voigt_window"):
+                fit_kind = "2voigt"
+                if requested_model == "voigt_window":
+                    fit_kind = "2voigt_window"
+
+                p0 = [
+                    amp[0], cen[0], wid[0], 0.25,
+                    amp[1], cen[1], wid[1], 0.25,
+                    offset,
+                ]
+
+                bounds = (
+                    [
+                        0, x_min, 0.03, 0.0,
+                        0, x_min, 0.03, 0.0,
+                        -np.inf,
+                    ],
+                    [
+                        np.inf, x_max, x_span / 2, 5.0,
+                        np.inf, x_max, x_span / 2, 5.0,
+                        np.inf,
+                    ],
+                )
+                model_func = _2voigt_binned
+
+        if requested_model in ("lorentzian_window", "voigt_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
 
             mask = self._build_window_mask(px, cen, wid, beta=beta)
@@ -197,20 +225,45 @@ class SpectrumFitter:
 
             if n_peaks == 1:
                 lo[1], hi[1] = center_ranges[0]
-                lo[2] = max(1e-6, 0.25 * float(wid[0]))
-                hi[2] = max(lo[2] * 2, 4.0 * float(wid[0]))
+
+                if requested_model == "lorentzian_window":
+                    lo[2] = max(1e-6, 0.25 * float(wid[0]))
+                    hi[2] = max(lo[2] * 2, 4.0 * float(wid[0]))
+
+                elif requested_model == "voigt_window":
+                    lo[2] = max(0.03, 0.25 * float(wid[0]))
+                    hi[2] = max(lo[2] * 2, 4.0 * float(wid[0]))
+                    lo[3] = 0.0
+                    hi[3] = 5.0
+
             else:
                 lo[1], hi[1] = center_ranges[0]
-                lo[4], hi[4] = center_ranges[1]
 
-                lo[2] = max(1e-6, 0.25 * float(wid[0]))
-                hi[2] = max(lo[2] * 2, 4.0 * float(wid[0]))
+                if requested_model == "lorentzian_window":
+                    lo[4], hi[4] = center_ranges[1]
 
-                lo[5] = max(1e-6, 0.25 * float(wid[1]))
-                hi[5] = max(lo[5] * 2, 4.0 * float(wid[1]))
+                    lo[2] = max(1e-6, 0.25 * float(wid[0]))
+                    hi[2] = max(lo[2] * 2, 4.0 * float(wid[0]))
+
+                    lo[5] = max(1e-6, 0.25 * float(wid[1]))
+                    hi[5] = max(lo[5] * 2, 4.0 * float(wid[1]))
+
+                elif requested_model == "voigt_window":
+                    lo[5], hi[5] = center_ranges[1]
+
+                    lo[2] = max(0.03, 0.25 * float(wid[0]))
+                    hi[2] = max(lo[2] * 2, 4.0 * float(wid[0]))
+                    lo[3] = 0.0
+                    hi[3] = 5.0
+
+                    lo[6] = max(0.03, 0.25 * float(wid[1]))
+                    hi[6] = max(lo[6] * 2, 4.0 * float(wid[1]))
+                    lo[7] = 0.0
+                    hi[7] = 5.0
 
             bounds = (lo, hi)
             mask_used = mask
+
         else:
             px_fit = px
             sline_fit = sline
@@ -223,11 +276,20 @@ class SpectrumFitter:
                 sline_fit,
                 p0=p0,
                 bounds=bounds,
-                maxfev=10000
+                maxfev=50000,
             )
 
             if n_peaks == 2:
-                popt[:7] = sort_peaks(popt[:7])
+                if requested_model in ("lorentzian", "lorentzian_window"):
+                    popt[:7] = sort_peaks(popt[:7])
+
+                elif requested_model in ("voigt", "voigt_window"):
+                    if popt[5] < popt[1]:
+                        popt = np.array([
+                            popt[4], popt[5], popt[6], popt[7],
+                            popt[0], popt[1], popt[2], popt[3],
+                            popt[8],
+                        ])
 
         except Exception as e:
             print(f"[SpectrumFitter] Fit failed: {e}")
@@ -235,7 +297,7 @@ class SpectrumFitter:
                 is_success=False,
                 sline=sline,
                 x_pixels=px,
-                model=fit_kind
+                model=fit_kind,
             )
 
         return self._build_result(
@@ -248,12 +310,6 @@ class SpectrumFitter:
         )
 
     def _extract_peak_params(self, pk_ind, pk_info, px, sline):
-        """
-        Extract amplitudes, centers, and widths for the detected peaks.
-
-        Returns exactly the peaks that were detected, up to two.
-        No synthetic second peak is created.
-        """
         pk_ind = np.asarray(pk_ind, dtype=int)
 
         if len(pk_ind) < 1:
@@ -265,8 +321,8 @@ class SpectrumFitter:
         if "left_ips" in pk_info and "right_ips" in pk_info:
             idx_axis = np.arange(len(px), dtype=float)
             centers_idx = 0.5 * (
-                np.asarray(pk_info["left_ips"], dtype=float) +
-                np.asarray(pk_info["right_ips"], dtype=float)
+                np.asarray(pk_info["left_ips"], dtype=float)
+                + np.asarray(pk_info["right_ips"], dtype=float)
             )
             centers = np.interp(centers_idx, idx_axis, px)
         else:
@@ -320,6 +376,56 @@ class SpectrumFitter:
                 left_peak_amplitude=float(amp1),
                 right_peak_center_px=float(cen2),
                 right_peak_width_px=float(wid2),
+                right_peak_amplitude=float(amp2),
+                inter_peak_distance=abs(cen2 - cen1),
+                offset=float(offset),
+            )
+
+        if len(popt) == 5:
+            amp, cen, gamma, sigma_psf, offset = popt
+
+            return FittedSpectrum(
+                is_success=True,
+                model=model,
+                sline=sline,
+                x_pixels=px,
+                fitted_spectrum=fitted,
+                x_fit_refined=x_fit,
+                y_fit_refined=y_fit,
+                mask_for_fitting=mask,
+                parameters=popt,
+                left_peak_center_px=float(cen),
+                left_peak_width_px=float(gamma),
+                left_peak_amplitude=float(amp / 2.0),
+                right_peak_center_px=float(cen),
+                right_peak_width_px=float(gamma),
+                right_peak_amplitude=float(amp / 2.0),
+                inter_peak_distance=0.0,
+                offset=float(offset),
+            )
+
+        if len(popt) == 9:
+            (
+                amp1, cen1, gamma1, sigma_psf1,
+                amp2, cen2, gamma2, sigma_psf2,
+                offset,
+            ) = popt
+
+            return FittedSpectrum(
+                is_success=True,
+                model=model,
+                sline=sline,
+                x_pixels=px,
+                fitted_spectrum=fitted,
+                x_fit_refined=x_fit,
+                y_fit_refined=y_fit,
+                mask_for_fitting=mask,
+                parameters=popt,
+                left_peak_center_px=float(cen1),
+                left_peak_width_px=float(gamma1),
+                left_peak_amplitude=float(amp1),
+                right_peak_center_px=float(cen2),
+                right_peak_width_px=float(gamma2),
                 right_peak_amplitude=float(amp2),
                 inter_peak_distance=abs(cen2 - cen1),
                 offset=float(offset),
