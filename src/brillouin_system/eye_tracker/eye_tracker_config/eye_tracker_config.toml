@@ -2,7 +2,7 @@
 binary_threshold_left = 70
 binary_threshold_right = 70
 fill_n_vetical_dark_pixels_left = 5
-fill_n_vetical_dark_pixels_right = 5
+fill_n_vetical_dark_pixels_right = 15
 masking_radius_left = 200
 masking_radius_right = 200
 masking_center_left = [
@@ -10,8 +10,8 @@ masking_center_left = [
     0,
 ]
 masking_center_right = [
-    0,
-    0,
+    -50,
+    -50,
 ]
 do_ellipse_fitting = true
 overlay_ellipse = true

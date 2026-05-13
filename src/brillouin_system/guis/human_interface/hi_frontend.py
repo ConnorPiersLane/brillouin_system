@@ -65,10 +65,11 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = False
 # Eye Tracking
-include_eye_tracking = False
+include_eye_tracking = True
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
+
 class NotifyingViewBox(pg.ViewBox):
     userScaled = QtCore.pyqtSignal()
     def wheelEvent(self, ev, axis=None):

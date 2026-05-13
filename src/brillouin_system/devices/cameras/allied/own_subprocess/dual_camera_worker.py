@@ -51,6 +51,7 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
                     left_cfg  = allied_config["left"].get()
                     right_cfg = allied_config["right"].get()
                     cams.set_configs(left_cfg, right_cfg)
+                    cams.start_dual_cam_stream()
 
                     # 2) Query actual accepted shapes
                     shape_left  = _shape_from_roi(cams.left,  left_cfg)

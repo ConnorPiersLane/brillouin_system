@@ -144,8 +144,8 @@ class DualAlliedVisionCameras(BaseDualCameras):
         # Use software-trigger snap mode by default
         self._setup_snap_mode()
 
-        # Start streaming now; queues will hold latest frames
-        self.start_dual_cam_stream()
+        # # Start streaming now; queues will hold latest frames
+        # self.start_dual_cam_stream()
 
     def _set_transport(self, cam, mbps_per_cam: float, delay_ticks: int | None):
         # Bytes per second cap: AlliedVisionCamera.init uses bytes/s features
@@ -194,16 +194,26 @@ class DualAlliedVisionCameras(BaseDualCameras):
         # t1 = threading.Thread(target=lambda: self.left.camera.get_feature_by_name("TriggerSoftware").run())
         # t2 = threading.Thread(target=lambda: self.right.camera.get_feature_by_name("TriggerSoftware").run())
         # t1.start(); t2.start(); t1.join(); t2.join()
+        try:
+            self.left.camera.get_feature_by_name("TriggerSoftware").run()
+            self.right.camera.get_feature_by_name("TriggerSoftware").run()
+        except VimbaFeatureError:
+            self._setup_snap_mode()
+            self.left.camera.get_feature_by_name("TriggerSoftware").run()
+            self.right.camera.get_feature_by_name("TriggerSoftware").run()
 
-        self.left.camera.get_feature_by_name("TriggerSoftware").run()
-        self.right.camera.get_feature_by_name("TriggerSoftware").run()
 
     def start_dual_cam_stream(self):
-        """Start streaming once and keep queues ready."""
+        if self._is_streaming:
+            return
+
+        self._setup_snap_mode()
         self.left.camera.start_streaming(_handler0, buffer_count=40)
         self.right.camera.start_streaming(_handler1, buffer_count=40)
-        time.sleep(2)  # Let the queues settle
+        self.left.streaming = True
+        self.right.streaming = True
         self._is_streaming = True
+
 
 
     def stop_stream(self):
@@ -215,7 +225,8 @@ class DualAlliedVisionCameras(BaseDualCameras):
                 print(f"[DualCamera] ignoring {name} stop error during shutdown: {e}")
             except Exception as e:
                 print(f"[DualCamera] unexpected {name} stop error: {e}")
-
+        self.left.streaming = False
+        self.right.streaming = False
         self._is_streaming = False
 
     def snap_once(self, timeout: float = 5.0):
