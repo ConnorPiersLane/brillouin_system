@@ -3,7 +3,7 @@ from scipy.optimize import curve_fit
 from scipy.special import voigt_profile
 
 
-def _voigt_pixel_integrated(x, amp, cen, gamma, sigma_psf, oversample=25):
+def _voigt_pixel_integrated(x, amp, cen, gamma, sigma_psf, oversample=100):
     """
     Pixel-integrated Voigt model.
 
@@ -19,7 +19,7 @@ def _voigt_pixel_integrated(x, amp, cen, gamma, sigma_psf, oversample=25):
 
     y = voigt_profile(xx - cen, sigma_psf, gamma)
 
-    return amp * np.trapz(y, u, axis=1)
+    return amp * np.trapezoid(y, u, axis=1)
 
 
 def _1voigt_binned(x, amp, cen, gamma, sigma_psf, offset):

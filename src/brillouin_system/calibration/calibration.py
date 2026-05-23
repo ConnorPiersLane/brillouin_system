@@ -298,14 +298,14 @@ def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParamet
 
     for freq_block in data.measured_freqs:
         for point in freq_block.cali_meas_points:
-            if point.fitting_results.is_success:
-                all_fits.append(point.fitting_results)
-                freqs_all.append(point.microwave_freq)
-            # px, sline = sf.get_px_sline_from_image(point.frame)
-            # fs = sf.fit(px, sline, is_reference_mode=True)
-            # if fs.is_success:
-            #     all_fits.append(fs)
+            # if point.fitting_results.is_success:
+            #     all_fits.append(point.fitting_results)
             #     freqs_all.append(point.microwave_freq)
+            px, sline = sf.get_px_sline_from_image(point.frame)
+            fs = sf.fit(px, sline, is_reference_mode=True)
+            if fs.is_success:
+                all_fits.append(fs)
+                freqs_all.append(point.microwave_freq)
 
     if not all_fits:
         raise ValueError("No successful fits found in calibration data.")
@@ -328,24 +328,16 @@ def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParamet
     distance_peaks_mean = []
     freqs_mean = []
 
-    for freq_block in data.measured_freqs:
-        left = []
-        right = []
-        dist = []
+    fits_by_freq = {}
 
-        for point in freq_block.cali_meas_points:
-            if point.fitting_results.is_success:
-                left.append(point.fitting_results.left_peak_center_px)
-                right.append(point.fitting_results.right_peak_center_px)
-                dist.append(point.fitting_results.inter_peak_distance)
+    for fs, freq in zip(all_fits, freqs_all):
+        fits_by_freq.setdefault(freq, []).append(fs)
 
-        if len(left) == 0:
-            continue
-
-        freqs_mean.append(freq_block.set_freq_ghz)
-        left_peaks_mean.append(np.mean(left))
-        right_peaks_mean.append(np.mean(right))
-        distance_peaks_mean.append(np.mean(dist))
+    for freq, fits in fits_by_freq.items():
+        freqs_mean.append(freq)
+        left_peaks_mean.append(np.mean([fs.left_peak_center_px for fs in fits]))
+        right_peaks_mean.append(np.mean([fs.right_peak_center_px for fs in fits]))
+        distance_peaks_mean.append(np.mean([fs.inter_peak_distance for fs in fits]))
 
     left_px_sorted, left_freq_sorted = sort_xy(np.asarray(left_peaks_mean), np.asarray(freqs_mean))
     right_px_sorted, right_freq_sorted = sort_xy(np.asarray(right_peaks_mean), np.asarray(freqs_mean))
