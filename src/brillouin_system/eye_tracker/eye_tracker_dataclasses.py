@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,20 +14,11 @@ class EyeTrackerSettings:
     stereo_calibration: StereoCalibration
 
 
-@dataclass
-class EyeTrackerRawData:
-    timestamp: float
-    left_img_original: np.ndarray
-    right_img_original: np.ndarray
-    pupil3D: Pupil3D | None
-
-@dataclass
-class EyeTrackerResultsForDiskSave:
-    settings: EyeTrackerSettings
-    rawdata: list[EyeTrackerRawData]
 
 @dataclass
 class EyeTrackerResultsForGui:
     pupil3D: Pupil3D | None
     cam_left_img: np.ndarray
     cam_right_img: np.ndarray
+
+

@@ -73,7 +73,7 @@ class IxonUltra(BaseCamera):
                  x_start: int = 1, x_end: int = 512,
                  y_start: int = 1, y_end: int = 512,
                  vbin: int = 1, hbin: int = 1,
-                 exposure_time = 0.21,
+                 exposure_time = 0.1,
                  gain: int = 0,
                  advanced_gain_option: bool = False,
                  fixed_amp_mode_index: int=18,

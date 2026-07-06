@@ -18,6 +18,9 @@ from brillouin_system.devices.shutter_device import ShutterManager, ShutterManag
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens_dummy import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset, \
+    CalibRigLaserPosition
+
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
@@ -32,7 +35,6 @@ from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
@@ -79,25 +81,32 @@ class HiBackend:
             ni = NIDummy()
 
         else:
-            # camera=IxonUltra(
-            #     index = 0,
-            #     temperature = "off",
-            #     fan_mode = "full",
-            #     x_start = 40, x_end  = 120,
-            #     y_start= 300, y_end  = 315,
-            #     vbin= 1, hbin  = 1,
-            #     verbose = True,
-            #     advanced_gain_option=False
-            # )
-            camera = DummyCamera()
+            try:
+                camera=IxonUltra(
+                    index = 0,
+                    temperature = "off",
+                    fan_mode = "full",
+                    x_start = 40, x_end  = 120,
+                    y_start= 300, y_end  = 315,
+                    vbin= 1, hbin  = 1,
+                    verbose = True,
+                    advanced_gain_option=False
+                )
+                # camera = DummyCamera()
+            except:
+                raise print("Camera not connected")
 
             shutter_manager=ShutterManager('human_interface')
-            # microwave=Microwave()
-            microwave = MicrowaveDummy()
+            # shutter_manager = ShutterManager('microscope')
+            try:
+                microwave=Microwave()
+                # microwave = MicrowaveDummy()
+            except:
+                raise print("Microwave not connected")
             zaber_eye_lens=ZaberEyeLens()
             # zaber_eye_lens = ZaberEyeLensDummy()
-            # zaber_hi=ZaberHumanInterface()
-            zaber_hi = ZaberHumanInterfaceDummy()
+            zaber_hi=ZaberHumanInterface()
+            # zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
             ni = NI6008()
 
@@ -108,7 +117,6 @@ class HiBackend:
         self._axial_scan_config: ScanningConfig = axial_scanning_config.get()
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
-
 
         self.microwave: Microwave | MicrowaveDummy = microwave
 
@@ -130,6 +138,7 @@ class HiBackend:
         self.calibration_data: CalibrationData | None = None
         self.calibration_poly_fit_params: CalibrationPolyfitParameters | None = None
         self.calibration_calculator: CalibrationCalculator | None = None
+        self.calibration_config: CalibrationConfig = calibration_config.get()
 
         # Background (BG) Image and dark_image for the sample
         self.bg_image: ImageStatistics | None = None
@@ -201,7 +210,8 @@ class HiBackend:
             andor_camera_info=self.andor_camera.get_camera_info_dataclass()
         )
 
-
+    def update_calibration_config(self, config: CalibrationConfig):
+        self.calibration_config = config
 
     def init_f2b_signals(self, cancel_callback: Callable[[], bool]):
         self.f2b_cancel_callback = cancel_callback
@@ -242,14 +252,16 @@ class HiBackend:
 
     # ---------------- Change Modes ----------------
 
+
+
     def open_sample_shutter(self):
         self.is_shutter_open = True
-        self.shutter_manager.sample.open()
+        self.shutter_manager.objective.open()
         log.info("[BrillouinBackend] Switched to continuous illumination mode.")
 
     def close_sample_shutter(self):
         self.is_shutter_open = False
-        self.shutter_manager.sample.close()
+        self.shutter_manager.objective.close()
         log.info("[BrillouinBackend] Switched to pulsed illumination mode.")
 
     def change_system_state(self, state_mode: SystemState):
@@ -282,7 +294,9 @@ class HiBackend:
     def change_to_sample_mode(self):
         # Store current state mode of the sample for future:
         self.reference_state_mode = self.get_current_system_state()
-        self.shutter_manager.change_to_objective()
+        self.shutter_manager.reference.close()
+        if self.is_shutter_open:
+            self.shutter_manager.objective.open()
         self.change_system_state(state_mode=self.sample_state_mode)
         log.info("[BrillouinBackend] Switched to sample mode.")
 
@@ -453,8 +467,10 @@ class HiBackend:
             self.calibration_poly_fit_params = None
             self.calibration_calculator = None
         else:
-            self.calibration_poly_fit_params = calibrate(data=self.calibration_data)
-            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(parameters=self.calibration_poly_fit_params)
+            self.calibration_poly_fit_params = calibrate(data=self.calibration_data,
+                                                         poyfit_degree=self.calibration_config.degree)
+            self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(
+                parameters=self.calibration_poly_fit_params)
 
 
 
@@ -526,12 +542,9 @@ class HiBackend:
                 )
 
 
-
         if request_axial_scan.find_reflection_plane:
             reflection_result_backwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=False)
 
-        if request_axial_scan.find_reflection_plane:
-            reflection_result_backwards: ReflectionResult = self.find_reflection_plane(is_go_forwards=False)
 
         # Move lens back to original position
         self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
@@ -573,16 +586,49 @@ class HiBackend:
         if self.calibration_calculator is None:
             return None
         else:
-            return self.calibration_calculator.compute_freq_shift(fitting=fitting)
+            return self.calibration_calculator.compute_freq_shift(fitting=fitting,
+                                                                  reference=self.calibration_config.reference,
+                                                                  mode=self.calibration_config.mode)
+
+    def get_hwhm_shift(self, fitting: FittedSpectrum) -> tuple:
+        """
+
+        Args:
+            fitting:
+
+        Returns: hwhm_left_peak_ghz, hwhm_right_peak_ghz
+
+        """
+        if self.calibration_calculator is None:
+            return None, None
+        else:
+            hwhm_left_peak_ghz = float(
+                abs(
+                    self.calibration_calculator.df_left_peak(
+                        fitting.left_peak_center_px,
+                        fitting.left_peak_width_px
+                    )))
+            hwhm_right_peak_ghz = float(
+                abs(
+                    self.calibration_calculator.df_right_peak(
+                        fitting.right_peak_center_px,
+                        fitting.right_peak_width_px
+                    )))
+
+            return hwhm_left_peak_ghz, hwhm_right_peak_ghz
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
         if self.is_reference_mode:
             freq_shift_ghz = self.microwave.get_frequency()
+            hwhm_lp_ghz, hwhm_rp_ghz = self.get_hwhm_shift(fitting)
+
         elif fitting.is_success:
             freq_shift_ghz = self.get_freq_shift(fitting)
+            hwhm_lp_ghz, hwhm_rp_ghz = self.get_hwhm_shift(fitting)
         else:
             freq_shift_ghz = None
+            hwhm_lp_ghz, hwhm_rp_ghz = None, None
 
         if fitting.is_success:
             return DisplayResults(
@@ -595,6 +641,8 @@ class HiBackend:
                 y_fit_refined=fitting.y_fit_refined,
                 inter_peak_distance=fitting.inter_peak_distance,
                 freq_shift_ghz=freq_shift_ghz,
+                hwhm_left_peak=hwhm_lp_ghz,
+                hwhm_right_peak=hwhm_rp_ghz,
             )
         else:
             return DisplayResults(
@@ -650,12 +698,16 @@ class HiBackend:
             with self.force_reference_mode():
                 measured_freqs = []
 
+                i = 0
+                n = len(config.calibration_freqs)
                 for freq in config.calibration_freqs:
                     if self.f2b_cancel_callback():
                         log.info("[Calibration] Cancelled by user.")
                         return False
 
                     self.microwave.set_frequency(freq)
+                    i += 1
+                    log.info(f"Freq {i}/{n}")
                     freq_points = []
 
                     for _ in range(config.n_per_freq):
@@ -682,7 +734,7 @@ class HiBackend:
 
                 self.calibration_data = CalibrationData(measured_freqs=measured_freqs)
                 self.update_calibration_calculator()
-                log.info("[Calibration] Completed successfully.")
+                log.info(self.calibration_calculator.get_str_all_models())
                 return True
 
         except Exception as e:
@@ -734,6 +786,41 @@ class HiBackend:
         )
         return result
 
+
+    def run_laser_xy_calibration(self) -> LaserOffset:
+        """
+        Run the full laser XY calibration from the backend and save offset.toml.
+
+        Returns:
+            LaserCoordSystem
+        """
+        if self.is_reference_mode:
+            raise RuntimeError("Laser XY calibration must be run in sample mode, not reference mode.")
+
+        log.info("[Laser XY Calibration] Starting.")
+
+        calib = CalibRigLaserPosition(
+            ni=self.ni,
+            zaber_eye_lens=self.zaber_eye_lens,
+            zaber_hi=self.zaber_hi,
+            cancel_callback=self.f2b_cancel_callback,
+            axial_scan_config=self._axial_scan_config,
+        )
+
+        try:
+            laser_coord_system = calib.run_calibration()
+
+            log.info(
+                f"[Laser XY Calibration] Done. "
+                f"dx={laser_coord_system.dx:.3f}, "
+                f"dy={laser_coord_system.dy:.3f}, "
+                f"dz={laser_coord_system.dz:.3f}"
+            )
+            return laser_coord_system
+
+        except Exception as e:
+            log.exception(f"[Laser XY Calibration] Failed: {e}")
+            raise
 
 
     def close(self):

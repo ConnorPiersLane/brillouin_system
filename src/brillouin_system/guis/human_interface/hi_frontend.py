@@ -2,6 +2,8 @@ import logging
 import threading
 import time
 
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset, \
+    load_laser_coord_system_from_toml
 from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
@@ -41,7 +43,7 @@ from brillouin_system.logging_utils.logging_setup import start_logging, install_
 
 log = get_logger(__name__)
 
-from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
@@ -51,22 +53,23 @@ from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan
-from brillouin_system.calibration.calibration import render_calibration_to_pixmap, \
-    CalibrationImageDialog, CalibrationData, CalibrationCalculator
-
+from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
+from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 ###
 # Add other guis
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import dataclass_to_hdf5_native_dict, save_dict_to_hdf5
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
 
+#todo: fix sample mode closing shutter.
 
-use_backend_dummy = True
+use_backend_dummy = False
 # Eye Tracking
-include_eye_tracking = False
+include_eye_tracking = True
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
+
 class NotifyingViewBox(pg.ViewBox):
     userScaled = QtCore.pyqtSignal()
     def wheelEvent(self, ev, axis=None):
@@ -98,6 +101,7 @@ class HiFrontend(QWidget):
     move_zaber_stage_z_requested = pyqtSignal(float)
 
     run_calibration_requested = pyqtSignal()
+    update_calibration_config_requested = pyqtSignal(object)
     take_axial_step_scan_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
@@ -110,6 +114,7 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
+    calibrate_laser_camera_position_requested = pyqtSignal()
 
     # Saving Signals
     save_all_axial_scans_requested = pyqtSignal()
@@ -129,7 +134,12 @@ class HiFrontend(QWidget):
 
 
         self.laser_focus_position: RigCoord | None = None
-        self.last_eye_tracker_results: EyeTrackerResults | None = None
+        self._zaber_lens_um: float | None = None
+        self.lastest_eye_tracker_results: EyeTrackerResults | None = None
+        if include_eye_tracking:
+            self._laser_offset = load_laser_coord_system_from_toml()
+        else:
+            self._laser_offset = LaserOffset(0,0,0)
         self._last_eye_update_monotonic = 0.0
         self._andor_exposure_time: float | None = None
 
@@ -176,11 +186,15 @@ class HiFrontend(QWidget):
         self.move_zaber_stage_z_requested.connect(self.brillouin_signaller.move_zaber_stage_z_relative)
 
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
+        self.update_calibration_config_requested.connect(self.brillouin_signaller.update_calibration_config_backend)
         self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
         self.cancel_requested.connect(self.brillouin_signaller.cancel_operations)
+        self.calibrate_laser_camera_position_requested.connect(
+            self.brillouin_signaller.calibrate_laser_camera_position_delegate)
+
         self.update_andor_config_requested.connect(self.brillouin_signaller.update_andor_config_settings)
         self.close_all_shutters_requested.connect(self.brillouin_signaller.close_all_shutters)
         self.update_fitting_configs_requested.connect(self.brillouin_signaller.update_fitting_configs)
@@ -212,14 +226,12 @@ class HiFrontend(QWidget):
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
         self.brillouin_signaller.send_message_to_frontend.connect(self.message_handler)
         self.brillouin_signaller.close_event_finished.connect(self._finalize_close)
+        self.brillouin_signaller.laser_coord_calibration_ready.connect(self.update_laser_coord_calibration)
 
         # Saving Signals
         self.save_all_axial_scans_requested.connect(self.brillouin_signaller.save_all_axial_scans)
         self.save_selected_axial_scans_requested.connect(self.brillouin_signaller.save_multiple_axial_scans)
         self.remove_selected_axial_scans_requested.connect(self.brillouin_signaller.remove_selected_axial_scans)
-
-
-
 
 
         # Connect signals BEFORE starting the thread
@@ -554,11 +566,11 @@ class HiFrontend(QWidget):
         btn_row2 = QHBoxLayout()
         self.btn_restart_eye = QPushButton("ReStart")
         self.btn_close_eye = QPushButton("Shutdown")
-        self.btn_print_pos = QPushButton("Print Pos.")
+        self.btn_cal_laser_offset = QPushButton("Cal. Laser Offset")
 
         btn_row2.addWidget(self.btn_restart_eye)
         btn_row2.addWidget(self.btn_close_eye)
-        btn_row2.addWidget(self.btn_print_pos)
+        btn_row2.addWidget(self.btn_cal_laser_offset)
         btn_row2.addStretch()
 
         # put the row into a real layout and set it on the group
@@ -573,7 +585,7 @@ class HiFrontend(QWidget):
         self.btn_eye_tracking.clicked.connect(self.open_eye_tracker_config_dialog)
         self.btn_restart_eye.clicked.connect(self.on_restart_eye_clicked)
         self.btn_close_eye.clicked.connect(self.shutdown_eye_tracker)
-        self.btn_print_pos.clicked.connect(self.on_print_pos_clicked)
+        self.btn_cal_laser_offset.clicked.connect(self.calibrate_laser_position)
 
         return group
 
@@ -823,6 +835,16 @@ class HiFrontend(QWidget):
         group.setLayout(layout)
         return group
 
+
+    def _fmt_plot_val(self, value, unit="GHz"):
+        try:
+            value = float(value)
+            if np.isfinite(value):
+                return f"{value:.3f} {unit}"
+        except Exception:
+            pass
+        return "—"
+
     # --- inside HiFrontend ---
     def create_andor_display_group(self):
         # White theme + fast options
@@ -846,6 +868,7 @@ class HiFrontend(QWidget):
 
         # -------- Row 1: Live image --------
         self.vb_img = self.glw.addViewBox(lockAspect=True, enableMenu=False)
+        self.vb_img.invertY(True)
         self.img_item = pg.ImageItem(autoDownsample=True)
         self.vb_img.addItem(self.img_item)
         self.vb_img.setBorder((170, 170, 170))
@@ -864,14 +887,12 @@ class HiFrontend(QWidget):
         self.spec_plot.getViewBox().setBorder((170, 170, 170))
         self.spec_vb.userScaled.connect(self._on_spec_user_scaled)
 
-        # Fit: red dashed line (no symbols)
         self.fit_curve = pg.PlotDataItem(
             pen=pg.mkPen('r', width=1.5, style=QtCore.Qt.DashLine)
         )
         self.fit_curve.setZValue(0)
         self.spec_plot.addItem(self.fit_curve)
 
-        # All measurement samples: black dots (no connecting line)
         self.spec_points = pg.PlotDataItem(
             pen=None,
             symbol='o',
@@ -882,7 +903,6 @@ class HiFrontend(QWidget):
         self.spec_points.setZValue(1)
         self.spec_plot.addItem(self.spec_points)
 
-        # Points used for fitting: red dots overlay
         self.mask_points = pg.PlotDataItem(
             pen=None,
             symbol='o',
@@ -892,6 +912,15 @@ class HiFrontend(QWidget):
         )
         self.mask_points.setZValue(2)
         self.spec_plot.addItem(self.mask_points)
+
+        # Important: ignoreBounds=True prevents this overlay from changing plot autoscale
+        self.live_fit_text = pg.TextItem(
+            text="",
+            color=(0, 0, 0),
+            anchor=(1, 0)
+        )
+        self.live_fit_text.setZValue(10)
+        self.spec_plot.addItem(self.live_fit_text, ignoreBounds=True)
 
         # -------- Row 3: History --------
         self.glw.nextRow()
@@ -913,10 +942,9 @@ class HiFrontend(QWidget):
         self._spec_init_done = False
         self._spec_user_zoomed = False
         self._hist_user_zoomed = False
-        self.HIST_WINDOW = 200  # trailing window size for scrolling
+        self.HIST_WINDOW = 200
 
         return group
-
     # --- inside HiFrontend ---
     def _on_spec_user_scaled(self):
         self._spec_user_zoomed = True
@@ -1158,9 +1186,6 @@ class HiFrontend(QWidget):
 
     # ---------------- Signal Handles ---------------- #
 
-
-
-
     def update_system_state_label(self, state):
         if state.name == "IDLE":
             self.state_label.setText("● IDLE")
@@ -1179,6 +1204,9 @@ class HiFrontend(QWidget):
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.update_andor_config_requested.emit(andor_config)
 
+    def update_calibration_config(self, calibration_config: CalibrationConfig):
+        self.update_calibration_config_requested.emit(calibration_config)
+
     def request_scanning_config_file_update(self, scanning_config: ScanningConfig):
         self.update_scanning_config_requested.emit(scanning_config)
 
@@ -1190,7 +1218,7 @@ class HiFrontend(QWidget):
         dialog.exec_()
 
     def on_reference_configs_clicked(self):
-        dialog = CalibrationConfigDialog(self)
+        dialog = CalibrationConfigDialog(on_apply=self.update_calibration_config, parent=self)
         dialog.exec_()
 
 
@@ -1244,8 +1272,10 @@ class HiFrontend(QWidget):
 
 
     def update_zaber_lens_position(self, pos: float):
+        self._zaber_lens_um = pos
         self.lens_pos_display.setText(f"Lens {pos:.2f} µm")
-        self.laser_focus_position = RigCoord(x=0, y=0, z=pos/1000)
+        dx, dy, dz = self._laser_offset.dx, self._laser_offset.dy, self._laser_offset.dz
+        self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dy/1000)
 
     # ---------------- GUI Update Loop ---------------- #
 
@@ -1280,6 +1310,30 @@ class HiFrontend(QWidget):
             self.fit_curve.setData(xf, yf)
         else:
             self.fit_curve.setData([], [])
+
+        # -------- Live fit values drawn on Spectrum + Fit plot --------
+        if getattr(dr, "is_fitting_available", False):
+            freq_shift = getattr(dr, "freq_shift_ghz", None)
+            left_hwhm = getattr(dr, "hwhm_left_peak", None)
+            right_hwhm = getattr(dr, "hwhm_right_peak", None)
+
+            self.live_fit_text.setText(
+                "Freq shift: {}\nLeft HWHM: {}\nRight HWHM: {}".format(
+                    self._fmt_plot_val(freq_shift),
+                    self._fmt_plot_val(left_hwhm),
+                    self._fmt_plot_val(right_hwhm),
+                )
+            )
+            self.live_fit_text.setVisible(True)
+
+            # Keep text in upper-right corner of current view
+            vb = self.spec_plot.getViewBox()
+            (x_min, x_max), (y_min, y_max) = vb.viewRange()
+            self.live_fit_text.setPos(x_max, y_max)
+
+        else:
+            self.live_fit_text.setText("")
+            self.live_fit_text.setVisible(False)
 
         mask = getattr(dr, "mask_for_fitting", None)
         if mask is not None and x.size and y.size:
@@ -1463,14 +1517,18 @@ class HiFrontend(QWidget):
         self.save_calib_btn.setEnabled(True)
         log.info(f"[Brillouin Viewer] Calibration available")
 
-    def handle_requested_calibration(self, received_cali: tuple[CalibrationData, CalibrationCalculator]):
+
+    def handle_requested_calibration(self,
+                                     received_cali: tuple[CalibrationData, CalibrationCalculator, CalibrationConfig]):
         cali_data = received_cali[0]
         cali_calculator = received_cali[1]
+        log.info(cali_calculator.get_str_all_models())
+        config = received_cali[2]
 
         if self._show_cali:
             try:
                 pixmap = render_calibration_to_pixmap(
-                    cali_data, cali_calculator, calibration_config.get().reference
+                    cali_data, cali_calculator, reference=config.reference, mode=config.mode
                 )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
@@ -1509,6 +1567,9 @@ class HiFrontend(QWidget):
         self._show_cali = False
         self._save_cali = True
 
+    def update_laser_coord_calibration(self, laser_offset: LaserOffset):
+        self._laser_offset: LaserOffset = laser_offset
+
     def take_axial_step_scan(self, find_reflection_plane: bool = False):
         try:
             id_str = self.axial_id_input.text().strip()
@@ -1525,7 +1586,7 @@ class HiFrontend(QWidget):
                 n_measurements=n_meas,
                 step_size_um=step,
                 find_reflection_plane=find_reflection_plane,
-                eye_tracker_results=self.last_eye_tracker_results,
+                eye_tracker_results=self.lastest_eye_tracker_results,
             )
 
             self.take_axial_step_scan_requested.emit(request)
@@ -1715,30 +1776,38 @@ class HiFrontend(QWidget):
             f"Δc = {tdc}"
         )
 
-    def on_print_pos_clicked(self):
-        res = getattr(self, "last_eye_tracker_results", None)
-        if res is None:
-            log.info("Print Eye Position requested: No eye-tracker results")
+    def calibrate_laser_position(self):
+
+        et_result = self._wait_for_eye_result()
+        if et_result is None or et_result.pupil3d is None:
             return
+        pupil_center = et_result.pupil3d.center_ref
 
-        laser_position = getattr(res, "laser_position", None)
-        if laser_position is None:
-            log.info("Print Eye Position requested: No Position Available")
+        # convert from mm to um
+        x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
+        if self._zaber_lens_um is None:
             return
+        print(f"Pupil Center before moving: {round(float(x)), round(float(y)), round(float(z))}")
+        # Assumint Rig COS and zaber_lens share same origin
+        # Moving the Rig here (not the lens)
+        self.move_zaber_stage_x_requested.emit(x)
+        self.move_zaber_stage_y_requested.emit(y)
+        self.move_zaber_stage_z_requested.emit(z-self._zaber_lens_um)
 
-        x = float(laser_position[0])
-        y = float(laser_position[1])
-        z = float(laser_position[2])
-        dc = getattr(res, "delta_laser_corner", None)
+        # remov ethie
+        time.sleep(2)
+        et_result = self._wait_for_eye_result()
+        if et_result is None or et_result.pupil3d is None:
+            return
+        pupil_center = et_result.pupil3d.center_ref
 
-        def fmt(v):
-            return f"{v:6.3f}" if v is not None else " " * 6
+        # convert from mm to um
+        x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
+        if self._zaber_lens_um is None:
+            return
+        print(f"Pupil Center after moving: {round(float(x)), round(float(y)), round(float(z))}")
 
-        log.info(
-            "Eye Position requested: "
-            f"X={fmt(x)}  Y={fmt(y)}  Z={fmt(z)}  ΔCorner={fmt(dc)}"
-        )
-
+        self.calibrate_laser_camera_position_requested.emit()
 
 
     @QtCore.pyqtSlot(object, object, dict)
@@ -1758,20 +1827,21 @@ class HiFrontend(QWidget):
         self.eye_img[0].setImage(left, autoLevels=True)
         self.eye_img[1].setImage(right, autoLevels=True)
 
-        self.last_eye_tracker_results = get_eye_tracker_results(
+        self.lastest_eye_tracker_results = get_eye_tracker_results(
             left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
         )
-        laser_position = self.last_eye_tracker_results.laser_position
+
+        laser_position = self.lastest_eye_tracker_results.laser_position
         if laser_position is not None:
             self.update_laser_position_cartesian(x=laser_position[0], y=laser_position[1])
             self.update_laser_position_text_eye_tracker(
                 x=laser_position[0],
                 y=laser_position[1],
                 z=laser_position[2],
-                dc=self.last_eye_tracker_results.delta_laser_corner
+                dc=self.lastest_eye_tracker_results.delta_laser_corner
             )
 
-            self._update_cornea_band(self.last_eye_tracker_results.delta_laser_corner)
+            self._update_cornea_band(self.lastest_eye_tracker_results.delta_laser_corner)
 
         else:
             self.clear_laser_position()
@@ -1780,6 +1850,7 @@ class HiFrontend(QWidget):
             # IMPORTANT: also hide cornea when laser_position missing
             self._update_cornea_band(None)
 
+
     def _wait_for_eye_result(self, timeout_s: float = 1, max_age_s: float = 0.5) -> EyeTrackerResults | None:
         """
         Wait (briefly) for a recent EyeTrackerResults with a valid laser_position.
@@ -1787,7 +1858,7 @@ class HiFrontend(QWidget):
         """
         t0 = time.monotonic()
         while time.monotonic() - t0 < timeout_s:
-            r = self.last_eye_tracker_results
+            r = self.lastest_eye_tracker_results
             if r is not None and r.laser_position is not None:
                 age = time.monotonic() - self._last_eye_update_monotonic
                 if age <= max_age_s:

@@ -11,7 +11,12 @@ from brillouin_system.calibration.config.calibration_config_gui import Calibrati
 
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, fit_axial_scan
+from brillouin_system.guis.data_analyzer.excel_export_axial_scan import (
+    BrillouinExport,
+    get_excel_row_data,
+    export_to_excel,
+)
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
@@ -25,8 +30,6 @@ class AxialScanManager(QWidget):
 
         self.scans: dict[int, AxialScan] = {}   # internal tracker → scan
         self.next_index: int = 0
-
-
 
         self.init_ui()
 
@@ -51,6 +54,9 @@ class AxialScanManager(QWidget):
         self.show_btn.clicked.connect(self.show_scan)
         btn_row.addWidget(self.show_btn)
 
+        self.save_all_btn = QPushButton("Save All to Excel")
+        self.save_all_btn.clicked.connect(self.save_all_to_excel)
+        btn_row.addWidget(self.save_all_btn)
 
         self.remove_btn = QPushButton("Remove Selected")
         self.remove_btn.clicked.connect(self.remove_selected)
@@ -110,6 +116,7 @@ class AxialScanManager(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "Load Error", f"Failed to load {path}:\n{e}")
 
+
     def show_scan(self):
         items = self.scan_list.selectedItems()
         if not items:
@@ -159,17 +166,84 @@ class AxialScanManager(QWidget):
             self.scan_list.takeItem(row)
 
     def open_calibration_config(self):
-        dlg = CalibrationConfigDialog(self)
+        def on_apply(_):
+            # No need to update anything locally
+            print("[AxialScanManager] Apply has no effect — you need to save the configs to they effect the viewer.")
+        dlg = CalibrationConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
+
+
+
 
     def open_fitting_config(self):
         def on_apply(_):
             # No need to update anything locally
-            print("[AxialScanManager] Pressed Apply — configs are live globally.")
+            print("[AxialScanManager] Apply has no effect — you need to save the configs to they effect the viewer")
 
         dlg = FindPeaksConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
 
+
+    def _build_export_rows_for_scan(self, scan: AxialScan) -> list[BrillouinExport]:
+        rows: list[BrillouinExport] = []
+
+        analyzed_spectra = fit_axial_scan(scan)
+
+        for idx, analyzed_spectrum in enumerate(analyzed_spectra):
+            row = get_excel_row_data(
+                axial_scan=scan,
+                analyzed_spectrum=analyzed_spectrum,
+                idx=idx,
+            )
+            rows.append(row)
+
+        return rows
+
+    def _build_export_rows_for_all_scans(self) -> list[BrillouinExport]:
+        all_rows: list[BrillouinExport] = []
+
+        # sort by manager index for predictable export order
+        for idx in sorted(self.scans.keys()):
+            scan = self.scans[idx]
+            scan_rows = self._build_export_rows_for_scan(scan)
+            all_rows.extend(scan_rows)
+
+        return all_rows
+
+    def save_all_to_excel(self):
+        try:
+            if not self.scans:
+                QMessageBox.information(self, "No Scans", "There are no loaded scans to export.")
+                return
+
+            rows = self._build_export_rows_for_all_scans()
+            if not rows:
+                QMessageBox.warning(self, "No Data", "There is no data to export.")
+                return
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save All to Excel",
+                "all_axial_scans_brillouin_export.xlsx",
+                "Excel Files (*.xlsx)"
+            )
+
+            if not file_path:
+                return
+
+            if not file_path.lower().endswith(".xlsx"):
+                file_path += ".xlsx"
+
+            export_to_excel(rows, file_path)
+
+            QMessageBox.information(
+                self,
+                "Excel Saved",
+                f"Saved {len(rows)} rows from {len(self.scans)} scan(s) to:\n{file_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

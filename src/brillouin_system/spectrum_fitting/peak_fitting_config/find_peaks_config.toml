@@ -2,8 +2,6 @@
 pixel_offset_left = 0
 pixel_offset_right = 0
 selected_rows = [
-    3,
-    4,
     5,
     6,
     7,
@@ -11,16 +9,22 @@ selected_rows = [
     9,
     10,
     11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
 ]
 
 [sample]
-prominence_fraction = 0.05
+prominence_fraction = 0.001
 min_peak_width = 1
 min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
 fitting_model = "lorentzian_window"
-beta = 3
+beta = 4
 
 [reference]
 prominence_fraction = 0.05
@@ -28,5 +32,5 @@ min_peak_width = 1
 min_peak_height = 800
 rel_height = 0.5
 wlen_pixels = 40
-fitting_model = "lorentzian"
-beta = 1
+fitting_model = "lorentzian_window"
+beta = 4

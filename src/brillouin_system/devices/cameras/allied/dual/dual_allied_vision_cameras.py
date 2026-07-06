@@ -1,10 +1,9 @@
 import queue
-import threading
 import time
 
 import cv2
 import numpy as np
-from vimba import VimbaFeatureError, PixelFormat
+from vimba import VimbaFeatureError, PixelFormat, VimbaCameraError
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig, allied_config
 from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
@@ -14,6 +13,7 @@ from brillouin_system.devices.cameras.allied.single.allied_vision_camera import 
 frame_q0 = queue.Queue(maxsize=20)
 frame_q1 = queue.Queue(maxsize=20)
 
+# TODO: put timestamps time.perfcount() to the frames
 
 def clear_queues():
     while not frame_q0.empty():
@@ -107,8 +107,8 @@ class DualAlliedVisionCameras(BaseDualCameras):
         id0: str = "DEV_000F315BC084",
         id1: str = "DEV_000F315BDC0C",
         *,
-        throughput_MBps_per_cam: float = 45.0,  # ~90 MB/s total budget across both on 1GbE
-        packet_delays: tuple[int | None, int | None] = (1200, 2000),
+        throughput_MBps_per_cam: float = 20.0,  # ~90 MB/s total budget across both on 1GbE
+        packet_delays: tuple[int | None, int | None] = (2000, 4000),
         enable_ptp: bool = False,
         pixel_format = PixelFormat.Mono8,
     ):
@@ -144,8 +144,8 @@ class DualAlliedVisionCameras(BaseDualCameras):
         # Use software-trigger snap mode by default
         self._setup_snap_mode()
 
-        # Start streaming now; queues will hold latest frames
-        self.start_dual_cam_stream()
+        # # Start streaming now; queues will hold latest frames
+        # self.start_dual_cam_stream()
 
     def _set_transport(self, cam, mbps_per_cam: float, delay_ticks: int | None):
         # Bytes per second cap: AlliedVisionCamera.init uses bytes/s features
@@ -191,20 +191,42 @@ class DualAlliedVisionCameras(BaseDualCameras):
 
     def trigger_both(self):
         # Fire software triggers concurrently for tighter sync
-        t1 = threading.Thread(target=lambda: self.left.camera.get_feature_by_name("TriggerSoftware").run())
-        t2 = threading.Thread(target=lambda: self.right.camera.get_feature_by_name("TriggerSoftware").run())
-        t1.start(); t2.start(); t1.join(); t2.join()
+        # t1 = threading.Thread(target=lambda: self.left.camera.get_feature_by_name("TriggerSoftware").run())
+        # t2 = threading.Thread(target=lambda: self.right.camera.get_feature_by_name("TriggerSoftware").run())
+        # t1.start(); t2.start(); t1.join(); t2.join()
+        try:
+            self.left.camera.get_feature_by_name("TriggerSoftware").run()
+            self.right.camera.get_feature_by_name("TriggerSoftware").run()
+        except VimbaFeatureError:
+            self._setup_snap_mode()
+            self.left.camera.get_feature_by_name("TriggerSoftware").run()
+            self.right.camera.get_feature_by_name("TriggerSoftware").run()
+
 
     def start_dual_cam_stream(self):
-        """Start streaming once and keep queues ready."""
+        if self._is_streaming:
+            return
+
+        self._setup_snap_mode()
         self.left.camera.start_streaming(_handler0, buffer_count=40)
         self.right.camera.start_streaming(_handler1, buffer_count=40)
-        time.sleep(2)  # Let the queues settle
+        self.left.streaming = True
+        self.right.streaming = True
         self._is_streaming = True
 
+
+
     def stop_stream(self):
-        self.left.camera.stop_streaming()
-        self.right.camera.stop_streaming()
+        for name, cam in (("left", self.left.camera), ("right", self.right.camera)):
+            try:
+                cam.stop_streaming()
+                print(f"[DualCamera] stopped {name} stream")
+            except (VimbaCameraError, VimbaFeatureError) as e:
+                print(f"[DualCamera] ignoring {name} stop error during shutdown: {e}")
+            except Exception as e:
+                print(f"[DualCamera] unexpected {name} stop error: {e}")
+        self.left.streaming = False
+        self.right.streaming = False
         self._is_streaming = False
 
     def snap_once(self, timeout: float = 5.0):
@@ -218,8 +240,17 @@ class DualAlliedVisionCameras(BaseDualCameras):
         clear_queues()
         self.trigger_both()
 
-        f0 = frame_q0.get(timeout=timeout)
-        f1 = frame_q1.get(timeout=timeout)
+        import queue
+
+        try:
+            f0 = frame_q0.get(timeout=timeout)
+        except queue.Empty:
+            f0 = _black_from_roi(cam=self.left.camera)
+
+        try:
+            f1 = frame_q1.get(timeout=timeout)
+        except queue.Empty:
+            f1 = _black_from_roi(cam=self.right.camera)
 
         f0 = _to_mono2d(f0)
         f1 = _to_mono2d(f1)
@@ -250,37 +281,6 @@ class DualAlliedVisionCameras(BaseDualCameras):
         self.right.close()
         print("[DualCamera] Cameras closed.")
 
-
-    # ToDo: do trigger loop - finish this code and implement into pipeline (remove shmring for cameras)
-    def start_trigger_loop(self, hz=10):
-        self._run = True
-        def loop():
-            period = 1.0 / hz
-            next_t = time.time()
-            while self._run:
-                self.trigger_both()  # concurrent triggers :contentReference[oaicite:3]{index=3}
-                next_t += period
-                time.sleep(max(0.0, next_t - time.time()))
-        self._thread = threading.Thread(target=loop, daemon=True)
-        self._thread.start()
-
-    def stop_trigger_loop(self):
-        self._run = False
-        if hasattr(self, "_thread"):
-            self._thread.join(timeout=1.0)
-
-    def get_latest_from_queues(self):
-        f0 = f1 = None
-        try:
-            while True: f0 = frame_q0.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            while True: f1 = frame_q1.get_nowait()
-        except queue.Empty:
-            pass
-        return (None if f0 is None else _to_mono2d(f0),
-                None if f1 is None else _to_mono2d(f1))
 
 
 

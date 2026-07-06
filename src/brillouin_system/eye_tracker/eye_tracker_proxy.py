@@ -6,6 +6,7 @@ from typing import Tuple, Optional, Dict
 
 import numpy as np
 
+from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
 from brillouin_system.helpers.frame_ipc_shared import ShmFrameSpec, ShmRing
 
 
@@ -286,7 +287,6 @@ class EyeTrackerProxy:
         # Rebuild Pupil3D from the last frame message
         p3d_dict = last.get("pupil3D")
         if p3d_dict is not None:
-            from brillouin_system.eye_tracker.pupil_fitting.pupil3D import Pupil3D
             pupil3D = Pupil3D(
                 center_left=np.array(p3d_dict["center_left"]) if p3d_dict["center_left"] is not None else None,
                 center_ref=np.array(p3d_dict["center_ref"]) if p3d_dict["center_ref"] is not None else None,

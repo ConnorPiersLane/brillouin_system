@@ -4,7 +4,9 @@ import threading
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 from PyQt5 import QtCore
 
+from brillouin_system.calibration.config.calibration_config import CalibrationConfig
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
@@ -55,6 +57,7 @@ class HiSignaller(QObject):
     send_message_to_frontend = pyqtSignal(str, str)
     new_andor_display_ready = pyqtSignal()
     close_event_finished = pyqtSignal()
+    laser_coord_calibration_ready = pyqtSignal(object)
 
     zaber_stage_positions_updated = pyqtSignal(float, float, float)
     # (x, y, z) positions in µm
@@ -430,11 +433,16 @@ class HiSignaller(QObject):
     @pyqtSlot()
     def get_calibration_results(self):
         self.backend.update_calibration_calculator() # this recalculates the calibration
-        self.calibration_result_ready.emit((self.backend.calibration_data, self.backend.calibration_calculator))
+        self.calibration_result_ready.emit(
+            (self.backend.calibration_data, self.backend.calibration_calculator, self.backend.calibration_config))
+
+
+    @pyqtSlot(object)
+    def update_calibration_config_backend(self, config: CalibrationConfig):
+        self.backend.update_calibration_config(config)
 
     def emit_display_result(self, display: DisplayResults):
         self._mailbox_push_andor_display(display)
-
 
     @pyqtSlot()
     def run_calibration(self):
@@ -468,6 +476,14 @@ class HiSignaller(QObject):
         finally:
             self.update_system_state(new_state=old_state)
             self.restart_live_view_when_ready()
+
+    @pyqtSlot()
+    def calibrate_laser_camera_position_delegate(self):
+        log.info(f"I disabled this function in normal use (for safety).\n"
+                 f"Go to hi_signaller.py -> def calibrate_laser_camera_position_delegate() and activate it "
+                 f"when required")
+        #laser_offset: LaserOffset = self.backend.run_laser_xy_calibration()
+        #self.laser_coord_calibration_ready.emit(laser_offset)
 
 
     @pyqtSlot(int)

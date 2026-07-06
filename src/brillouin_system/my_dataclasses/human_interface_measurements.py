@@ -2,17 +2,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from brillouin_system.calibration.calibration import CalibrationCalculator, CalibrationPolyfitParameters
-from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.calibration.calibration import CalibrationPolyfitParameters, CalibrationCalculator
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
-from brillouin_system.my_dataclasses.analyzed_freq_shifts import AnalyzedFreqShifts
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, \
     calculate_photon_counts_from_fitted_spectrum
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
-from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
+from brillouin_system.spectrum_fitting.spectrum_analyzer import AnalyzedFreqShifts, TheoreticalPeakStdError, \
+    SpectrumAnalyzer
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -43,7 +42,6 @@ class MeasurementPoint:
 
 
 
-
 @dataclass
 class AxialScan:
     i: int  # internal tracker
@@ -56,48 +54,25 @@ class AxialScan:
     reflection_result_backwards: ReflectionResult | None = None
 
 # -------------- Scan Fitting --------------
-
 @dataclass
-class FittedAxialScan:
-    axial_scan: AxialScan
-    fitted_spectras: list[FittedSpectrum]
-    fitted_photon_counts: list[PhotonsCounts]
-
-# -------------- Scan Analysis --------------
-@dataclass
-class AnalysedAxialScan:
-    fitted_scan: FittedAxialScan
-    freq_shifts: list[AnalyzedFreqShifts]
-
-
-def get_freq_shift(analyzed_freq_shift: AnalyzedFreqShifts):
-    config = calibration_config.get()
-
-    if config.reference == "left":
-        return analyzed_freq_shift.freq_shift_left_peak_ghz
-    elif config.reference == "right":
-        return analyzed_freq_shift.freq_shift_right_peak_ghz
-    elif config.reference == "distance":
-        return analyzed_freq_shift.freq_shift_peak_distance_ghz
-    elif config.reference == "centroid":
-        return analyzed_freq_shift.freq_shift_centroid_ghz
-    elif config.reference == "dc":
-        return analyzed_freq_shift.freq_shift_dc_ghz
-    else:
-        return None
+class AnalyzedSpectrum:
+    fitted_spectrum: FittedSpectrum
+    analyzed_shifts: AnalyzedFreqShifts
+    photons: PhotonsCounts
+    theoretical_precisions: TheoreticalPeakStdError
 
 
 # -------------- Functions --------------
-def fit_axial_scan(scan: AxialScan) -> FittedAxialScan:
+def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()
-
+    spectrum_analyzer = SpectrumAnalyzer(
+        calibration_calculator=CalibrationCalculator(parameters=scan.calibration_params))
 
     do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
 
     is_reference_mode = scan.system_state.is_reference_mode
 
-    fitted_measurement_points = []
-    photons_points = []
+    list_analyzed_spectras: list[AnalyzedSpectrum] = []
 
     for measurement in scan.measurements:
         frame = measurement.frame_andor.copy()
@@ -113,47 +88,32 @@ def fit_axial_scan(scan: AxialScan) -> FittedAxialScan:
         # Fit spectrum
         fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode)
 
+        analyzed_shift = spectrum_analyzer.analyze_spectrum(fitting=fitting)
+
         # Photon counts
         photons = calculate_photon_counts_from_fitted_spectrum(fs=fitting,
                                                                preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
                                                                emccd_gain=scan.system_state.andor_camera_info.gain)
 
-        fitted_measurement_points.append(fitting)
-        photons_points.append(photons)
+        if scan.system_state.is_do_bg_subtraction_active:
+            bg_frame_std = scan.system_state.bg_image.std_image
+        else:
+            bg_frame_std = None
 
-    return FittedAxialScan(
-        axial_scan=scan,
-        fitted_spectras=fitted_measurement_points,
-        fitted_photon_counts=photons_points
-    )
+        theoretical_std: TheoreticalPeakStdError = spectrum_analyzer.theoretical_precision(
+            fs=fitting, photons=photons, bg_frame_std=bg_frame_std,
+            preamp_gain = scan.system_state.andor_camera_info.preamp_gain,
+        emccd_gain = scan.system_state.andor_camera_info.gain)
 
-
-
-def analyze_axial_scan(fitted_scan: FittedAxialScan) -> AnalysedAxialScan:
-
-    analyzed_freqs_shifts = []
-
-    if fitted_scan.axial_scan.calibration_params is None:
-        none_shifts = AnalyzedFreqShifts(
-            freq_shift_left_peak_ghz=None,
-            freq_shift_right_peak_ghz=None,
-            freq_shift_peak_distance_ghz=None,
-            hwhm_left_peak_ghz=None,
-            hwhm_right_peak_ghz=None,
+        # Append
+        anaylzed_spectra = AnalyzedSpectrum(
+            fitted_spectrum=fitting,
+            analyzed_shifts=analyzed_shift,
+            photons=photons,
+            theoretical_precisions=theoretical_std
         )
+        list_analyzed_spectras.append(anaylzed_spectra)
 
-        for _ in fitted_scan.fitted_spectras:
-            analyzed_freqs_shifts.append(none_shifts)
-    else:
-        calibration_calculator = CalibrationCalculator(fitted_scan.axial_scan.calibration_params)
+    return list_analyzed_spectras
 
-        spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
-        analyzed_freqs_shifts = []
-        for fitting in fitted_scan.fitted_spectras:
-            analyzed_freqs_shifts.append(spectrum_analyzer.analyze_spectrum(fitting))
-
-    return AnalysedAxialScan(
-        fitted_scan=fitted_scan,
-        freq_shifts=analyzed_freqs_shifts
-    )

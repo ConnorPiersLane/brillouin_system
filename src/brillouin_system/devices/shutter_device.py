@@ -101,7 +101,7 @@ class ShutterManager:
         if self.sample_type == 'microscope':
             self.sample = Shutter(339)
         elif self.sample_type == 'human_interface':
-            self.sample = Shutter(314)
+            self.sample = ShutterDummy(314)
         else:
             raise ValueError(f"Incorrect parameter input sample={sample}")
 

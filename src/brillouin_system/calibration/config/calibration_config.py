@@ -1,11 +1,13 @@
-# calibration_config.py
 from dataclasses import dataclass, asdict
 from pathlib import Path
+import random
+
 import tomli
 import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
 CALIBRATION_TOML_PATH = Path(__file__).parent / "calibration_config.toml"
+
 
 @dataclass
 class CalibrationConfig:
@@ -15,12 +17,22 @@ class CalibrationConfig:
     stop: float
     step: float
     reference: str  # "left", "right", or "distance"
+    mode: str  # "poly" or "interp"
 
     @property
     def calibration_freqs(self) -> list[float]:
-        # compute frequencies on the fly
-        return [round(self.start + i * self.step, 6) for i in range(1000)
-                if self.start + i * self.step <= self.stop]
+        n_steps = int(round((self.stop - self.start) / self.step))
+
+        freqs = [
+            round(self.start + i * self.step, 6)
+            for i in range(n_steps + 1)
+            if self.start + i * self.step <= self.stop + 1e-9
+        ]
+
+        random.shuffle(freqs)
+        return freqs
+
+
 
 def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationConfig:
     with path.open("rb") as f:
@@ -33,7 +45,7 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         stop=raw["stop"],
         step=raw["step"],
         reference=raw["reference"],
-
+        mode=raw["mode"],
     )
 
 
@@ -43,7 +55,16 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
 
     raw = asdict(config.get_raw())
     data["calibration"] = {
-        k: raw[k] for k in ["n_per_freq", "degree", "start", "stop", "step", "reference"]
+        k: raw[k]
+        for k in [
+            "n_per_freq",
+            "degree",
+            "start",
+            "stop",
+            "step",
+            "reference",
+            "mode",
+        ]
     }
 
     with path.open("wb") as f:
@@ -52,4 +73,3 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
 
 # Global instance
 calibration_config = ThreadSafeConfig(load_calibration_config(CALIBRATION_TOML_PATH))
-

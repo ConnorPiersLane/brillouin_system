@@ -5,7 +5,6 @@ from dataclasses import dataclass, fields
 from typing import Optional
 
 import numpy as np
-from matplotlib import pyplot as plt
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_position_log import interp_z_positions, ZaberPositionLog
 
@@ -24,13 +23,17 @@ class ReflectionResult:
     event_time_perf: Optional[float] = None    # perf_counter time_of(event_index)
     event_z_um: Optional[float] = None         # interpolated z at event time
     z_offset_um: Optional[float] = None
-    peak_value: Optional[float] = None         # only meaningful for mode="max"
+    peak_value: Optional[float] = None
+    background_mean: Optional[float] = None
+    background_std: Optional[float] = None
+    threshold_high: Optional[float] = None
+    threshold_low: Optional[float] = None
     idx_first: Optional[int] = None            # first sample above threshold_high
     idx_last: Optional[int] = None             # last sample above threshold_high (within the interval)
-    daq_ts: np.ndarray | None = None
-    daq_values: np.ndarray | None = None
-    zaber_lens_ts: np.ndarray | None = None
-    zaber_lens_z_um: np.ndarray | None = None
+    daq_ts: Optional[np.ndarray] = None
+    daq_values: Optional[np.ndarray] = None
+    zaber_lens_ts: Optional[np.ndarray] = None
+    zaber_lens_z_um: Optional[np.ndarray] = None
 
 def print_reflection_result(result):
     for f in fields(result):
@@ -176,7 +179,6 @@ def find_reflection_realtime(
             except Exception:
                 zlog = None
 
-
             try: err = ni.get_acquiring_error()
             except Exception: err = None
 
@@ -185,9 +187,18 @@ def find_reflection_realtime(
             except Exception:
                 daq: None = None
 
-    # Validate detection + acquisition
+
+    daq_ts = np.asarray(daq.timestamps_perf())
+    daq_values = np.asarray(daq.values)
+    zaber_lens_ts = np.asarray(zlog.t_perf)
+    zaber_lens_z_um = np.asarray(zlog.z_um)
+
+
     if (not in_interval) or idx_first is None or idx_last_above is None or daq is None or best_idx is None:
-        return ReflectionResult(found=False)
+        # Validate detection + acquisition
+        return ReflectionResult(
+            found=False,
+        )
 
     event_i = best_idx
     peak_val = best_v
@@ -199,10 +210,7 @@ def find_reflection_realtime(
     else:
         z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
 
-    daq_ts = np.asarray(daq.timestamps_perf())
-    daq_values = np.asarray(daq.values)
-    zaber_lens_ts = np.asarray(zlog.t_perf)
-    zaber_lens_z_um = np.asarray(zlog.z_um)
+
 
 
     return ReflectionResult(
@@ -212,6 +220,10 @@ def find_reflection_realtime(
         event_z_um=z_event,
         z_offset_um=z_offset_um,
         peak_value=peak_val,
+        background_mean=av,
+        background_std=sigma,
+        threshold_high=th_hi,
+        threshold_low=th_lo,
         idx_first=int(idx_first),
         idx_last=int(idx_last_above),
         daq_ts = daq_ts,
@@ -230,12 +242,12 @@ if __name__ == "__main__":
 
     ni = NI6008()
     z = ZaberEyeLens()
-    z.move_abs(14000)
+    z.move_abs(6000)
     res = find_reflection_realtime(
         ni, z,
         ni_sample_rate_hz=1000,
         speed_um_s=2000.0,
-        max_distance_um=5000.0,
+        max_distance_um=10000.0,
         threshold_high_n_sigma=20,
         threshold_low_n_sigma=4,
         bg_acqui_s=0.1,

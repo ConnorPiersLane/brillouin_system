@@ -13,13 +13,11 @@ class PupilCoord:
     z: float
 
 
-
-
 class RigPupilTransform:
     """
     Coordinate transform between rig coordinates and pupil coordinates.
 
-    d = pupil center expressed in rig coordinates
+    d = pupil center expressed in rig or laser coordinates
     Rotation = 180° around rig Y-axis
         R = diag([-1, 1, -1])
     """
