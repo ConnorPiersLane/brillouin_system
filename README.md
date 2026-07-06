@@ -32,7 +32,7 @@ C:\Program Files\Allied Vision\Vimba_6.0\VimbaPython\Source
 
 Due to permission restrictions in the Program Files directory, copy the entire `Source` directory to a location where you can make changes. For example, copy it to:
 
-C:\Users<YourUsername>\VimbaPython\Source
+C:\Users\<YourUsername>\VimbaPython\Source
 
 Replace `<YourUsername>` with your actual Windows username.
 
@@ -43,11 +43,11 @@ For example: `C:\Users\Mandelstam\Documents\Connor\VimbaPython\Source`
 pip install "vimbapython @ file:///C:/Users/<YourUsername>/vimba-python/Source"
 
 For example: `pip install vimbapython@file:///C:/Users/Mandelstam/Documents/Connor/VimbaPython/Source`
-`
+
 ### Spinnaker SDK and PySpin for the Flir Camera (microscope only)
 Install the Spinnaker PySpin package 
 (Attention, pip install PySpin will install pyspin, this has nothing to do with PySpin).
-Requirmement (currently: python 3.10).
+Requirement (currently: python 3.10).
 For example, I downloaded the python 3.10 spinnaker. In my venv, I than had to run:
 `pip install "C:\Users\Mandelstam\Downloads\spinnaker_python-4.2.0.83-cp310-cp310-win_amd64\spinnaker_python-4.2.0.83-cp310-cp310-win_amd64.whl"
 `
