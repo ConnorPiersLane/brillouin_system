@@ -22,6 +22,12 @@ from brillouin_system.spectrum_fitting.voigt_model import (
     _2voigt_binned,
 )
 
+from brillouin_system.spectrum_fitting.dho_model import (
+    _2dho_binned,
+    _sort_2dho_params,
+    dho_peak_height,
+)
+
 
 # -----------------------------
 # Symmetric Lorentzian models
@@ -188,12 +194,14 @@ class SpectrumFitter:
             "asym_lorentzian_window",
             "voigt",
             "voigt_window",
+            "dho",
+            "dho_window",
         ):
             raise ValueError(
                 f"Unknown model: '{requested_model}'. "
                 f"Supported models are 'lorentzian', 'lorentzian_window', "
                 f"'asym_lorentzian', 'asym_lorentzian_window', "
-                f"'voigt', and 'voigt_window'."
+                f"'voigt', 'voigt_window', 'dho', and 'dho_window'."
             )
 
         px = np.asarray(px, dtype=np.float64)
@@ -232,6 +240,24 @@ class SpectrumFitter:
         x_max = float(np.max(px))
         x_span = max(x_max - x_min, 1.0)
         offset = float(np.amin(sline))
+
+        if requested_model in ("dho", "dho_window"):
+            # The joint DHO model couples Stokes and anti-Stokes through shared
+            # omega0/gamma, so it needs both peaks to be present.
+            if n_peaks < 2:
+                print(
+                    f"[SpectrumFitter] DHO model needs two detected peaks "
+                    f"(found {n_peaks}) — returning unsuccessful fit."
+                )
+                return FittedSpectrum(
+                    is_success=False,
+                    sline=sline,
+                    x_pixels=px,
+                    model=requested_model,
+                )
+
+            order = np.argsort(cen)
+            amp, cen, wid = amp[order], cen[order], wid[order]
 
         if n_peaks == 1:
             if requested_model in ("lorentzian", "lorentzian_window"):
@@ -313,6 +339,33 @@ class SpectrumFitter:
                 )
                 model_func = _2voigt_binned
 
+            elif requested_model in ("dho", "dho_window"):
+                fit_kind = "2dho_window" if requested_model == "dho_window" else "2dho"
+
+                # cen is sorted ascending here (see dho block above).
+                # omega0 is only weakly constrained by the lineshape alone
+                # (only through the tail asymmetry), so it gets a bounded range
+                # around the inter-peak distance; centers and gamma are the
+                # robustly identified parameters.
+                d = max(float(cen[1] - cen[0]), 1.0)
+                omega0_0 = 0.8 * d
+                # wid from find_peaks is HWHM-like; DHO HWHM ~ gamma / 2
+                gamma0 = 2.0 * float(np.mean(wid))
+                gamma0 = min(max(gamma0, 1e-2), 2.0 * d)
+                height_unit = dho_peak_height(omega0_0, gamma0)
+
+                p0 = [
+                    amp[0] / height_unit, cen[0],
+                    amp[1] / height_unit, cen[1],
+                    omega0_0, gamma0,
+                    offset,
+                ]
+                bounds = (
+                    [0, x_min, 0, x_min, 0.05 * d, 1e-3, 0],
+                    [np.inf, x_max, np.inf, x_max, 10.0 * d, 2.0 * d, np.inf],
+                )
+                model_func = _2dho_binned
+
         if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
 
@@ -383,6 +436,27 @@ class SpectrumFitter:
             bounds = (lo, hi)
             mask_used = mask
 
+        elif requested_model == "dho_window":
+            beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
+
+            mask = self._build_window_mask(px, cen, wid, beta=beta)
+            px_fit = px[mask]
+            sline_fit = sline[mask]
+
+            lo, hi = list(bounds[0]), list(bounds[1])
+            center_ranges = self._bounded_center_ranges(px, cen, wid, beta=beta)
+
+            # Always two peaks here: centers at indices 1 and 3, gamma at 5.
+            lo[1], hi[1] = center_ranges[0]
+            lo[3], hi[3] = center_ranges[1]
+
+            wid_mean = float(np.mean(wid))
+            lo[5] = max(1e-3, 0.5 * wid_mean)
+            hi[5] = max(lo[5] * 2, 8.0 * wid_mean)
+
+            bounds = (lo, hi)
+            mask_used = mask
+
         else:
             px_fit = px
             sline_fit = sline
@@ -413,6 +487,9 @@ class SpectrumFitter:
                             popt[0], popt[1], popt[2], popt[3],
                             popt[8],
                         ])
+
+                elif requested_model in ("dho", "dho_window"):
+                    popt = _sort_2dho_params(popt)
 
         except Exception as e:
             print(f"[SpectrumFitter] Fit failed: {e}")
@@ -525,6 +602,34 @@ class SpectrumFitter:
                 right_peak_width_px=float(gamma),
                 right_peak_amplitude=float(amp / 2.0),
                 inter_peak_distance=0.0,
+                offset=float(offset),
+            )
+
+        if len(popt) == 7 and model.startswith("2dho"):
+            amp1, cen1, amp2, cen2, omega0, gamma, offset = popt
+
+            # DHO HWHM ~ gamma / 2; the reported amplitude is the peak height,
+            # matching the height semantics of the Lorentzian models.
+            hwhm = 0.5 * float(gamma)
+            height_unit = dho_peak_height(float(omega0), float(gamma))
+
+            return FittedSpectrum(
+                is_success=True,
+                model=model,
+                sline=sline,
+                x_pixels=px,
+                fitted_spectrum=fitted,
+                x_fit_refined=x_fit,
+                y_fit_refined=y_fit,
+                mask_for_fitting=mask,
+                parameters=popt,
+                left_peak_center_px=float(cen1),
+                left_peak_width_px=hwhm,
+                left_peak_amplitude=float(amp1) * height_unit,
+                right_peak_center_px=float(cen2),
+                right_peak_width_px=hwhm,
+                right_peak_amplitude=float(amp2) * height_unit,
+                inter_peak_distance=abs(cen2 - cen1),
                 offset=float(offset),
             )
 
