@@ -6,7 +6,9 @@ import tomli_w
 from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 
 FITTING_MODELS_SAMPLE = ["lorentzian", "lorentzian_quad_bg", "lorentzian_window", "voigt", "voigt_window", "asym_lorentzian", "asym_lorentzian_window", "dho", "dho_window"]
-FITTING_MODELS_REFERENCE = ["lorentzian", "lorentzian_window", "voigt", "voigt_window", "asym_lorentzian", "asym_lorentzian_window", "dho", "dho_window"]
+# The DHO model needs elastic anchors derived FROM a calibration, so it cannot
+# be used to fit the calibration reference spectra themselves.
+FITTING_MODELS_REFERENCE = ["lorentzian", "lorentzian_window", "voigt", "voigt_window", "asym_lorentzian", "asym_lorentzian_window"]
 
 @dataclass
 class FindPeaksConfig:

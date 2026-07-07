@@ -61,48 +61,6 @@ def _dho_pixel_integrated(x, amp, rayleigh_px, omega0, gamma, oversample=100):
     return amp * np.trapezoid(y, u, axis=1)
 
 
-def _2dho_binned(x, amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset):
-    """
-    Joint two-peak DHO model with shared omega0 and independent gamma1/gamma2.
-
-    cen1 and cen2 are the visible peak-maximum positions (cen1 < cen2). The
-    elastic-line anchors are derived from them: the left peak is the Stokes
-    hump of the Rayleigh order to its left (anchor at cen1 - u_pk1), the right
-    peak is the anti-Stokes hump of the next order (anchor at cen2 + u_pk2).
-
-    Each peak keeps its own damping gamma, so the two peaks may have different
-    widths (e.g. from non-uniform spectrometer dispersion across the window).
-    omega0 stays shared as a single, weakly-constrained asymmetry scale.
-
-    Parameter order:
-        [amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset]
-    """
-    u_pk1 = dho_peak_offset(omega0, gamma1)
-    u_pk2 = dho_peak_offset(omega0, gamma2)
-    rayleigh_left = cen1 - u_pk1
-    rayleigh_right = cen2 + u_pk2
-    return (
-        _dho_pixel_integrated(x, amp1, rayleigh_left, omega0, gamma1)
-        + _dho_pixel_integrated(x, amp2, rayleigh_right, omega0, gamma2)
-        + offset
-    )
-
-
-def _sort_2dho_params(popt):
-    """Ensure the peak at the smaller pixel position comes first.
-
-    popt = [amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset]
-    """
-    popt = np.asarray(popt, dtype=float)
-    if popt[4] < popt[1]:
-        return np.array([
-            popt[3], popt[4], popt[5],
-            popt[0], popt[1], popt[2],
-            popt[6], popt[7],
-        ])
-    return popt
-
-
 def make_2dho_anchored(rayleigh_left_px, rayleigh_right_px):
     """
     Build a two-peak DHO model (eq. S2 twice) with fixed elastic-line anchors.

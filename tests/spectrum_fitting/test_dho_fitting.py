@@ -8,10 +8,10 @@ from brillouin_system.calibration.calibration import (
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
-    _2dho_binned,
     dho_intensity,
     dho_peak_offset,
     dho_peak_height,
+    make_2dho_anchored,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
@@ -70,51 +70,41 @@ TRUE_ANCHORS = ElasticAnchors(
 )
 
 
-@pytest.mark.parametrize("model", ["dho", "dho_window"])
-def test_dho_fit_recovers_peak_positions_and_width(model):
+def test_dho_without_anchors_raises():
+    """The DHO model is eq. S2 anchored at the elastic lines; without
+    calibration anchors it must refuse to fit rather than silently degrade."""
     px, sline = make_synthetic_dho_sline()
 
-    result = fit_with_model(model, px, sline)
+    with pytest.raises(ValueError, match="anchors"):
+        fit_with_model("dho", px, sline)
+    with pytest.raises(ValueError, match="anchors"):
+        fit_with_model("dho_window", px, sline)
 
-    assert result.is_success
-    assert result.model == ("2dho" if model == "dho" else "2dho_window")
 
-    assert result.left_peak_center_px == pytest.approx(TRUE_CEN_LEFT, abs=0.5)
-    assert result.right_peak_center_px == pytest.approx(TRUE_CEN_RIGHT, abs=0.5)
-    assert result.inter_peak_distance == pytest.approx(
-        TRUE_CEN_RIGHT - TRUE_CEN_LEFT, abs=0.5
-    )
-
-    # Reported width is the HWHM ~ gamma / 2; both peaks share the same true
-    # width here, so the independently-fitted widths should agree closely.
-    assert result.left_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
-    assert result.right_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
-    assert result.right_peak_width_px == pytest.approx(result.left_peak_width_px, rel=0.1)
-
-    # Reported amplitudes are peak heights
-    true_height_left = AMP_LEFT * dho_peak_height(OMEGA0, GAMMA)
-    true_height_right = AMP_RIGHT * dho_peak_height(OMEGA0, GAMMA)
-    assert result.left_peak_amplitude == pytest.approx(true_height_left, rel=0.1)
-    assert result.right_peak_amplitude == pytest.approx(true_height_right, rel=0.1)
-
-    assert result.offset == pytest.approx(OFFSET, abs=10.0)
+def test_dho_with_invalid_anchors_raises():
+    px, sline = make_synthetic_dho_sline()
+    with pytest.raises(ValueError, match="Invalid elastic anchors"):
+        fit_with_model("dho", px, sline,
+                       anchors=ElasticAnchors(rayleigh_left_px=400.0, rayleigh_right_px=100.0))
+    with pytest.raises(ValueError, match="Invalid elastic anchors"):
+        fit_with_model("dho", px, sline,
+                       anchors=ElasticAnchors(rayleigh_left_px=np.nan, rayleigh_right_px=392.0))
 
 
 def test_dho_fit_fails_gracefully_with_one_peak():
     px = np.arange(0, 200, dtype=float)
     sline = 1000.0 * np.exp(-0.5 * ((px - 100.0) / 3.0) ** 2) + 20.0
 
-    result = fit_with_model("dho", px, sline)
+    result = fit_with_model("dho", px, sline,
+                            anchors=ElasticAnchors(rayleigh_left_px=20.0, rayleigh_right_px=180.0))
 
     assert not result.is_success
 
 
-def test_2dho_binned_model_is_consistent_with_kernel():
+def test_2dho_anchored_model_is_consistent_with_kernel():
     px = np.arange(150, 380, dtype=float)
-    params = dict(amp1=AMP_LEFT, cen1=TRUE_CEN_LEFT, gamma1=GAMMA,
-                  amp2=AMP_RIGHT, cen2=TRUE_CEN_RIGHT, gamma2=GAMMA,
-                  omega0=OMEGA0, offset=OFFSET)
-    binned = _2dho_binned(px, **params)
+    model_func = make_2dho_anchored(RAYLEIGH_LEFT, RAYLEIGH_RIGHT)
+    binned = model_func(px, AMP_LEFT, OMEGA0, GAMMA, AMP_RIGHT, OMEGA0, GAMMA, OFFSET)
 
     unbinned = (
         AMP_LEFT * dho_intensity(px - RAYLEIGH_LEFT, OMEGA0, GAMMA)
@@ -145,9 +135,10 @@ def test_dho_fit_recovers_two_different_widths():
     rng = np.random.default_rng(3)
     sline = signal + rng.normal(0.0, np.sqrt(np.clip(signal, 1.0, None)))
 
-    result = fit_with_model("dho", px, sline)
+    result = fit_with_model("dho", px, sline, anchors=TRUE_ANCHORS)
 
     assert result.is_success
+    assert result.model == "2dho_anchored"
     # Widths recovered independently (HWHM ~ gamma / 2)
     assert result.left_peak_width_px == pytest.approx(gamma_left / 2, rel=0.2)
     assert result.right_peak_width_px == pytest.approx(gamma_right / 2, rel=0.2)
@@ -156,6 +147,9 @@ def test_dho_fit_recovers_two_different_widths():
     # Positions still recovered
     assert result.left_peak_center_px == pytest.approx(cen_left, abs=0.7)
     assert result.right_peak_center_px == pytest.approx(cen_right, abs=0.7)
+    # Both omegas estimate the same resonance
+    assert result.omega_left_px == pytest.approx(OMEGA0, rel=0.05)
+    assert result.omega_right_px == pytest.approx(OMEGA0, rel=0.05)
 
 
 @pytest.mark.parametrize("model", ["dho", "dho_window"])
@@ -182,22 +176,22 @@ def test_anchored_dho_recovers_omega_and_gamma(model):
     assert result.offset == pytest.approx(OFFSET, abs=10.0)
 
 
-def test_inconsistent_anchors_fall_back_to_free_dho():
-    """Anchors that do not bracket the detected peaks must not be used."""
+def test_non_bracketing_anchors_return_unsuccessful_fit():
+    """Anchors that do not bracket the detected peaks (e.g. calibration
+    drift) must not produce a fit — and must not crash a scan loop."""
     px, sline = make_synthetic_dho_sline()
     bad_anchors = ElasticAnchors(rayleigh_left_px=250.0, rayleigh_right_px=300.0)
 
     result = fit_with_model("dho", px, sline, anchors=bad_anchors)
 
-    assert result.is_success
-    assert result.model == "2dho"  # free-anchor fallback
+    assert not result.is_success
     assert result.omega_left_px is None
     assert result.rayleigh_left_px is None
 
 
-def test_free_dho_leaves_anchor_fields_none():
+def test_other_models_ignore_anchors():
     px, sline = make_synthetic_dho_sline()
-    result = fit_with_model("dho", px, sline)
+    result = fit_with_model("lorentzian_window", px, sline, anchors=TRUE_ANCHORS)
     assert result.is_success
     assert result.omega_left_px is None
     assert result.omega_right_px is None
