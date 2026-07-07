@@ -22,14 +22,17 @@ class TheoreticalPeakStdError:
 
 @dataclass
 class AnalyzedFreqShifts:
+    """
+    Note: for the anchored DHO model ("2dho_anchored*"), the peak centers are
+    the fitted resonance positions, so freq_shift_left/right are directly the
+    true (damping-corrected) Brillouin shifts. For all other models they are
+    the calibrated positions of the visible peak maxima.
+    """
     freq_shift_left_peak_ghz: float | None
     freq_shift_right_peak_ghz: float | None
     freq_shift_peak_distance_ghz: float | None
     hwhm_left_peak_ghz: float | None
     hwhm_right_peak_ghz: float | None
-    # Anchored DHO fit only: Brillouin resonances (damping-corrected shifts).
-    omega_left_ghz: float | None = None
-    omega_right_ghz: float | None = None
 
 
 @dataclass
@@ -87,34 +90,7 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
-            omega_left_ghz=self._omega_ghz(
-                fitting.rayleigh_left_px, fitting.omega_left_px,
-                self.calibration_calculator.freq_left_peak, sign=+1,
-            ),
-            omega_right_ghz=self._omega_ghz(
-                fitting.rayleigh_right_px, fitting.omega_right_px,
-                self.calibration_calculator.freq_right_peak, sign=-1,
-            ),
         )
-
-    @staticmethod
-    def _omega_ghz(rayleigh_px, omega_px, freq_poly, sign: int) -> float | None:
-        """
-        Convert an anchored-DHO resonance from pixels to GHz.
-
-        The resonance sits at pixel rayleigh_px + sign * omega_px (the left
-        peak extends rightward from its elastic line, the right peak
-        leftward). Evaluating the calibration polynomial there measures the
-        frequency offset from the elastic line in its trusted range near the
-        peaks; anchor errors largely cancel because the pixel position is
-        data-determined.
-        """
-        if rayleigh_px is None or omega_px is None:
-            return None
-        value = float(freq_poly(rayleigh_px + sign * omega_px))
-        if not math.isfinite(value):
-            return None
-        return abs(value)
 
 
     def theoretical_precision(self, fs: FittedSpectrum,

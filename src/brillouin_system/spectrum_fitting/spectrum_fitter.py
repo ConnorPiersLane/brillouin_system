@@ -25,7 +25,6 @@ from brillouin_system.spectrum_fitting.voigt_model import (
 from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
     dho_peak_height,
-    dho_peak_offset,
     make_2dho_anchored,
 )
 
@@ -609,12 +608,15 @@ class SpectrumFitter:
             r_left = float(anchors.rayleigh_left_px)
             r_right = float(anchors.rayleigh_right_px)
 
-            # Visible peak maxima are pulled toward the elastic lines by
-            # damping: u_pk = sqrt(omega^2 - gamma^2/2).
-            u_pk1 = dho_peak_offset(float(omega1), float(gamma1))
-            u_pk2 = dho_peak_offset(float(omega2), float(gamma2))
-            cen1 = r_left + u_pk1
-            cen2 = r_right - u_pk2
+            # The reported peak centers are the RESONANCE positions
+            # (rayleigh +/- omega), so the downstream calibration converts
+            # them directly into the true (damping-corrected) Brillouin
+            # shift. The visible maximum sits slightly closer to the elastic
+            # line, at rayleigh +/- sqrt(omega^2 - gamma^2/2); it can be
+            # reconstructed from `parameters` and the rayleigh fields if
+            # ever needed.
+            cen1 = r_left + float(omega1)
+            cen2 = r_right - float(omega2)
 
             return FittedSpectrum(
                 is_success=True,
@@ -634,8 +636,6 @@ class SpectrumFitter:
                 right_peak_amplitude=float(amp2) * dho_peak_height(float(omega2), float(gamma2)),
                 inter_peak_distance=float(cen2 - cen1),
                 offset=float(offset),
-                omega_left_px=float(omega1),
-                omega_right_px=float(omega2),
                 rayleigh_left_px=r_left,
                 rayleigh_right_px=r_right,
             )

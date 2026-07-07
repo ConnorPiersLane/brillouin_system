@@ -9,8 +9,6 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
     dho_intensity,
-    dho_peak_offset,
-    dho_peak_height,
     make_2dho_anchored,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig
@@ -29,9 +27,6 @@ AMP_LEFT = 8000.0
 AMP_RIGHT = 6000.0
 OFFSET = 50.0
 
-U_PK = dho_peak_offset(OMEGA0, GAMMA)
-TRUE_CEN_LEFT = RAYLEIGH_LEFT + U_PK
-TRUE_CEN_RIGHT = RAYLEIGH_RIGHT - U_PK
 
 
 def make_config(model: str) -> FindPeaksConfig:
@@ -121,10 +116,6 @@ def test_dho_fit_recovers_two_different_widths():
     recover them independently rather than collapsing to a single width."""
     gamma_left = 6.0
     gamma_right = 12.0
-    u_pk_left = dho_peak_offset(OMEGA0, gamma_left)
-    u_pk_right = dho_peak_offset(OMEGA0, gamma_right)
-    cen_left = RAYLEIGH_LEFT + u_pk_left
-    cen_right = RAYLEIGH_RIGHT - u_pk_right
 
     px = np.arange(150, 380, dtype=float)
     signal = (
@@ -144,18 +135,19 @@ def test_dho_fit_recovers_two_different_widths():
     assert result.right_peak_width_px == pytest.approx(gamma_right / 2, rel=0.2)
     # And they are clearly distinct, not collapsed to one shared value
     assert result.right_peak_width_px > 1.4 * result.left_peak_width_px
-    # Positions still recovered
-    assert result.left_peak_center_px == pytest.approx(cen_left, abs=0.7)
-    assert result.right_peak_center_px == pytest.approx(cen_right, abs=0.7)
-    # Both omegas estimate the same resonance
-    assert result.omega_left_px == pytest.approx(OMEGA0, rel=0.05)
-    assert result.omega_right_px == pytest.approx(OMEGA0, rel=0.05)
+    # Centers are the resonance positions: both peaks have the same true
+    # omega despite the different widths, so both sit omega away from their
+    # own elastic lines (the visible maxima cen_left/cen_right differ more).
+    assert result.left_peak_center_px == pytest.approx(RAYLEIGH_LEFT + OMEGA0, abs=0.7)
+    assert result.right_peak_center_px == pytest.approx(RAYLEIGH_RIGHT - OMEGA0, abs=0.7)
 
 
 @pytest.mark.parametrize("model", ["dho", "dho_window"])
 def test_anchored_dho_recovers_omega_and_gamma(model):
-    """With calibration-derived anchors, omega is the Brillouin resonance in
-    px and must be recovered tightly (this is the whole point of anchoring)."""
+    """With calibration-derived anchors the reported peak centers are the
+    RESONANCE positions (rayleigh +/- omega), i.e. the true Brillouin shift
+    location — not the visible maximum, which damping pulls toward the
+    elastic line."""
     px, sline = make_synthetic_dho_sline()
 
     result = fit_with_model(model, px, sline, anchors=TRUE_ANCHORS)
@@ -164,13 +156,19 @@ def test_anchored_dho_recovers_omega_and_gamma(model):
     expected_kind = "2dho_anchored_window" if model == "dho_window" else "2dho_anchored"
     assert result.model == expected_kind
 
-    assert result.omega_left_px == pytest.approx(OMEGA0, rel=0.02)
-    assert result.omega_right_px == pytest.approx(OMEGA0, rel=0.02)
     assert result.rayleigh_left_px == RAYLEIGH_LEFT
     assert result.rayleigh_right_px == RAYLEIGH_RIGHT
 
-    assert result.left_peak_center_px == pytest.approx(TRUE_CEN_LEFT, abs=0.5)
-    assert result.right_peak_center_px == pytest.approx(TRUE_CEN_RIGHT, abs=0.5)
+    # Centers are the resonance positions: rayleigh +/- omega
+    assert result.left_peak_center_px == pytest.approx(RAYLEIGH_LEFT + OMEGA0, abs=0.5)
+    assert result.right_peak_center_px == pytest.approx(RAYLEIGH_RIGHT - OMEGA0, abs=0.5)
+
+    # Omega recovered tightly (this is the whole point of anchoring)
+    omega_left = result.left_peak_center_px - result.rayleigh_left_px
+    omega_right = result.rayleigh_right_px - result.right_peak_center_px
+    assert omega_left == pytest.approx(OMEGA0, rel=0.02)
+    assert omega_right == pytest.approx(OMEGA0, rel=0.02)
+
     assert result.left_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
     assert result.right_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
     assert result.offset == pytest.approx(OFFSET, abs=10.0)
@@ -185,7 +183,6 @@ def test_non_bracketing_anchors_return_unsuccessful_fit():
     result = fit_with_model("dho", px, sline, anchors=bad_anchors)
 
     assert not result.is_success
-    assert result.omega_left_px is None
     assert result.rayleigh_left_px is None
 
 
@@ -193,8 +190,8 @@ def test_other_models_ignore_anchors():
     px, sline = make_synthetic_dho_sline()
     result = fit_with_model("lorentzian_window", px, sline, anchors=TRUE_ANCHORS)
     assert result.is_success
-    assert result.omega_left_px is None
-    assert result.omega_right_px is None
+    assert result.rayleigh_left_px is None
+    assert result.rayleigh_right_px is None
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +276,10 @@ def test_elastic_anchors_degree2_without_points_returns_none():
     assert CalibrationCalculator(params).elastic_anchors() is None
 
 
-def test_analyzer_converts_omega_to_ghz():
+def test_freq_shifts_of_anchored_fit_are_true_brillouin_shifts():
+    """For the anchored DHO the peak centers hold the resonance positions,
+    so the standard freq_shift outputs directly carry the true shift —
+    no separate omega field, one value chain downstream."""
     calc = CalibrationCalculator(make_linear_calibration_params())
     analyzer = SpectrumAnalyzer(calibration_calculator=calc)
 
@@ -288,36 +288,19 @@ def test_analyzer_converts_omega_to_ghz():
         x_pixels=np.arange(10, dtype=float),
         sline=np.zeros(10),
         model="2dho_anchored",
-        left_peak_center_px=TRUE_CEN_LEFT,
+        left_peak_center_px=RAYLEIGH_LEFT + OMEGA0,
         left_peak_width_px=GAMMA / 2,
-        right_peak_center_px=TRUE_CEN_RIGHT,
+        right_peak_center_px=RAYLEIGH_RIGHT - OMEGA0,
         right_peak_width_px=GAMMA / 2,
-        inter_peak_distance=TRUE_CEN_RIGHT - TRUE_CEN_LEFT,
-        omega_left_px=OMEGA0,
-        omega_right_px=OMEGA0,
+        inter_peak_distance=(RAYLEIGH_RIGHT - OMEGA0) - (RAYLEIGH_LEFT + OMEGA0),
         rayleigh_left_px=RAYLEIGH_LEFT,
         rayleigh_right_px=RAYLEIGH_RIGHT,
     )
 
     shifts = analyzer.analyze_spectrum(fitting)
 
-    assert shifts.omega_left_ghz == pytest.approx(A_LEFT * OMEGA0, rel=1e-9)
-    assert shifts.omega_right_ghz == pytest.approx(abs(A_RIGHT) * OMEGA0, rel=1e-9)
-
-    # Non-anchored fits carry no omega
-    fitting_plain = FittedSpectrum(
-        is_success=True,
-        x_pixels=np.arange(10, dtype=float),
-        sline=np.zeros(10),
-        left_peak_center_px=TRUE_CEN_LEFT,
-        left_peak_width_px=GAMMA / 2,
-        right_peak_center_px=TRUE_CEN_RIGHT,
-        right_peak_width_px=GAMMA / 2,
-        inter_peak_distance=TRUE_CEN_RIGHT - TRUE_CEN_LEFT,
-    )
-    shifts_plain = analyzer.analyze_spectrum(fitting_plain)
-    assert shifts_plain.omega_left_ghz is None
-    assert shifts_plain.omega_right_ghz is None
+    assert shifts.freq_shift_left_peak_ghz == pytest.approx(A_LEFT * OMEGA0, rel=1e-9)
+    assert shifts.freq_shift_right_peak_ghz == pytest.approx(abs(A_RIGHT) * OMEGA0, rel=1e-9)
 
 
 def test_lorentzian_window_regression_for_calibration_pipeline():
