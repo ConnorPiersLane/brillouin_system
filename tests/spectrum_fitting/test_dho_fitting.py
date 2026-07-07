@@ -72,9 +72,11 @@ def test_dho_fit_recovers_peak_positions_and_width(model):
         TRUE_CEN_RIGHT - TRUE_CEN_LEFT, abs=0.5
     )
 
-    # Reported width is the HWHM ~ gamma / 2
+    # Reported width is the HWHM ~ gamma / 2; both peaks share the same true
+    # width here, so the independently-fitted widths should agree closely.
     assert result.left_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
-    assert result.right_peak_width_px == result.left_peak_width_px
+    assert result.right_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
+    assert result.right_peak_width_px == pytest.approx(result.left_peak_width_px, rel=0.1)
 
     # Reported amplitudes are peak heights
     true_height_left = AMP_LEFT * dho_peak_height(OMEGA0, GAMMA)
@@ -96,8 +98,9 @@ def test_dho_fit_fails_gracefully_with_one_peak():
 
 def test_2dho_binned_model_is_consistent_with_kernel():
     px = np.arange(150, 380, dtype=float)
-    params = dict(amp1=AMP_LEFT, cen1=TRUE_CEN_LEFT, amp2=AMP_RIGHT,
-                  cen2=TRUE_CEN_RIGHT, omega0=OMEGA0, gamma=GAMMA, offset=OFFSET)
+    params = dict(amp1=AMP_LEFT, cen1=TRUE_CEN_LEFT, gamma1=GAMMA,
+                  amp2=AMP_RIGHT, cen2=TRUE_CEN_RIGHT, gamma2=GAMMA,
+                  omega0=OMEGA0, offset=OFFSET)
     binned = _2dho_binned(px, **params)
 
     unbinned = (
@@ -108,6 +111,38 @@ def test_2dho_binned_model_is_consistent_with_kernel():
 
     # Pixel integration smooths the curve slightly; agreement should be close.
     np.testing.assert_allclose(binned, unbinned, rtol=0.05, atol=1.0)
+
+
+def test_dho_fit_recovers_two_different_widths():
+    """The two peaks may have genuinely different linewidths; the fit must
+    recover them independently rather than collapsing to a single width."""
+    gamma_left = 6.0
+    gamma_right = 12.0
+    u_pk_left = dho_peak_offset(OMEGA0, gamma_left)
+    u_pk_right = dho_peak_offset(OMEGA0, gamma_right)
+    cen_left = RAYLEIGH_LEFT + u_pk_left
+    cen_right = RAYLEIGH_RIGHT - u_pk_right
+
+    px = np.arange(150, 380, dtype=float)
+    signal = (
+        AMP_LEFT * dho_intensity(px - RAYLEIGH_LEFT, OMEGA0, gamma_left)
+        + AMP_RIGHT * dho_intensity(px - RAYLEIGH_RIGHT, OMEGA0, gamma_right)
+        + OFFSET
+    )
+    rng = np.random.default_rng(3)
+    sline = signal + rng.normal(0.0, np.sqrt(np.clip(signal, 1.0, None)))
+
+    result = fit_with_model("dho", px, sline)
+
+    assert result.is_success
+    # Widths recovered independently (HWHM ~ gamma / 2)
+    assert result.left_peak_width_px == pytest.approx(gamma_left / 2, rel=0.2)
+    assert result.right_peak_width_px == pytest.approx(gamma_right / 2, rel=0.2)
+    # And they are clearly distinct, not collapsed to one shared value
+    assert result.right_peak_width_px > 1.4 * result.left_peak_width_px
+    # Positions still recovered
+    assert result.left_peak_center_px == pytest.approx(cen_left, abs=0.7)
+    assert result.right_peak_center_px == pytest.approx(cen_right, abs=0.7)
 
 
 def test_lorentzian_window_regression_for_calibration_pipeline():

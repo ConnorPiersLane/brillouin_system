@@ -345,24 +345,28 @@ class SpectrumFitter:
                 # cen is sorted ascending here (see dho block above).
                 # omega0 is only weakly constrained by the lineshape alone
                 # (only through the tail asymmetry), so it gets a bounded range
-                # around the inter-peak distance; centers and gamma are the
-                # robustly identified parameters.
+                # around the inter-peak distance; centers and gammas are the
+                # robustly identified parameters. gamma1/gamma2 are independent
+                # so the two peaks may take different widths.
                 d = max(float(cen[1] - cen[0]), 1.0)
                 omega0_0 = 0.8 * d
                 # wid from find_peaks is HWHM-like; DHO HWHM ~ gamma / 2
-                gamma0 = 2.0 * float(np.mean(wid))
-                gamma0 = min(max(gamma0, 1e-2), 2.0 * d)
-                height_unit = dho_peak_height(omega0_0, gamma0)
+                def _gamma_guess(w):
+                    return min(max(2.0 * float(w), 1e-2), 2.0 * d)
+                gamma1_0 = _gamma_guess(wid[0])
+                gamma2_0 = _gamma_guess(wid[1])
+                height_unit1 = dho_peak_height(omega0_0, gamma1_0)
+                height_unit2 = dho_peak_height(omega0_0, gamma2_0)
 
                 p0 = [
-                    amp[0] / height_unit, cen[0],
-                    amp[1] / height_unit, cen[1],
-                    omega0_0, gamma0,
+                    amp[0] / height_unit1, cen[0], gamma1_0,
+                    amp[1] / height_unit2, cen[1], gamma2_0,
+                    omega0_0,
                     offset,
                 ]
                 bounds = (
-                    [0, x_min, 0, x_min, 0.05 * d, 1e-3, 0],
-                    [np.inf, x_max, np.inf, x_max, 10.0 * d, 2.0 * d, np.inf],
+                    [0, x_min, 1e-3, 0, x_min, 1e-3, 0.05 * d, 0],
+                    [np.inf, x_max, 2.0 * d, np.inf, x_max, 2.0 * d, 10.0 * d, np.inf],
                 )
                 model_func = _2dho_binned
 
@@ -446,13 +450,15 @@ class SpectrumFitter:
             lo, hi = list(bounds[0]), list(bounds[1])
             center_ranges = self._bounded_center_ranges(px, cen, wid, beta=beta)
 
-            # Always two peaks here: centers at indices 1 and 3, gamma at 5.
+            # Param order: [amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset]
+            # Always two peaks here: centers at 1 and 4, gammas at 2 and 5.
             lo[1], hi[1] = center_ranges[0]
-            lo[3], hi[3] = center_ranges[1]
+            lo[4], hi[4] = center_ranges[1]
 
-            wid_mean = float(np.mean(wid))
-            lo[5] = max(1e-3, 0.5 * wid_mean)
-            hi[5] = max(lo[5] * 2, 8.0 * wid_mean)
+            lo[2] = max(1e-3, 0.5 * float(wid[0]))
+            hi[2] = max(lo[2] * 2, 8.0 * float(wid[0]))
+            lo[5] = max(1e-3, 0.5 * float(wid[1]))
+            hi[5] = max(lo[5] * 2, 8.0 * float(wid[1]))
 
             bounds = (lo, hi)
             mask_used = mask
@@ -605,13 +611,15 @@ class SpectrumFitter:
                 offset=float(offset),
             )
 
-        if len(popt) == 7 and model.startswith("2dho"):
-            amp1, cen1, amp2, cen2, omega0, gamma, offset = popt
+        if len(popt) == 8 and model.startswith("2dho"):
+            amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset = popt
 
-            # DHO HWHM ~ gamma / 2; the reported amplitude is the peak height,
-            # matching the height semantics of the Lorentzian models.
-            hwhm = 0.5 * float(gamma)
-            height_unit = dho_peak_height(float(omega0), float(gamma))
+            # DHO HWHM ~ gamma / 2; each peak keeps its own width. The reported
+            # amplitude is the peak height, matching the Lorentzian models.
+            hwhm1 = 0.5 * float(gamma1)
+            hwhm2 = 0.5 * float(gamma2)
+            height_unit1 = dho_peak_height(float(omega0), float(gamma1))
+            height_unit2 = dho_peak_height(float(omega0), float(gamma2))
 
             return FittedSpectrum(
                 is_success=True,
@@ -624,11 +632,11 @@ class SpectrumFitter:
                 mask_for_fitting=mask,
                 parameters=popt,
                 left_peak_center_px=float(cen1),
-                left_peak_width_px=hwhm,
-                left_peak_amplitude=float(amp1) * height_unit,
+                left_peak_width_px=hwhm1,
+                left_peak_amplitude=float(amp1) * height_unit1,
                 right_peak_center_px=float(cen2),
-                right_peak_width_px=hwhm,
-                right_peak_amplitude=float(amp2) * height_unit,
+                right_peak_width_px=hwhm2,
+                right_peak_amplitude=float(amp2) * height_unit2,
                 inter_peak_distance=abs(cen2 - cen1),
                 offset=float(offset),
             )
