@@ -65,8 +65,12 @@ class AnalyzedSpectrum:
 # -------------- Functions --------------
 def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()
-    spectrum_analyzer = SpectrumAnalyzer(
-        calibration_calculator=CalibrationCalculator(parameters=scan.calibration_params))
+    calibration_calculator = CalibrationCalculator(parameters=scan.calibration_params)
+    spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
+
+    # Elastic-line anchors for the anchored DHO fit; None (→ free-anchor
+    # fallback) when the stored calibration cannot provide them.
+    anchors = calibration_calculator.elastic_anchors() if scan.calibration_params is not None else None
 
     do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
 
@@ -86,7 +90,7 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
         px, sline = spectrum_fitter.get_px_sline_from_image(frame)
 
         # Fit spectrum
-        fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode)
+        fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode, anchors=anchors)
 
         analyzed_shift = spectrum_analyzer.analyze_spectrum(fitting=fitting)
 

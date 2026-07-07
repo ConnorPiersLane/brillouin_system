@@ -26,6 +26,13 @@ class FittedSpectrum:
     right_peak_amplitude: float = None
     inter_peak_distance: float = None
     offset: float = None
+    # Anchored DHO fit only (model "2dho_anchored*"): Brillouin resonances in
+    # pixel units, measured from the elastic (Rayleigh) lines, and the anchor
+    # positions used. None for all other models.
+    omega_left_px: float = None
+    omega_right_px: float = None
+    rayleigh_left_px: float = None
+    rayleigh_right_px: float = None
 
 @dataclass
 class GratingSpectrum:

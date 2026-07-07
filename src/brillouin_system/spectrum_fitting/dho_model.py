@@ -1,4 +1,18 @@
+from dataclasses import dataclass
+
 import numpy as np
+
+
+@dataclass
+class ElasticAnchors:
+    """
+    Pixel positions of the elastic (Rayleigh) lines bracketing the two
+    Brillouin peaks, derived from the frequency calibration (see
+    CalibrationCalculator.elastic_anchors). The left Rayleigh order sits left
+    of the left peak, the right order right of the right peak.
+    """
+    rayleigh_left_px: float
+    rayleigh_right_px: float
 
 
 def dho_intensity(u, omega0, gamma):
@@ -87,3 +101,32 @@ def _sort_2dho_params(popt):
             popt[6], popt[7],
         ])
     return popt
+
+
+def make_2dho_anchored(rayleigh_left_px, rayleigh_right_px):
+    """
+    Build a two-peak DHO model (eq. S2 twice) with fixed elastic-line anchors.
+
+    Each peak is a DHO anchored at its own Rayleigh order: the left peak is
+    the Stokes hump of the left order (visible at rayleigh_left_px + u_pk1),
+    the right peak the anti-Stokes hump of the right order (visible at
+    rayleigh_right_px - u_pk2). With the anchors fixed by the calibration,
+    omega1 and omega2 are directly the Brillouin resonances of the two peaks
+    in pixel units, measured from their own elastic lines. The fitted gammas
+    are total (material + instrument) widths; instrument subtraction happens
+    downstream.
+
+    Parameter order:
+        [amp1, omega1, gamma1, amp2, omega2, gamma2, offset]
+    """
+    rayleigh_left_px = float(rayleigh_left_px)
+    rayleigh_right_px = float(rayleigh_right_px)
+
+    def _2dho_anchored(x, amp1, omega1, gamma1, amp2, omega2, gamma2, offset):
+        return (
+            _dho_pixel_integrated(x, amp1, rayleigh_left_px, omega1, gamma1)
+            + _dho_pixel_integrated(x, amp2, rayleigh_right_px, omega2, gamma2)
+            + offset
+        )
+
+    return _2dho_anchored

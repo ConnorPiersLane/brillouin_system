@@ -23,9 +23,12 @@ from brillouin_system.spectrum_fitting.voigt_model import (
 )
 
 from brillouin_system.spectrum_fitting.dho_model import (
+    ElasticAnchors,
     _2dho_binned,
     _sort_2dho_params,
     dho_peak_height,
+    dho_peak_offset,
+    make_2dho_anchored,
 )
 
 
@@ -183,7 +186,13 @@ class SpectrumFitter:
             return 0.0
         return float(np.sum(sline))
 
-    def fit(self, px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
+    def fit(
+        self,
+        px: np.ndarray,
+        sline: np.ndarray,
+        is_reference_mode: bool,
+        anchors: ElasticAnchors | None = None,
+    ) -> FittedSpectrum:
         config = self.reference_config if is_reference_mode else self.sample_config
         requested_model = config.fitting_model
 
@@ -241,6 +250,9 @@ class SpectrumFitter:
         x_span = max(x_max - x_min, 1.0)
         offset = float(np.amin(sline))
 
+        use_anchored = False
+        r_left = r_right = None
+
         if requested_model in ("dho", "dho_window"):
             # The joint DHO model couples Stokes and anti-Stokes through shared
             # omega0/gamma, so it needs both peaks to be present.
@@ -258,6 +270,20 @@ class SpectrumFitter:
 
             order = np.argsort(cen)
             amp, cen, wid = amp[order], cen[order], wid[order]
+
+            # With calibration-derived elastic anchors the DHO becomes eq. S2
+            # anchored at the true Rayleigh positions; omega is then the
+            # Brillouin resonance itself. The anchors must bracket the peaks.
+            if anchors is not None:
+                r_left = float(anchors.rayleigh_left_px)
+                r_right = float(anchors.rayleigh_right_px)
+                if np.isfinite(r_left) and np.isfinite(r_right) and r_left < cen[0] and cen[1] < r_right:
+                    use_anchored = True
+                else:
+                    print(
+                        "[SpectrumFitter] Elastic anchors inconsistent with "
+                        "detected peaks — falling back to free-anchor DHO."
+                    )
 
         if n_peaks == 1:
             if requested_model in ("lorentzian", "lorentzian_window"):
@@ -340,35 +366,63 @@ class SpectrumFitter:
                 model_func = _2voigt_binned
 
             elif requested_model in ("dho", "dho_window"):
-                fit_kind = "2dho_window" if requested_model == "dho_window" else "2dho"
-
                 # cen is sorted ascending here (see dho block above).
-                # omega0 is only weakly constrained by the lineshape alone
-                # (only through the tail asymmetry), so it gets a bounded range
-                # around the inter-peak distance; centers and gammas are the
-                # robustly identified parameters. gamma1/gamma2 are independent
-                # so the two peaks may take different widths.
                 d = max(float(cen[1] - cen[0]), 1.0)
-                omega0_0 = 0.8 * d
-                # wid from find_peaks is HWHM-like; DHO HWHM ~ gamma / 2
+
+                # wid from find_peaks is HWHM-like; DHO HWHM ~ gamma / 2.
+                # gamma1/gamma2 are independent so the two peaks may take
+                # different widths.
                 def _gamma_guess(w):
                     return min(max(2.0 * float(w), 1e-2), 2.0 * d)
                 gamma1_0 = _gamma_guess(wid[0])
                 gamma2_0 = _gamma_guess(wid[1])
-                height_unit1 = dho_peak_height(omega0_0, gamma1_0)
-                height_unit2 = dho_peak_height(omega0_0, gamma2_0)
 
-                p0 = [
-                    amp[0] / height_unit1, cen[0], gamma1_0,
-                    amp[1] / height_unit2, cen[1], gamma2_0,
-                    omega0_0,
-                    offset,
-                ]
-                bounds = (
-                    [0, x_min, 1e-3, 0, x_min, 1e-3, 0.05 * d, 0],
-                    [np.inf, x_max, 2.0 * d, np.inf, x_max, 2.0 * d, 10.0 * d, np.inf],
-                )
-                model_func = _2dho_binned
+                if use_anchored:
+                    # Eq. S2 anchored at the calibration-derived elastic lines:
+                    # omega1/omega2 are the Brillouin resonances (px units),
+                    # strongly determined by the peak positions.
+                    fit_kind = "2dho_anchored_window" if requested_model == "dho_window" else "2dho_anchored"
+
+                    fsr_px = r_right - r_left
+                    omega1_0 = max(float(cen[0]) - r_left, 1.0)
+                    omega2_0 = max(r_right - float(cen[1]), 1.0)
+                    height_unit1 = dho_peak_height(omega1_0, gamma1_0)
+                    height_unit2 = dho_peak_height(omega2_0, gamma2_0)
+
+                    p0 = [
+                        amp[0] / height_unit1, omega1_0, gamma1_0,
+                        amp[1] / height_unit2, omega2_0, gamma2_0,
+                        offset,
+                    ]
+                    bounds = (
+                        [0, 1e-2, 1e-3, 0, 1e-2, 1e-3, 0],
+                        [np.inf, fsr_px, 2.0 * d, np.inf, fsr_px, 2.0 * d, np.inf],
+                    )
+                    model_func = make_2dho_anchored(r_left, r_right)
+
+                else:
+                    # Free-anchor fallback: omega0 is only weakly constrained
+                    # by the lineshape alone (only through the tail
+                    # asymmetry), so it gets a bounded range around the
+                    # inter-peak distance; centers and gammas are the robustly
+                    # identified parameters.
+                    fit_kind = "2dho_window" if requested_model == "dho_window" else "2dho"
+
+                    omega0_0 = 0.8 * d
+                    height_unit1 = dho_peak_height(omega0_0, gamma1_0)
+                    height_unit2 = dho_peak_height(omega0_0, gamma2_0)
+
+                    p0 = [
+                        amp[0] / height_unit1, cen[0], gamma1_0,
+                        amp[1] / height_unit2, cen[1], gamma2_0,
+                        omega0_0,
+                        offset,
+                    ]
+                    bounds = (
+                        [0, x_min, 1e-3, 0, x_min, 1e-3, 0.05 * d, 0],
+                        [np.inf, x_max, 2.0 * d, np.inf, x_max, 2.0 * d, 10.0 * d, np.inf],
+                    )
+                    model_func = _2dho_binned
 
         if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
@@ -450,10 +504,20 @@ class SpectrumFitter:
             lo, hi = list(bounds[0]), list(bounds[1])
             center_ranges = self._bounded_center_ranges(px, cen, wid, beta=beta)
 
-            # Param order: [amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset]
-            # Always two peaks here: centers at 1 and 4, gammas at 2 and 5.
-            lo[1], hi[1] = center_ranges[0]
-            lo[4], hi[4] = center_ranges[1]
+            if use_anchored:
+                # Param order: [amp1, omega1, gamma1, amp2, omega2, gamma2, offset]
+                # Translate the pixel center ranges into omega ranges relative
+                # to the fixed anchors (left peak sits at r_left + u_pk, right
+                # peak at r_right - u_pk).
+                lo[1] = max(1e-2, center_ranges[0][0] - r_left)
+                hi[1] = max(lo[1] * 2, center_ranges[0][1] - r_left)
+                lo[4] = max(1e-2, r_right - center_ranges[1][1])
+                hi[4] = max(lo[4] * 2, r_right - center_ranges[1][0])
+            else:
+                # Param order: [amp1, cen1, gamma1, amp2, cen2, gamma2, omega0, offset]
+                # Always two peaks here: centers at 1 and 4, gammas at 2 and 5.
+                lo[1], hi[1] = center_ranges[0]
+                lo[4], hi[4] = center_ranges[1]
 
             lo[2] = max(1e-3, 0.5 * float(wid[0]))
             hi[2] = max(lo[2] * 2, 8.0 * float(wid[0]))
@@ -495,7 +559,10 @@ class SpectrumFitter:
                         ])
 
                 elif requested_model in ("dho", "dho_window"):
-                    popt = _sort_2dho_params(popt)
+                    if not use_anchored:
+                        # Anchored params are side-bound by construction
+                        # (omega1 belongs to the left anchor), no swap needed.
+                        popt = _sort_2dho_params(popt)
 
         except Exception as e:
             print(f"[SpectrumFitter] Fit failed: {e}")
@@ -513,6 +580,7 @@ class SpectrumFitter:
             popt=popt,
             model=fit_kind,
             mask=mask_used,
+            anchors=anchors if use_anchored else None,
         )
 
     def _extract_peak_params(self, pk_ind, pk_info, px, sline):
@@ -537,9 +605,55 @@ class SpectrumFitter:
         widths = widths_idx * 1.0
         return heights, centers, widths
 
-    def _build_result(self, px, sline, model_func, popt, model: str, mask: np.ndarray) -> FittedSpectrum:
+    def _build_result(
+        self,
+        px,
+        sline,
+        model_func,
+        popt,
+        model: str,
+        mask: np.ndarray,
+        anchors: ElasticAnchors | None = None,
+    ) -> FittedSpectrum:
         fitted = model_func(px, *popt)
         x_fit, y_fit = refine_fitted_spectrum(model_func, px, popt, factor=10)
+
+        if len(popt) == 7 and model.startswith("2dho_anchored"):
+            amp1, omega1, gamma1, amp2, omega2, gamma2, offset = popt
+
+            r_left = float(anchors.rayleigh_left_px)
+            r_right = float(anchors.rayleigh_right_px)
+
+            # Visible peak maxima are pulled toward the elastic lines by
+            # damping: u_pk = sqrt(omega^2 - gamma^2/2).
+            u_pk1 = dho_peak_offset(float(omega1), float(gamma1))
+            u_pk2 = dho_peak_offset(float(omega2), float(gamma2))
+            cen1 = r_left + u_pk1
+            cen2 = r_right - u_pk2
+
+            return FittedSpectrum(
+                is_success=True,
+                model=model,
+                sline=sline,
+                x_pixels=px,
+                fitted_spectrum=fitted,
+                x_fit_refined=x_fit,
+                y_fit_refined=y_fit,
+                mask_for_fitting=mask,
+                parameters=popt,
+                left_peak_center_px=float(cen1),
+                left_peak_width_px=0.5 * float(gamma1),
+                left_peak_amplitude=float(amp1) * dho_peak_height(float(omega1), float(gamma1)),
+                right_peak_center_px=float(cen2),
+                right_peak_width_px=0.5 * float(gamma2),
+                right_peak_amplitude=float(amp2) * dho_peak_height(float(omega2), float(gamma2)),
+                inter_peak_distance=float(cen2 - cen1),
+                offset=float(offset),
+                omega_left_px=float(omega1),
+                omega_right_px=float(omega2),
+                rayleigh_left_px=r_left,
+                rayleigh_right_px=r_right,
+            )
 
         if len(popt) == 4:
             amp, cen, wid, offset = popt

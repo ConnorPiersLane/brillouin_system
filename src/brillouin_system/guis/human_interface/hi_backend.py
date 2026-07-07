@@ -457,7 +457,9 @@ class HiBackend:
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
         try:
-            return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode)
+            anchors = (self.calibration_calculator.elastic_anchors()
+                       if self.calibration_calculator is not None else None)
+            return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode, anchors=anchors)
         except Exception as e:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)

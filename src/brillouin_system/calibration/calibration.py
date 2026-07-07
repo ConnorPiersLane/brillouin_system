@@ -5,6 +5,7 @@ import numpy as np
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
+from brillouin_system.spectrum_fitting.dho_model import ElasticAnchors
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -191,6 +192,81 @@ class CalibrationCalculator:
         slope = self.dfreq_dpx_peak_distance(px)
         return slope * dpx
 
+    @staticmethod
+    def _elastic_line_px(coeffs, px_points, freq_points) -> float | None:
+        """
+        Pixel position of the elastic (Rayleigh) line for one peak, or None.
+
+        Uses a local Newton step from the calibrated point closest to zero
+        frequency: R = px* - nu(px*) / nu'(px*). This extrapolates with the
+        locally correct slope over the shortest possible distance, so a mildly
+        nonlinear dispersion introduces only a small bias. Falls back to
+        polynomial roots when no calibration points are stored (only
+        unambiguous for degree-1 fits).
+        """
+        if coeffs is None:
+            return None
+        coeffs = np.asarray(coeffs, dtype=float)
+        if not np.all(np.isfinite(coeffs)):
+            return None
+
+        dcoeffs = np.polyder(coeffs, m=1)
+
+        if px_points is not None and freq_points is not None and len(px_points) > 0:
+            freqs = np.asarray(freq_points, dtype=float)
+            pxs = np.asarray(px_points, dtype=float)
+            idx = int(np.argmin(np.abs(freqs)))
+            px_star = float(pxs[idx])
+
+            slope = float(np.polyval(dcoeffs, px_star))
+            if slope == 0.0 or not np.isfinite(slope):
+                return None
+
+            r = px_star - float(np.polyval(coeffs, px_star)) / slope
+            if not np.isfinite(r):
+                return None
+            # The elastic line must lie outside the measured sideband range.
+            if np.min(pxs) <= r <= np.max(pxs):
+                return None
+            return r
+
+        # No stored points: only a degree-1 polynomial has an unambiguous root.
+        if len(coeffs) == 2:
+            a, b = float(coeffs[0]), float(coeffs[1])
+            if a == 0.0:
+                return None
+            r = -b / a
+            return r if np.isfinite(r) else None
+
+        return None
+
+    def elastic_anchors(self) -> ElasticAnchors | None:
+        """
+        Pixel positions of the elastic (Rayleigh) lines bracketing the two
+        Brillouin peaks, or None if the calibration cannot provide them.
+
+        Used by the anchored DHO fit (eq. S2 with a pinned frequency zero).
+        Returns None when either anchor is unavailable or the geometry is
+        inconsistent (left anchor must lie left of the right anchor); callers
+        then fall back to the free-anchor DHO.
+        """
+        if self.p is None:
+            return None
+
+        r_left = self._elastic_line_px(
+            self.p.freq_left_peak, self.p.left_px_points, self.p.left_freq_points
+        )
+        r_right = self._elastic_line_px(
+            self.p.freq_right_peak, self.p.right_px_points, self.p.right_freq_points
+        )
+
+        if r_left is None or r_right is None:
+            return None
+        if not r_left < r_right:
+            return None
+
+        return ElasticAnchors(rayleigh_left_px=r_left, rayleigh_right_px=r_right)
+
     def calibration_width_left_peak_dpx(self, px):
         """Ideal FWHM width of the left peak in pixels."""
         return np.polyval(self.p.calibration_width_left_peak, px)
@@ -252,6 +328,14 @@ class CalibrationCalculator:
         lines.append(self._poly_to_line("Inter-Peak Distance", self.p.freq_peak_distance))
         # lines.append(self._poly_to_line("Centroid", self.p.freq_peak_centroid))
         # lines.append(self._dc_model_to_line())
+        anchors = self.elastic_anchors()
+        if anchors is not None:
+            lines.append(
+                f"Elastic lines (DHO anchors): left ≈ {anchors.rayleigh_left_px:.2f} px, "
+                f"right ≈ {anchors.rayleigh_right_px:.2f} px"
+            )
+        else:
+            lines.append("Elastic lines (DHO anchors): not available")
         lines.append("================================")
         return "\n".join(lines)
 
