@@ -247,8 +247,9 @@ class CalibrationCalculator:
 
         Used by the anchored DHO fit (eq. S2 with a pinned frequency zero).
         Returns None when either anchor is unavailable or the geometry is
-        inconsistent (left anchor must lie left of the right anchor); callers
-        then fall back to the free-anchor DHO.
+        inconsistent (left anchor must lie left of the right anchor). Note the
+        DHO model requires anchors: passing anchors=None to
+        SpectrumFitter.fit raises for the dho models.
         """
         if self.p is None:
             return None

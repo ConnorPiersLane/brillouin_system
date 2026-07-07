@@ -68,8 +68,8 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     calibration_calculator = CalibrationCalculator(parameters=scan.calibration_params)
     spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
-    # Elastic-line anchors for the anchored DHO fit; None (→ free-anchor
-    # fallback) when the stored calibration cannot provide them.
+    # Elastic-line anchors for the DHO fit; None when the stored calibration
+    # cannot provide them (the dho models then refuse to fit).
     anchors = calibration_calculator.elastic_anchors() if scan.calibration_params is not None else None
 
     do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
