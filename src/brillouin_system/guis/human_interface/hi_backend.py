@@ -554,6 +554,7 @@ class HiBackend:
 
         self._i_axial_scans += 1
 
+        store_frames = self.calibration_config.save_calibration_frames
         axial_scan = AxialScan(
             i=self._i_axial_scans,
             id=request_axial_scan.id,
@@ -563,7 +564,7 @@ class HiBackend:
             eye_tracker_results=request_axial_scan.eye_tracker_results,
             reflection_result_forwards=reflection_result_forwards,
             reflection_result_backwards=reflection_result_backwards,
-            calibration_data=self.calibration_data,
+            calibration_data=self.calibration_data if store_frames else None,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
 

@@ -25,6 +25,11 @@ class CalibrationConfig:
     #                re-fit all centers with a shifted-PSF model. Also stores
     #                the PSFs for the DHO sample fit.
     centering: str = "lorentzian"
+    # Whether to store the raw calibration reference frames on each axial
+    # scan (AxialScan.calibration_data). Needed for later PSF reconstruction
+    # / debugging, but adds frames to every saved scan. The PSF DHO fit does
+    # NOT need this (the reconstructed PSF is baked into calibration_params).
+    save_calibration_frames: bool = True
 
     @property
     def calibration_freqs(self) -> list[float]:
@@ -54,6 +59,7 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         reference=raw["reference"],
         mode=raw["mode"],
         centering=raw.get("centering", "lorentzian"),
+        save_calibration_frames=raw.get("save_calibration_frames", True),
     )
 
 
@@ -73,6 +79,7 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
             "reference",
             "mode",
             "centering",
+            "save_calibration_frames",
         ]
     }
 
