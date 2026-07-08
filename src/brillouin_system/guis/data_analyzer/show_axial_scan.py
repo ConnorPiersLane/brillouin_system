@@ -339,16 +339,30 @@ class AxialScanViewer(QWidget):
 
     def print_measurement_info(self):
         mp = self.axial_scan.measurements[self.current_index]
-        freq_shift = self.list_analyzed_spectras[self.current_index].analyzed_shifts
-        photons: PhotonsCounts = self.list_analyzed_spectras[self.current_index].photons
+        analyzed = self.list_analyzed_spectras[self.current_index]
+        freq_shift = analyzed.analyzed_shifts
+        photons: PhotonsCounts = analyzed.photons
+        fitting = analyzed.fitted_spectrum
 
         print(f"--- Measurement {self.current_index} ---")
         print(f"Zaber position: {fmt(mp.lens_zaber_position, precision=0)} µm")
+        print(f"Fitting model: {fitting.model}")
         print(f"Freq shifts poly: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
-        print(f"HWHM (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
+        print(f"HWHM total (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
               f"right={fmt(freq_shift.hwhm_right_peak_ghz)}")
+
+        # DHO only: material widths and the instrument HWHM the fit used
+        # (total = material + instrument by construction).
+        if freq_shift.material_hwhm_left_ghz is not None:
+            inst_left = freq_shift.hwhm_left_peak_ghz - freq_shift.material_hwhm_left_ghz
+            inst_right = freq_shift.hwhm_right_peak_ghz - freq_shift.material_hwhm_right_ghz
+            print(f"HWHM material (GHz): left={fmt(freq_shift.material_hwhm_left_ghz)}, "
+                  f"right={fmt(freq_shift.material_hwhm_right_ghz)}")
+            print(f"HWHM instrument (GHz): left={fmt(inst_left)}, "
+                  f"right={fmt(inst_right)}")
+
         print(f"Photons: left={fmt(photons.left_peak_photons, precision=0)}, "
               f"right={fmt(photons.right_peak_photons, precision=0)}, "
               f"total={fmt(photons.total_photons, precision=0)}")
