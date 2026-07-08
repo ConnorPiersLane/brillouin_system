@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
+from scipy.optimize import curve_fit
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -46,6 +47,15 @@ class CalibrationPolyfitParameters:
     right_freq_points: Optional[np.ndarray] = field(default=None)
     dist_px_points: Optional[np.ndarray] = field(default=None) # must be increase (see np.interp)
     dist_freq_points: Optional[np.ndarray] = field(default=None)
+
+    # Empirical per-order instrument response (ePSF = optical PSF including
+    # the 1-px binning), reconstructed from the reference sweep when the
+    # calibration ran with centering="psf". Sampled on a uniform grid of
+    # spacing psf_grid_step_px, symmetric around the profile maximum at the
+    # center index, area-normalised. None for classic calibrations.
+    psf_left: Optional[np.ndarray] = field(default=None)
+    psf_right: Optional[np.ndarray] = field(default=None)
+    psf_grid_step_px: Optional[float] = field(default=None)
 
 
 class CalibrationCalculator:
@@ -278,11 +288,30 @@ class CalibrationCalculator:
         if not (np.all(np.isfinite(wl)) and np.all(np.isfinite(wr))):
             return None
 
+        # Empirical PSFs (present when the calibration ran with
+        # centering="psf"); the DHO fit then uses them as the instrument
+        # response instead of the Lorentzian width model.
+        psf_left = psf_right = None
+        psf_step = None
+        if (
+            self.p.psf_left is not None
+            and self.p.psf_right is not None
+            and self.p.psf_grid_step_px
+        ):
+            pl = np.asarray(self.p.psf_left, dtype=float)
+            pr = np.asarray(self.p.psf_right, dtype=float)
+            if np.all(np.isfinite(pl)) and np.all(np.isfinite(pr)):
+                psf_left, psf_right = pl, pr
+                psf_step = float(self.p.psf_grid_step_px)
+
         return ElasticAnchors(
             rayleigh_left_px=r_left,
             rayleigh_right_px=r_right,
             instrument_width_left_poly=wl,
             instrument_width_right_poly=wr,
+            psf_left=psf_left,
+            psf_right=psf_right,
+            psf_grid_step_px=psf_step,
         )
 
     def calibration_width_left_peak_dpx(self, px):
@@ -383,8 +412,12 @@ class CalibrationCalculator:
         print(f"{name}: f(x) ≈ {eq}  [GHz]")
 
 
-def get_calibration_calculator_from_data(calibration_data: CalibrationData, poyfit_degree) -> CalibrationCalculator:
-    return CalibrationCalculator(calibrate(data=calibration_data, poyfit_degree=poyfit_degree))
+def get_calibration_calculator_from_data(
+    calibration_data: CalibrationData, poyfit_degree, centering: str = "lorentzian"
+) -> CalibrationCalculator:
+    return CalibrationCalculator(
+        calibrate(data=calibration_data, poyfit_degree=poyfit_degree, centering=centering)
+    )
 
 def sort_xy(x, y):
     idx = np.argsort(x)
@@ -392,32 +425,64 @@ def sort_xy(x, y):
 
 sf = SpectrumFitter()
 
-def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParameters:
-    degree = poyfit_degree
 
-    all_fits = []
-    freqs_all = []
+# --- PSF (empirical instrument response) reconstruction -------------------
+# The reference sidebands are quasi-monochromatic, so every reference
+# spectrum is a 1-px-sampled copy of the per-order instrument response. The
+# sweep slides it across the detector in sub-pixel steps, which allows a
+# super-resolved reconstruction (astronomy "ePSF" technique). The
+# reconstructed profile is the OPTICAL psf convolved with the 1-px binning
+# (it is built from pixel-integrated samples), so models using it must
+# sample at pixel centers WITHOUT integrating over the pixel again.
 
+PSF_GRID_STEP_PX = 0.05
+PSF_HALF_WIDTH_PX = 8.0
+
+
+@dataclass
+class _ReferenceFit:
+    """One bootstrap-fitted reference spectrum."""
+    px: np.ndarray
+    sline: np.ndarray
+    freq: float
+    left_center_px: float
+    right_center_px: float
+    left_width_px: float
+    right_width_px: float
+    left_amplitude: float
+    right_amplitude: float
+    offset: float
+
+
+def _bootstrap_reference_fits(data: CalibrationData) -> list[_ReferenceFit]:
+    entries = []
     for freq_block in data.measured_freqs:
         for point in freq_block.cali_meas_points:
-            # if point.fitting_results.is_success:
-            #     all_fits.append(point.fitting_results)
-            #     freqs_all.append(point.microwave_freq)
             px, sline = sf.get_px_sline_from_image(point.frame)
             fs = sf.fit(px, sline, is_reference_mode=True)
             if fs.is_success:
-                all_fits.append(fs)
-                freqs_all.append(point.microwave_freq)
+                entries.append(_ReferenceFit(
+                    px=np.asarray(px, dtype=float),
+                    sline=np.asarray(sline, dtype=float),
+                    freq=float(point.microwave_freq),
+                    left_center_px=float(fs.left_peak_center_px),
+                    right_center_px=float(fs.right_peak_center_px),
+                    left_width_px=float(fs.left_peak_width_px),
+                    right_width_px=float(fs.right_peak_width_px),
+                    left_amplitude=float(fs.left_peak_amplitude),
+                    right_amplitude=float(fs.right_peak_amplitude),
+                    offset=float(fs.offset),
+                ))
+    return entries
 
-    if not all_fits:
-        raise ValueError("No successful fits found in calibration data.")
 
-    freqs_all = np.asarray(freqs_all, dtype=float)
-    left_px = np.asarray([fs.left_peak_center_px for fs in all_fits], dtype=float)
-    right_px = np.asarray([fs.right_peak_center_px for fs in all_fits], dtype=float)
-    inter_px = np.asarray([fs.inter_peak_distance for fs in all_fits], dtype=float)
-    left_width = np.asarray([fs.left_peak_width_px for fs in all_fits], dtype=float)
-    right_width = np.asarray([fs.right_peak_width_px for fs in all_fits], dtype=float)
+def _build_polyfit_parameters(entries: list[_ReferenceFit], degree: int) -> CalibrationPolyfitParameters:
+    freqs_all = np.asarray([e.freq for e in entries], dtype=float)
+    left_px = np.asarray([e.left_center_px for e in entries], dtype=float)
+    right_px = np.asarray([e.right_center_px for e in entries], dtype=float)
+    inter_px = right_px - left_px
+    left_width = np.asarray([e.left_width_px for e in entries], dtype=float)
+    right_width = np.asarray([e.right_width_px for e in entries], dtype=float)
 
     def safe_polyfit(x, y, deg):
         if len(x) <= deg:
@@ -425,25 +490,20 @@ def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParamet
             return np.full(deg + 1, np.nan)
         return np.polyfit(x, y, deg)
 
-    left_peaks_mean = []
-    right_peaks_mean = []
-    distance_peaks_mean = []
-    freqs_mean = []
+    by_freq: dict[float, list[int]] = {}
+    for i, e in enumerate(entries):
+        by_freq.setdefault(e.freq, []).append(i)
 
-    fits_by_freq = {}
-
-    for fs, freq in zip(all_fits, freqs_all):
-        fits_by_freq.setdefault(freq, []).append(fs)
-
-    for freq, fits in fits_by_freq.items():
+    freqs_mean, left_mean, right_mean, dist_mean = [], [], [], []
+    for freq, idxs in by_freq.items():
         freqs_mean.append(freq)
-        left_peaks_mean.append(np.mean([fs.left_peak_center_px for fs in fits]))
-        right_peaks_mean.append(np.mean([fs.right_peak_center_px for fs in fits]))
-        distance_peaks_mean.append(np.mean([fs.inter_peak_distance for fs in fits]))
+        left_mean.append(float(np.mean(left_px[idxs])))
+        right_mean.append(float(np.mean(right_px[idxs])))
+        dist_mean.append(float(np.mean(inter_px[idxs])))
 
-    left_px_sorted, left_freq_sorted = sort_xy(np.asarray(left_peaks_mean), np.asarray(freqs_mean))
-    right_px_sorted, right_freq_sorted = sort_xy(np.asarray(right_peaks_mean), np.asarray(freqs_mean))
-    dist_px_sorted, dist_freq_sorted = sort_xy(np.asarray(distance_peaks_mean), np.asarray(freqs_mean))
+    left_px_sorted, left_freq_sorted = sort_xy(np.asarray(left_mean), np.asarray(freqs_mean))
+    right_px_sorted, right_freq_sorted = sort_xy(np.asarray(right_mean), np.asarray(freqs_mean))
+    dist_px_sorted, dist_freq_sorted = sort_xy(np.asarray(dist_mean), np.asarray(freqs_mean))
 
     return CalibrationPolyfitParameters(
         degree=degree,
@@ -459,3 +519,219 @@ def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParamet
         dist_px_points=dist_px_sorted,
         dist_freq_points=dist_freq_sorted,
     )
+
+
+def _psf_grid(step: float = PSF_GRID_STEP_PX, half: float = PSF_HALF_WIDTH_PX) -> np.ndarray:
+    n_bins = int(round(2.0 * half / step)) + 1
+    return -half + step * np.arange(n_bins)
+
+
+def _lorentzian_tail(px, amp, cen, hwhm):
+    """Approximate profile of the OTHER peak, subtracted before PSF binning."""
+    hwhm = max(float(hwhm), 1e-6)
+    return amp * hwhm**2 / (np.square(px - cen) + hwhm**2)
+
+
+def _reconstruct_epsf(entries: list[_ReferenceFit], coeffs, side: str) -> np.ndarray | None:
+    """
+    Reconstruct the ePSF of one order from the reference sweep.
+
+    Alignment centers come from the (smooth) calibration polynomial evaluated
+    at each frame's known microwave frequency — NOT from the per-frame fitted
+    centers — so per-frame fit bias (the pixel-phase wiggle) does not distort
+    the reconstruction. The other order's tail is subtracted using its
+    bootstrap Lorentzian parameters.
+
+    Returns an area-normalised profile on _psf_grid(), maximum at the center
+    bin, or None if the reconstruction is not usable.
+    """
+    if coeffs is None:
+        return None
+    coeffs = np.asarray(coeffs, dtype=float)
+    if not np.all(np.isfinite(coeffs)):
+        return None
+    dcoeffs = np.polyder(coeffs)
+
+    step = PSF_GRID_STEP_PX
+    half = PSF_HALF_WIDTH_PX
+    grid = _psf_grid(step, half)
+    n_bins = len(grid)
+    sums = np.zeros(n_bins)
+    counts = np.zeros(n_bins)
+    expected_px = int(2 * half) + 1
+
+    for e in entries:
+        if side == "left":
+            c = e.left_center_px
+            other_amp, other_cen, other_w = e.right_amplitude, e.right_center_px, e.right_width_px
+        else:
+            c = e.right_center_px
+            other_amp, other_cen, other_w = e.left_amplitude, e.left_center_px, e.left_width_px
+
+        # Newton-refine the alignment center on the smooth polynomial.
+        for _ in range(3):
+            s = float(np.polyval(dcoeffs, c))
+            if s == 0.0 or not np.isfinite(s):
+                c = np.nan
+                break
+            c = c - (float(np.polyval(coeffs, c)) - e.freq) / s
+        if not np.isfinite(c):
+            continue
+
+        mask = np.abs(e.px - c) <= half
+        if int(mask.sum()) < expected_px - 1:  # skip edge-truncated windows
+            continue
+
+        # The 2lorentzian amplitude is the raw kernel parameter; convert to
+        # peak height for the tail estimate.
+        other_w_safe = max(float(other_w), 1e-6)
+        other_height = other_amp * other_w_safe * 2.0 * np.arctan(0.5 / other_w_safe)
+
+        vals = e.sline[mask] - _lorentzian_tail(e.px[mask], other_height, other_cen, other_w)
+
+        # Local baseline from the window edges: the bootstrap window-fit
+        # offset is biased for near-pixel-wide peaks, and a wrong baseline
+        # skews the reconstructed profile once wings are clipped.
+        edge = np.abs(e.px[mask] - c) >= half - 2.0
+        if int(edge.sum()) >= 3:
+            baseline = float(np.median(vals[edge]))
+        else:
+            baseline = e.offset
+        vals = vals - baseline
+
+        area = float(vals.sum())
+        if not np.isfinite(area) or area <= 0:
+            continue
+        vals = vals / area
+
+        idx = np.round((e.px[mask] - c + half) / step).astype(int)
+        ok = (idx >= 0) & (idx < n_bins)
+        np.add.at(sums, idx[ok], vals[ok])
+        np.add.at(counts, idx[ok], 1.0)
+
+    filled = counts > 0
+    if filled.sum() < 10:
+        return None
+    # Phase-coverage criterion: what matters is the effective sampling of the
+    # profile, i.e. the largest gap between filled bins — a sweep whose pixel
+    # step is (near-)rational fills few distinct sub-pixel phases but can
+    # still sample densely enough. Reject only genuinely coarse coverage.
+    fidx = np.flatnonzero(filled)
+    max_gap_px = step * float(np.max(np.diff(fidx)))
+    if max_gap_px > 0.3:
+        return None
+
+    prof = np.interp(grid, grid[filled], sums[filled] / counts[filled])
+    prof = np.convolve(prof, np.ones(3) / 3.0, mode="same")  # light smoothing
+    prof = np.clip(prof, 0.0, None)
+
+    # Shift the maximum to u = 0 (parabolic sub-bin interpolation).
+    i = int(np.argmax(prof))
+    d = 0.0
+    if 0 < i < n_bins - 1:
+        denom = prof[i - 1] - 2.0 * prof[i] + prof[i + 1]
+        if denom != 0.0:
+            d = float(np.clip(0.5 * (prof[i - 1] - prof[i + 1]) / denom, -1.0, 1.0))
+    peak_u = grid[i] + d * step
+    prof = np.interp(grid + peak_u, grid, prof, left=0.0, right=0.0)
+
+    total = prof.sum()
+    if total <= 0:
+        return None
+    return prof / total
+
+
+def _fit_center_with_epsf(px, sline, psf, center0, amp0, offset0) -> float | None:
+    """Fit amp * ePSF(px - center) + offset around center0; return center."""
+    grid = _psf_grid()
+    half = PSF_HALF_WIDTH_PX
+
+    mask = np.abs(px - center0) <= half
+    if int(mask.sum()) < 7:
+        return None
+    x = px[mask]
+    y = sline[mask]
+
+    def model(xx, amp, cen, off):
+        return amp * np.interp(xx - cen, grid, psf, left=0.0, right=0.0) + off
+
+    psf_max = float(np.max(psf))
+    p0 = [max(amp0, 1e-6) / max(psf_max, 1e-12), center0, offset0]
+    try:
+        popt, _ = curve_fit(
+            model, x, y, p0=p0,
+            bounds=([0.0, center0 - half, -np.inf], [np.inf, center0 + half, np.inf]),
+            maxfev=20000,
+        )
+    except Exception:
+        return None
+    return float(popt[1])
+
+
+def _refit_entries_with_epsf(entries, psf_left, psf_right) -> list[_ReferenceFit]:
+    refit = []
+    for e in entries:
+        c_left = _fit_center_with_epsf(e.px, e.sline, psf_left, e.left_center_px, e.left_amplitude, e.offset)
+        c_right = _fit_center_with_epsf(e.px, e.sline, psf_right, e.right_center_px, e.right_amplitude, e.offset)
+        refit.append(_ReferenceFit(
+            px=e.px,
+            sline=e.sline,
+            freq=e.freq,
+            left_center_px=c_left if c_left is not None else e.left_center_px,
+            right_center_px=c_right if c_right is not None else e.right_center_px,
+            left_width_px=e.left_width_px,
+            right_width_px=e.right_width_px,
+            left_amplitude=e.left_amplitude,
+            right_amplitude=e.right_amplitude,
+            offset=e.offset,
+        ))
+    return refit
+
+
+def calibrate(
+    data: CalibrationData,
+    poyfit_degree: int = 1,
+    centering: str = "lorentzian",
+) -> CalibrationPolyfitParameters:
+    """
+    Build calibration parameters from reference sweep data.
+
+    centering = "lorentzian": classic behavior — reference peak centers from
+        lorentzian_window fits (unchanged old pipeline).
+    centering = "psf": two-stage — bootstrap with lorentzian fits, reconstruct
+        the per-order empirical PSF from the sweep, re-fit every reference
+        center with a shifted-PSF model (immune to PSF skew and sub-pixel
+        sampling bias), rebuild the polynomials from the improved centers, and
+        store the PSFs for the DHO sample fits. Falls back to the lorentzian
+        result (with a printed warning) if the reconstruction is unusable.
+    """
+    if centering not in ("lorentzian", "psf"):
+        raise ValueError(f"Unknown centering '{centering}'. Use 'lorentzian' or 'psf'.")
+
+    entries = _bootstrap_reference_fits(data)
+    if not entries:
+        raise ValueError("No successful fits found in calibration data.")
+
+    params = _build_polyfit_parameters(entries, poyfit_degree)
+    if centering == "lorentzian":
+        return params
+
+    # Pass 1: reconstruct the ePSFs aligned with the bootstrap polynomials.
+    psf_left = _reconstruct_epsf(entries, params.freq_left_peak, side="left")
+    psf_right = _reconstruct_epsf(entries, params.freq_right_peak, side="right")
+    if psf_left is None or psf_right is None:
+        print("[Calibration] PSF reconstruction not usable — keeping lorentzian centering.")
+        return params
+
+    # Re-fit all reference centers with the shifted-PSF model and rebuild.
+    refit_entries = _refit_entries_with_epsf(entries, psf_left, psf_right)
+    params_psf = _build_polyfit_parameters(refit_entries, poyfit_degree)
+
+    # Pass 2: re-reconstruct with the improved polynomials (better alignment).
+    psf_left2 = _reconstruct_epsf(entries, params_psf.freq_left_peak, side="left")
+    psf_right2 = _reconstruct_epsf(entries, params_psf.freq_right_peak, side="right")
+
+    params_psf.psf_left = psf_left2 if psf_left2 is not None else psf_left
+    params_psf.psf_right = psf_right2 if psf_right2 is not None else psf_right
+    params_psf.psf_grid_step_px = PSF_GRID_STEP_PX
+    return params_psf

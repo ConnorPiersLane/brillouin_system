@@ -2,7 +2,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from brillouin_system.calibration.calibration import CalibrationPolyfitParameters, CalibrationCalculator
+from brillouin_system.calibration.calibration import (
+    CalibrationCalculator,
+    CalibrationData,
+    CalibrationPolyfitParameters,
+)
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -52,6 +56,9 @@ class AxialScan:
     eye_tracker_results: EyeTrackerResults | None = None
     reflection_result_forwards: ReflectionResult | None = None
     reflection_result_backwards: ReflectionResult | None = None
+    # Raw calibration reference frames (for PSF reconstruction / future
+    # reprocessing). None for datasets recorded before this field existed.
+    calibration_data: CalibrationData | None = None
 
 # -------------- Scan Fitting --------------
 @dataclass

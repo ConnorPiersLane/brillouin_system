@@ -18,6 +18,13 @@ class CalibrationConfig:
     step: float
     reference: str  # "left", "right", or "distance"
     mode: str  # "poly" or "interp"
+    # How the reference peak centers are obtained during calibrate():
+    # "lorentzian" = classic lorentzian_window fits (default, old behavior)
+    # "psf"        = two-stage: bootstrap lorentzian fits, reconstruct the
+    #                empirical per-order PSF from the sideband sweep, then
+    #                re-fit all centers with a shifted-PSF model. Also stores
+    #                the PSFs for the DHO sample fit.
+    centering: str = "lorentzian"
 
     @property
     def calibration_freqs(self) -> list[float]:
@@ -46,6 +53,7 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         step=raw["step"],
         reference=raw["reference"],
         mode=raw["mode"],
+        centering=raw.get("centering", "lorentzian"),
     )
 
 
@@ -64,6 +72,7 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
             "step",
             "reference",
             "mode",
+            "centering",
         ]
     }
 

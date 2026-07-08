@@ -25,7 +25,9 @@ from brillouin_system.spectrum_fitting.voigt_model import (
 from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
     dho_peak_height,
+    epsf_hwhm_px,
     make_2dho_conv_anchored,
+    make_2dho_epsf_anchored,
 )
 
 
@@ -230,14 +232,20 @@ class SpectrumFitter:
                     f"Invalid elastic anchors: left={anchors.rayleigh_left_px}, "
                     f"right={anchors.rayleigh_right_px}."
                 )
-            if (
+            has_psf = (
+                anchors.psf_left is not None
+                and anchors.psf_right is not None
+                and anchors.psf_grid_step_px
+            )
+            if not has_psf and (
                 anchors.instrument_width_left_poly is None
                 or anchors.instrument_width_right_poly is None
             ):
                 raise ValueError(
-                    "The DHO model requires instrument-width polynomials "
-                    "(calibration_width_*_peak) to build the instrument "
-                    "response. The calibration did not provide them."
+                    "The DHO model requires an instrument response: either "
+                    "measured PSFs (calibration centering='psf') or "
+                    "instrument-width polynomials (calibration_width_*_peak). "
+                    "The calibration provided neither."
                 )
 
         px = np.asarray(px, dtype=np.float64)
@@ -400,11 +408,18 @@ class SpectrumFitter:
                 # convolved with the instrument response: omega1/omega2 are the
                 # material Brillouin resonances (px units) and gmat1/gmat2 the
                 # material dampings, both corrected for instrument broadening.
-                fit_kind = "2dho_anchored_window" if requested_model == "dho_window" else "2dho_anchored"
-
-                # Instrument HWHM (px) at each detected peak, from calibration.
-                gi_left = max(float(np.polyval(anchors.instrument_width_left_poly, cen[0])), 1e-3)
-                gi_right = max(float(np.polyval(anchors.instrument_width_right_poly, cen[1])), 1e-3)
+                # The instrument response is the measured per-order ePSF when
+                # the calibration provides it (centering="psf"; handles skewed
+                # responses), otherwise a Lorentzian of the calibration width.
+                if has_psf:
+                    fit_kind = "2dho_anchored_psf_window" if requested_model == "dho_window" else "2dho_anchored_psf"
+                    gi_left = max(epsf_hwhm_px(anchors.psf_left, anchors.psf_grid_step_px), 1e-3)
+                    gi_right = max(epsf_hwhm_px(anchors.psf_right, anchors.psf_grid_step_px), 1e-3)
+                else:
+                    fit_kind = "2dho_anchored_window" if requested_model == "dho_window" else "2dho_anchored"
+                    # Instrument HWHM (px) at each detected peak, from calibration.
+                    gi_left = max(float(np.polyval(anchors.instrument_width_left_poly, cen[0])), 1e-3)
+                    gi_right = max(float(np.polyval(anchors.instrument_width_right_poly, cen[1])), 1e-3)
 
                 # cen is sorted ascending here (see dho block above).
                 d = max(float(cen[1] - cen[0]), 1.0)
@@ -432,7 +447,13 @@ class SpectrumFitter:
                     [0, 1e-2, 1e-3, 0, 1e-2, 1e-3, 0],
                     [np.inf, fsr_px, 2.0 * d, np.inf, fsr_px, 2.0 * d, np.inf],
                 )
-                model_func = make_2dho_conv_anchored(r_left, r_right, gi_left, gi_right)
+                if has_psf:
+                    model_func = make_2dho_epsf_anchored(
+                        r_left, r_right,
+                        anchors.psf_left, anchors.psf_right, anchors.psf_grid_step_px,
+                    )
+                else:
+                    model_func = make_2dho_conv_anchored(r_left, r_right, gi_left, gi_right)
                 dho_instrument_hwhm = (gi_left, gi_right)
 
         if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window"):

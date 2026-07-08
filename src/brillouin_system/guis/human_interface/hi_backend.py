@@ -470,7 +470,8 @@ class HiBackend:
             self.calibration_calculator = None
         else:
             self.calibration_poly_fit_params = calibrate(data=self.calibration_data,
-                                                         poyfit_degree=self.calibration_config.degree)
+                                                         poyfit_degree=self.calibration_config.degree,
+                                                         centering=self.calibration_config.centering)
             self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(
                 parameters=self.calibration_poly_fit_params)
 
@@ -562,6 +563,7 @@ class HiBackend:
             eye_tracker_results=request_axial_scan.eye_tracker_results,
             reflection_result_forwards=reflection_result_forwards,
             reflection_result_backwards=reflection_result_backwards,
+            calibration_data=self.calibration_data,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
 
