@@ -11,29 +11,15 @@ angles_deg = np.array([0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 36
 
 # Measured intensities
 # calibration: after calibration port [mW]
-intensities = np.array([1.04, 1.23, 0.83, 0.23, 12.2e-3, 0.407, 1.019, 1.25, 0.86, 0.24, 9.5e-3, 0.382, 1.001])
 
 # after sample mirror
-# bad fiber
-# intensities = np.array([3.0, 3.45, 2.26, 0.54, 0.05, 1.25, 2.9, 3.45, 2.26, 0.54, 0.05, 1.25, 2.9])
-intensities = np.array([2.9, 3.3, 3.1, 0.5, 0.05, 1.2, 2.8, 3.3, 3.1, 0.5, 0.05, 1.2, 2.8])
-# good
-intensities = np.array([0.9, 1.08, 0.72, 0.19, 0.02, 0.38, 0.93, 1.09, 0.72, 0.19, 0.03, 0.39, 0.92])
-intensities = np.array([1.0, 1.15, 0.75, 0.2, 0.04, 0.45, 0.99, 1.15, 0.75, 0.2, 0.04, 0.42, 0.98])
-intensities = np.array([1.1, 1.25, 0.78, 0.19, 0.06, 0.52, 1.12, 1.23, 0.78, 0.19, 0.07, 0.52, 1.10])
+intensities = np.array([3.05, 1.8, 0.85, 1.3, 2.65, 3.50, 3.15, 1.60, 1.0, 1.25, 2.45, 3.46, 3.1])
+
+# calibration input, before rb filter
 
 
-# # calibration input, before rb filter
-intensities = np.array([6, 5.58, 3.85, 1.8, 0.8, 1.65, 4.15, 6.25, 5.6, 2.9, 0.3, 0.65, 3.9])
-# intensities = np.array([4, 6.3, 4.8, 1.9, 0.6, 2.4, 5.0, 6.1, 3.8, 1.3, 1.0, 3.5, 5.9])
-# intensities = np.array([5.9, 5.4, 2.1, 0.3, 1.7, 5.0, 6.7, 4.9, 1.5, 0.1, 2.1, 5.3, 6.7])
-# intensities = np.array([6.5, 5.0, 2.4, 1.3, 2.3, 4.6, 5.6, 5.2, 3.1, 1.7, 2.0, 3.4, 5.0])
-
-
-# #
-# # sample input, before rb filter
-# intensities = np.array([0.27, 0.27, 0.14, 0.02, 0.02, 0.14, 0.27, 0.27, 0.14, 0.02, 0.02, 0.14, 0.26])
-# intensities = np.array([0.26, 0.27, 0.16, 0.03, 0.02, 0.12, 0.25, 0.27, 0.15, 0.03, 0.02, 0.13, 0.25])
+# sample input, before rb filter
+intensities = np.array([])
 
 
 # Correction for angular misalignment, in degrees

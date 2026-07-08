@@ -2,7 +2,7 @@
 ni_sample_rate_hz = 1000.0
 speed_um_s = 2000.0
 max_distance_um = 2500.0
-threshold_high_n_sigma = 6
+threshold_high_n_sigma = 10
 threshold_low_n_sigma = 4
 bg_acqui_s = 0.1
 debounce_s = 0.02
@@ -10,4 +10,4 @@ z_poll_s = 0.016
 alpha = 0.25
 chunk_size = 256
 idle_sleep_s = 0.002
-z_offset_um = 200.0
+z_offset_um = 210.0

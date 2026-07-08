@@ -208,7 +208,7 @@ def spectrum_lorentzian_gaussian_pupil_limited(
 
 
 if __name__ == "__main__":
-    f180 = 5.104  # GHz
+    f180 = 5.07  # GHz
 
     # Example 5X
     result_5x = absolute_shift_gaussian_pupil_limited(

@@ -6,12 +6,12 @@ fill_n_vetical_dark_pixels_right = 15
 masking_radius_left = 200
 masking_radius_right = 200
 masking_center_left = [
-    150,
-    0,
+    60,
+    -70,
 ]
 masking_center_right = [
-    -50,
-    -50,
+    -20,
+    -100,
 ]
 do_ellipse_fitting = true
 overlay_ellipse = true

@@ -1,8 +1,8 @@
 [calibration]
 n_per_freq = 1
 degree = 2
-start = 4.0
-stop = 8.0
+start = 4.5
+stop = 6.5
 step = 0.1
 reference = "distance"
 mode = "poly"

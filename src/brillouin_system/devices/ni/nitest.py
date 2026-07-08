@@ -19,7 +19,12 @@ from nidaqmx.system import System
 
 
 def pick_device_name() -> str:
-    system = System.local()
+    try:
+        system = System.local()
+    except Exception as e:
+        print(f"ERROR 2: {e}")
+        sys.exit(2)
+
     devices = list(system.devices)
 
     if not devices:
@@ -27,6 +32,8 @@ def pick_device_name() -> str:
             "No NI-DAQmx devices found. "
             "Check that NI-DAQmx is installed and the USB-6008 is plugged in."
         )
+
+
 
     print("Detected NI-DAQmx devices:")
     for d in devices:

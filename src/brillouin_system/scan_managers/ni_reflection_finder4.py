@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
     ni = NI6008()
     z = ZaberEyeLens()
-    z.move_abs(6000)
+    z.move_abs(2000)
     res = find_reflection_realtime(
         ni, z,
         ni_sample_rate_hz=1000,
