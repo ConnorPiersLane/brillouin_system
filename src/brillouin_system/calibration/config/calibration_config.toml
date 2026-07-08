@@ -6,3 +6,4 @@ stop = 8.0
 step = 0.1
 reference = "distance"
 mode = "poly"
+centering = "psf"
