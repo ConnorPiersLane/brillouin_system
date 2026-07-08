@@ -28,6 +28,7 @@ from brillouin_system.spectrum_fitting.dho_model import (
     epsf_hwhm_px,
     make_2dho_conv_anchored,
     make_2dho_epsf_anchored,
+    make_2lorentzian_epsf,
 )
 
 
@@ -198,6 +199,8 @@ class SpectrumFitter:
         if requested_model not in (
             "lorentzian",
             "lorentzian_window",
+            "lorentzian_psf",
+            "lorentzian_psf_window",
             "asym_lorentzian",
             "asym_lorentzian_window",
             "voigt",
@@ -208,9 +211,25 @@ class SpectrumFitter:
             raise ValueError(
                 f"Unknown model: '{requested_model}'. "
                 f"Supported models are 'lorentzian', 'lorentzian_window', "
+                f"'lorentzian_psf', 'lorentzian_psf_window', "
                 f"'asym_lorentzian', 'asym_lorentzian_window', "
                 f"'voigt', 'voigt_window', 'dho', and 'dho_window'."
             )
+
+        if requested_model in ("lorentzian_psf", "lorentzian_psf_window"):
+            # Forward model through the measured instrument response; only
+            # defined when the calibration reconstructed the PSFs.
+            if (
+                anchors is None
+                or anchors.psf_left is None
+                or anchors.psf_right is None
+                or not anchors.psf_grid_step_px
+            ):
+                raise ValueError(
+                    "The lorentzian_psf model requires the measured instrument "
+                    "PSFs from a calibration run with centering='psf'. Run or "
+                    "load such a calibration, or choose another fitting model."
+                )
 
         if requested_model in ("dho", "dho_window"):
             # The DHO model is eq. S2 anchored at the elastic (Rayleigh) lines
@@ -323,6 +342,23 @@ class SpectrumFitter:
                     model=requested_model,
                 )
 
+        if requested_model in ("lorentzian_psf", "lorentzian_psf_window"):
+            # The PSFs are per-order (left/right kernels differ), so both
+            # peaks must be present and assigned to their sides.
+            if n_peaks < 2:
+                print(
+                    f"[SpectrumFitter] lorentzian_psf needs two detected peaks "
+                    f"(found {n_peaks}) — returning unsuccessful fit."
+                )
+                return FittedSpectrum(
+                    is_success=False,
+                    sline=sline,
+                    x_pixels=px,
+                    model=requested_model,
+                )
+            order = np.argsort(cen)
+            amp, cen, wid = amp[order], cen[order], wid[order]
+
         if n_peaks == 1:
             if requested_model in ("lorentzian", "lorentzian_window"):
                 fit_kind = "1lorentzian_window" if requested_model == "lorentzian_window" else "1lorentzian"
@@ -402,6 +438,34 @@ class SpectrumFitter:
                     ],
                 )
                 model_func = _2voigt_binned
+
+            elif requested_model in ("lorentzian_psf", "lorentzian_psf_window"):
+                # Lorentzian material cores forward-modeled through the
+                # measured per-order PSFs: fitted centers are unbiased under a
+                # non-Lorentzian instrument response, fitted gammas are the
+                # MATERIAL HWHMs. cen is sorted ascending here (see block
+                # above) so peak 1 gets the left-order kernel.
+                fit_kind = "2lorentzian_psf_window" if requested_model == "lorentzian_psf_window" else "2lorentzian_psf"
+
+                gi_left = max(epsf_hwhm_px(anchors.psf_left, anchors.psf_grid_step_px), 1e-3)
+                gi_right = max(epsf_hwhm_px(anchors.psf_right, anchors.psf_grid_step_px), 1e-3)
+
+                # wid from find_peaks is the observed HWHM; material ~ observed
+                # minus instrument. Observed height ~ amp * g / (g + gi).
+                g1_0 = min(max(float(wid[0]) - gi_left, 5e-2), x_span / 2)
+                g2_0 = min(max(float(wid[1]) - gi_right, 5e-2), x_span / 2)
+                amp1_0 = amp[0] * (g1_0 + gi_left) / g1_0
+                amp2_0 = amp[1] * (g2_0 + gi_right) / g2_0
+
+                p0 = [amp1_0, cen[0], g1_0, amp2_0, cen[1], g2_0, offset]
+                bounds = (
+                    [0, x_min, 1e-3, 0, x_min, 1e-3, 0],
+                    [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf],
+                )
+                model_func = make_2lorentzian_epsf(
+                    anchors.psf_left, anchors.psf_right, anchors.psf_grid_step_px
+                )
+                dho_instrument_hwhm = (gi_left, gi_right)
 
             elif requested_model in ("dho", "dho_window"):
                 # Eq. S2 anchored at the calibration-derived elastic lines and
@@ -526,6 +590,30 @@ class SpectrumFitter:
             bounds = (lo, hi)
             mask_used = mask
 
+        elif requested_model == "lorentzian_psf_window":
+            beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
+
+            mask = self._build_window_mask(px, cen, wid, beta=beta)
+            px_fit = px[mask]
+            sline_fit = sline[mask]
+
+            lo, hi = list(bounds[0]), list(bounds[1])
+            center_ranges = self._bounded_center_ranges(px, cen, wid, beta=beta)
+
+            # Param order: [amp1, cen1, gamma1, amp2, cen2, gamma2, offset]
+            lo[1], hi[1] = center_ranges[0]
+            lo[4], hi[4] = center_ranges[1]
+
+            # Material widths can be much smaller than the observed widths
+            # (instrument-dominated peaks), so keep the lower bounds loose.
+            lo[2] = 1e-3
+            hi[2] = max(4.0 * float(wid[0]), 0.5)
+            lo[5] = 1e-3
+            hi[5] = max(4.0 * float(wid[1]), 0.5)
+
+            bounds = (lo, hi)
+            mask_used = mask
+
         elif requested_model == "dho_window":
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
 
@@ -642,6 +730,41 @@ class SpectrumFitter:
     ) -> FittedSpectrum:
         fitted = model_func(px, *popt)
         x_fit, y_fit = refine_fitted_spectrum(model_func, px, popt, factor=10)
+
+        if len(popt) == 7 and model.startswith("2lorentzian_psf"):
+            amp1, cen1, gamma1, amp2, cen2, gamma2, offset = popt
+            gi_left, gi_right = instrument_hwhm
+
+            # Option-2 width semantics (same as the DHO): the classic width
+            # fields carry the TOTAL observed HWHM (photon counts need the
+            # real peak area), the material HWHM is reported separately.
+            hwhm_mat1, hwhm_mat2 = float(gamma1), float(gamma2)
+            hwhm_tot1 = hwhm_mat1 + float(gi_left)
+            hwhm_tot2 = hwhm_mat2 + float(gi_right)
+            height_obs1 = float(amp1) * hwhm_mat1 / hwhm_tot1 if hwhm_tot1 > 0 else float(amp1)
+            height_obs2 = float(amp2) * hwhm_mat2 / hwhm_tot2 if hwhm_tot2 > 0 else float(amp2)
+
+            return FittedSpectrum(
+                is_success=True,
+                model=model,
+                sline=sline,
+                x_pixels=px,
+                fitted_spectrum=fitted,
+                x_fit_refined=x_fit,
+                y_fit_refined=y_fit,
+                mask_for_fitting=mask,
+                parameters=popt,
+                left_peak_center_px=float(cen1),
+                left_peak_width_px=hwhm_tot1,
+                left_peak_amplitude=height_obs1,
+                right_peak_center_px=float(cen2),
+                right_peak_width_px=hwhm_tot2,
+                right_peak_amplitude=height_obs2,
+                inter_peak_distance=float(abs(cen2 - cen1)),
+                offset=float(offset),
+                material_hwhm_left_px=hwhm_mat1,
+                material_hwhm_right_px=hwhm_mat2,
+            )
 
         if len(popt) == 7 and model.startswith("2dho_anchored"):
             amp1, omega1, gmat1, amp2, omega2, gmat2, offset = popt

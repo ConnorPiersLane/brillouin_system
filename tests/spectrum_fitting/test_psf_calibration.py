@@ -256,6 +256,99 @@ def test_dho_with_measured_psf_recovers_material_parameters(params_psf):
     assert result.material_hwhm_right_px == pytest.approx(GAMMA_MAT / 2, rel=0.25)
 
 
+# --- lorentzian_psf: Lorentzian core forward-modeled through the ePSF -------
+
+LP_CEN_LEFT = 22.0
+LP_CEN_RIGHT = 58.0
+LP_HWHM_MAT = 1.5
+
+
+def make_lorentzian_sample_sline(seed=1):
+    """Material Lorentzians convolved with the TRUE optical PSFs, pixel-integrated."""
+    px = np.arange(N_PX, dtype=float)
+    fine = np.arange(-10.0, N_PX + 10.0, 0.02)
+
+    def one(psf_func, cen):
+        core = 1.0 / (1.0 + ((fine - cen) / LP_HWHM_MAT) ** 2)
+        kern_u = np.arange(-8.0, 8.0 + 1e-9, 0.02)
+        kern = psf_func(kern_u)
+        kern = kern / kern.sum()
+        conv = np.convolve(core, kern, mode="same")
+        out = np.empty_like(px)
+        for k, p in enumerate(px):
+            m = np.abs(fine - p) <= 0.5
+            out[k] = conv[m].mean()
+        return out
+
+    sline = (
+        1200.0 * one(optical_psf_left, LP_CEN_LEFT)
+        + 950.0 * one(optical_psf_right, LP_CEN_RIGHT)
+        + OFFSET_S
+    )
+    rng = np.random.default_rng(seed)
+    return px, sline + rng.normal(0.0, np.sqrt(np.clip(sline, 1.0, None)) * 0.2)
+
+
+@pytest.mark.parametrize("model", ["lorentzian_psf", "lorentzian_psf_window"])
+def test_lorentzian_psf_recovers_centers_and_material_width(params_psf, model):
+    anchors = CalibrationCalculator(params_psf).elastic_anchors()
+    calc = CalibrationCalculator(params_psf)
+    px, sline = make_lorentzian_sample_sline()
+
+    fitter = SpectrumFitter()
+    fitter.update_sample_config(sample_config(model))
+    result = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
+
+    assert result.is_success
+    expected = "2lorentzian_psf_window" if model == "lorentzian_psf_window" else "2lorentzian_psf"
+    assert result.model == expected
+
+    # The kernel's zero convention (maximum of the boxed profile at u=0)
+    # offsets ALL centers — sample AND calibration — by the same constant,
+    # which cancels through the calibration mapping, exactly as in the real
+    # pipeline. So the unbiasedness check must be done in FREQUENCY space:
+    true_freq_left = A_LEFT * (LP_CEN_LEFT - R_LEFT)
+    true_freq_right = A_RIGHT * (R_RIGHT - LP_CEN_RIGHT)
+    fitted_freq_left = float(calc.freq_left_peak(result.left_peak_center_px))
+    fitted_freq_right = float(calc.freq_right_peak(result.right_peak_center_px))
+    assert fitted_freq_left == pytest.approx(true_freq_left, abs=0.02)    # 20 MHz
+    assert fitted_freq_right == pytest.approx(true_freq_right, abs=0.02)  # 20 MHz
+    # Pixel-level sanity (allows the constant convention offset)
+    assert result.left_peak_center_px == pytest.approx(LP_CEN_LEFT, abs=0.4)
+    assert result.right_peak_center_px == pytest.approx(LP_CEN_RIGHT, abs=0.4)
+
+    # Material widths recovered (instrument deconvolved)
+    assert result.material_hwhm_left_px == pytest.approx(LP_HWHM_MAT, rel=0.2)
+    assert result.material_hwhm_right_px == pytest.approx(LP_HWHM_MAT, rel=0.2)
+    # Total (observed) width larger than material
+    assert result.left_peak_width_px > result.material_hwhm_left_px
+    assert result.right_peak_width_px > result.material_hwhm_right_px
+
+
+def test_lorentzian_psf_without_psf_raises(cal_data):
+    params_classic = calibrate(cal_data, poyfit_degree=2)  # no PSFs
+    anchors = CalibrationCalculator(params_classic).elastic_anchors()
+    px, sline = make_lorentzian_sample_sline()
+
+    fitter = SpectrumFitter()
+    fitter.update_sample_config(sample_config("lorentzian_psf"))
+    with pytest.raises(ValueError, match="lorentzian_psf"):
+        fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
+    with pytest.raises(ValueError, match="lorentzian_psf"):
+        fitter.fit(px, sline, is_reference_mode=False, anchors=None)
+
+
+def test_lorentzian_psf_one_peak_fails_gracefully(params_psf):
+    anchors = CalibrationCalculator(params_psf).elastic_anchors()
+    px = np.arange(N_PX, dtype=float)
+    sline = 1000.0 * np.exp(-0.5 * ((px - 40.0) / 2.0) ** 2) + 100.0
+
+    fitter = SpectrumFitter()
+    fitter.update_sample_config(sample_config("lorentzian_psf"))
+    result = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
+    assert not result.is_success
+
+
 def test_dho_without_psf_still_uses_lorentzian_irf(params_psf, cal_data):
     """A classic calibration (no PSF) keeps the Lorentzian-IRF DHO path."""
     params_classic = calibrate(cal_data, poyfit_degree=2)

@@ -154,11 +154,12 @@ def epsf_hwhm_px(psf, grid_step_px):
     return 0.5 * float(right - left)
 
 
-def _dho_epsf_sampled(x, amp, rayleigh_px, omega, gamma_mat, kernel, grid_step_px):
+def _epsf_convolved_sampled(x, core_func, kernel, grid_step_px):
     """
-    Material DHO (anchored at rayleigh_px) convolved with the measured ePSF
-    and SAMPLED at pixel centers.
+    Convolve a material lineshape with the measured ePSF and SAMPLE at pixel
+    centers.
 
+    core_func(fine_px_axis) evaluates the material profile on the fine grid.
     The ePSF already contains the 1-px binning (it was reconstructed from
     pixel-integrated samples), so no additional pixel integration is applied
     — doing so would double-count the pixelation.
@@ -172,9 +173,24 @@ def _dho_epsf_sampled(x, amp, rayleigh_px, omega, gamma_mat, kernel, grid_step_p
     n = int(np.ceil((hi - lo) / dt)) + 1
     fine = lo + dt * np.arange(n)
 
-    dho_fine = amp * dho_intensity(fine - rayleigh_px, omega, gamma_mat)
-    conv = fftconvolve(dho_fine, kernel / kernel.sum(), mode="same")
+    conv = fftconvolve(core_func(fine), kernel / kernel.sum(), mode="same")
     return np.interp(x, fine, conv)
+
+
+def lorentzian_core(u, hwhm):
+    """Height-normalised Lorentzian, HWHM in pixels."""
+    hwhm = max(float(hwhm), 1e-6)
+    return hwhm**2 / (np.square(u) + hwhm**2)
+
+
+def _dho_epsf_sampled(x, amp, rayleigh_px, omega, gamma_mat, kernel, grid_step_px):
+    """Material DHO (anchored at rayleigh_px) convolved with the measured ePSF."""
+    return _epsf_convolved_sampled(
+        x,
+        lambda fine: amp * dho_intensity(fine - rayleigh_px, omega, gamma_mat),
+        kernel,
+        grid_step_px,
+    )
 
 
 def make_2dho_epsf_anchored(
@@ -203,6 +219,38 @@ def make_2dho_epsf_anchored(
         )
 
     return _2dho_epsf_anchored
+
+
+def make_2lorentzian_epsf(psf_left, psf_right, grid_step_px):
+    """
+    Two Lorentzian peaks, each convolved with its order's MEASURED instrument
+    response (ePSF). The forward-model counterpart of the classic
+    2lorentzian: because the instrument shape is in the model, the fitted
+    centers are unbiased under a non-Lorentzian / skewed instrument response
+    (pairs consistently with centering="psf" calibrations), and the fitted
+    gammas are the MATERIAL HWHMs (instrument deconvolved). Needs no elastic
+    anchors — centers are free parameters.
+
+    Parameter order (same layout as the classic two-peak Lorentzian):
+        [amp1, cen1, gamma1, amp2, cen2, gamma2, offset]
+
+    amp is the material-core peak height; the observed (convolved) height is
+    lower, approximately amp * gamma / (gamma + instrument_hwhm).
+    """
+    kL = np.asarray(psf_left, dtype=float)
+    kR = np.asarray(psf_right, dtype=float)
+    dt = float(grid_step_px)
+
+    def _2lorentzian_epsf(x, amp1, cen1, gamma1, amp2, cen2, gamma2, offset):
+        return (
+            _epsf_convolved_sampled(
+                x, lambda fine: amp1 * lorentzian_core(fine - cen1, gamma1), kL, dt)
+            + _epsf_convolved_sampled(
+                x, lambda fine: amp2 * lorentzian_core(fine - cen2, gamma2), kR, dt)
+            + offset
+        )
+
+    return _2lorentzian_epsf
 
 
 def make_2dho_conv_anchored(
