@@ -1,12 +1,14 @@
 """
-End-to-end tests for the empirical-PSF calibration (centering="psf") and the
-PSF-kernel DHO fit.
+End-to-end tests for the dual-chain calibration (Lorentzian main chain +
+PSF-centered variant) and the PSF-kernel DHO fit.
 
 Synthetic instrument: linear dispersion per order, a SKEWED optical PSF for
 the left order (the real system's failure mode) and a symmetric one for the
 right order. The calibration sweep slides the sidebands across the detector
 in sub-pixel steps, exactly like the real EOM sweep.
 """
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -21,11 +23,13 @@ from brillouin_system.calibration.calibration import (
     _refit_entries_with_epsf,
     calibrate,
 )
+from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.dho_model import (
     dho_intensity,
     epsf_grid,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig
+from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -110,32 +114,57 @@ def cal_data():
 
 @pytest.fixture(scope="module")
 def params_psf(cal_data):
-    return calibrate(cal_data, poyfit_degree=2, centering="psf")
+    """Dual-chain calibration (calibrate() always attempts the PSF variant)."""
+    return calibrate(cal_data, poyfit_degree=2)
+
+
+def classic_params(params):
+    """A calibration without the PSF chain (as when the ePSF reconstruction
+    fails, or for files predating the variant). Shallow copy — the module
+    fixture stays untouched."""
+    return replace(params, psf_variant=None)
 
 
 # --- Calibration-level tests ------------------------------------------------
 
-def test_lorentzian_centering_unchanged(cal_data):
-    params = calibrate(cal_data, poyfit_degree=2)
-    assert params.psf_left is None
-    assert params.psf_right is None
-    assert np.all(np.isfinite(params.freq_left_peak))
-    assert np.all(np.isfinite(params.freq_right_peak))
+def test_calibrate_builds_dual_chain(params_psf):
+    """calibrate() returns the Lorentzian main chain with the PSF-centered
+    chain (and the ePSFs) nested as psf_variant."""
+    # Main chain keeps old semantics: no PSFs at the top level.
+    assert params_psf.psf_left is None
+    assert params_psf.psf_right is None
+    assert params_psf.psf_grid_step_px is None
+
+    variant = params_psf.psf_variant
+    assert variant is not None
+    assert variant.psf_variant is None  # no deeper nesting
+    assert variant.psf_left is not None
+    assert variant.psf_right is not None
+    assert variant.psf_grid_step_px is not None
+    assert np.all(np.isfinite(variant.freq_left_peak))
+    assert np.all(np.isfinite(variant.freq_right_peak))
 
 
-def test_unknown_centering_raises(cal_data):
-    with pytest.raises(ValueError, match="centering"):
-        calibrate(cal_data, poyfit_degree=2, centering="banana")
+def test_main_chain_is_pure_lorentzian_bootstrap(cal_data, params_psf):
+    """The main chain of a dual-chain calibration is EXACTLY the classic
+    lorentzian bootstrap result — old consumers see identical numbers."""
+    entries = _bootstrap_reference_fits(cal_data)
+    boot = _build_polyfit_parameters(entries, 2)
+    np.testing.assert_allclose(params_psf.freq_left_peak, boot.freq_left_peak)
+    np.testing.assert_allclose(params_psf.freq_right_peak, boot.freq_right_peak)
+    np.testing.assert_allclose(params_psf.freq_peak_distance, boot.freq_peak_distance)
+    np.testing.assert_allclose(params_psf.left_px_points, boot.left_px_points)
+    np.testing.assert_allclose(params_psf.right_px_points, boot.right_px_points)
 
 
 def test_psf_centering_reconstructs_skewed_epsf(params_psf):
-    assert params_psf.psf_left is not None
-    assert params_psf.psf_right is not None
-    step = params_psf.psf_grid_step_px
+    variant = params_psf.psf_variant
+    assert variant is not None
+    step = variant.psf_grid_step_px
     assert step is not None and step > 0
 
-    psf_l = np.asarray(params_psf.psf_left)
-    psf_r = np.asarray(params_psf.psf_right)
+    psf_l = np.asarray(variant.psf_left)
+    psf_r = np.asarray(variant.psf_right)
     u = epsf_grid(psf_l, step)
 
     # Maximum sits at the center bin by convention
@@ -306,11 +335,14 @@ def test_lorentzian_psf_recovers_centers_and_material_width(params_psf, model):
     # The kernel's zero convention (maximum of the boxed profile at u=0)
     # offsets ALL centers — sample AND calibration — by the same constant,
     # which cancels through the calibration mapping, exactly as in the real
-    # pipeline. So the unbiasedness check must be done in FREQUENCY space:
+    # pipeline. So the unbiasedness check must be done in FREQUENCY space,
+    # through the chain the fit was stamped with (the PSF-centered variant).
+    assert result.calibration_chain == "psf"
+    chain = calc.for_chain(result.calibration_chain)
     true_freq_left = A_LEFT * (LP_CEN_LEFT - R_LEFT)
     true_freq_right = A_RIGHT * (R_RIGHT - LP_CEN_RIGHT)
-    fitted_freq_left = float(calc.freq_left_peak(result.left_peak_center_px))
-    fitted_freq_right = float(calc.freq_right_peak(result.right_peak_center_px))
+    fitted_freq_left = float(chain.freq_left_peak(result.left_peak_center_px))
+    fitted_freq_right = float(chain.freq_right_peak(result.right_peak_center_px))
     assert fitted_freq_left == pytest.approx(true_freq_left, abs=0.02)    # 20 MHz
     assert fitted_freq_right == pytest.approx(true_freq_right, abs=0.02)  # 20 MHz
     # Pixel-level sanity (allows the constant convention offset)
@@ -325,8 +357,8 @@ def test_lorentzian_psf_recovers_centers_and_material_width(params_psf, model):
     assert result.right_peak_width_px > result.material_hwhm_right_px
 
 
-def test_lorentzian_psf_without_psf_raises(cal_data):
-    params_classic = calibrate(cal_data, poyfit_degree=2)  # no PSFs
+def test_lorentzian_psf_without_psf_raises(params_psf):
+    params_classic = classic_params(params_psf)  # no PSF chain
     anchors = CalibrationCalculator(params_classic).elastic_anchors()
     px, sline = make_lorentzian_sample_sline()
 
@@ -349,12 +381,14 @@ def test_lorentzian_psf_one_peak_fails_gracefully(params_psf):
     assert not result.is_success
 
 
-def test_dho_without_psf_still_uses_lorentzian_irf(params_psf, cal_data):
-    """A classic calibration (no PSF) keeps the Lorentzian-IRF DHO path."""
-    params_classic = calibrate(cal_data, poyfit_degree=2)
+def test_dho_without_psf_still_uses_lorentzian_irf(params_psf):
+    """A calibration without the PSF chain keeps the Lorentzian-IRF DHO path,
+    and the fit is stamped for the main chain."""
+    params_classic = classic_params(params_psf)
     anchors = CalibrationCalculator(params_classic).elastic_anchors()
     assert anchors is not None
     assert anchors.psf_left is None
+    assert anchors.chain == "lorentzian"
 
     px, sline = make_sample_sline()
     fitter = SpectrumFitter()
@@ -363,3 +397,162 @@ def test_dho_without_psf_still_uses_lorentzian_irf(params_psf, cal_data):
 
     assert result.is_success
     assert result.model == "2dho_anchored_window"
+    assert result.calibration_chain == "lorentzian"
+
+
+# --- Dual-chain selection ----------------------------------------------------
+
+def _fitted(chain: str, left=30.0, right=50.0) -> FittedSpectrum:
+    return FittedSpectrum(
+        is_success=True,
+        x_pixels=np.arange(N_PX, dtype=float),
+        sline=np.zeros(N_PX),
+        model="synthetic",
+        left_peak_center_px=left,
+        right_peak_center_px=right,
+        inter_peak_distance=right - left,
+        calibration_chain=chain,
+    )
+
+
+def test_for_chain_selects_chain(params_psf):
+    calc = CalibrationCalculator(params_psf)
+
+    # The main-chain stamp (and its absence, for old saved fits) stays on
+    # the main calculator; the "psf" stamp gets the variant chain.
+    assert calc.for_chain("lorentzian") is calc
+    assert calc.for_chain(None) is calc
+    assert calc.for_chain("") is calc
+    variant_calc = calc.for_chain("psf")
+    assert variant_calc is not calc
+    assert variant_calc.p is params_psf.psf_variant
+    assert calc.for_chain("psf") is variant_calc  # cached
+
+    with pytest.raises(ValueError, match="Unknown calibration chain"):
+        calc.for_chain("banana")
+
+
+def test_for_chain_psf_without_variant_raises(params_psf):
+    """A 'psf'-stamped fit against a calibration without the PSF chain is a
+    real mismatch and must fail loudly, never map through the wrong polys."""
+    calc_classic = CalibrationCalculator(classic_params(params_psf))
+    assert calc_classic.for_chain("lorentzian") is calc_classic
+    with pytest.raises(ValueError, match="psf"):
+        calc_classic.for_chain("psf")
+
+
+def test_fits_are_stamped_with_their_chain(params_psf):
+    """The fitter stamps each result with the chain of the anchors it
+    consumed; plain models always pair with the main chain."""
+    anchors = CalibrationCalculator(params_psf).elastic_anchors()
+    assert anchors.chain == "psf"
+
+    px, sline = make_lorentzian_sample_sline()
+    fitter = SpectrumFitter()
+
+    fitter.update_sample_config(sample_config("lorentzian_psf_window"))
+    result_psf = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
+    assert result_psf.is_success
+    assert result_psf.calibration_chain == "psf"
+
+    fitter.update_sample_config(sample_config("lorentzian_window"))
+    result_plain = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
+    assert result_plain.is_success
+    assert result_plain.calibration_chain == "lorentzian"
+
+
+def test_compute_freq_shift_uses_matching_chain(params_psf):
+    """compute_freq_shift maps the same pixel through main vs variant polys
+    depending on the fit's stamp — cross-usage is structurally impossible."""
+    calc = CalibrationCalculator(params_psf)
+    px_val = 30.0
+
+    freq_plain = calc.compute_freq_shift(_fitted("lorentzian", left=px_val), reference="left")
+    freq_psf = calc.compute_freq_shift(_fitted("psf", left=px_val), reference="left")
+
+    assert freq_plain == pytest.approx(
+        float(np.polyval(params_psf.freq_left_peak, px_val)))
+    assert freq_psf == pytest.approx(
+        float(np.polyval(params_psf.psf_variant.freq_left_peak, px_val)))
+
+
+def test_elastic_anchors_come_from_variant(params_psf):
+    """Anchors feed only the PSF-aware models, so a dual-chain calibration
+    serves them from the PSF-centered chain (PSFs included) and marks their
+    origin for the fit stamp."""
+    anchors = CalibrationCalculator(params_psf).elastic_anchors()
+    anchors_variant = CalibrationCalculator(params_psf.psf_variant).elastic_anchors()
+
+    assert anchors is not None
+    assert anchors.psf_left is not None
+    assert anchors.chain == "psf"
+    assert anchors_variant.chain == "lorentzian"  # served as its own main
+    assert anchors.rayleigh_left_px == pytest.approx(anchors_variant.rayleigh_left_px)
+    assert anchors.rayleigh_right_px == pytest.approx(anchors_variant.rayleigh_right_px)
+
+
+def test_spectrum_analyzer_uses_matching_chain(params_psf):
+    analyzer = SpectrumAnalyzer(CalibrationCalculator(params_psf))
+
+    fs_plain = _fitted("lorentzian")
+    fs_plain.left_peak_width_px = 1.0
+    fs_plain.right_peak_width_px = 1.0
+    fs_psf = _fitted("psf")
+    fs_psf.left_peak_width_px = 1.0
+    fs_psf.right_peak_width_px = 1.0
+
+    shift_plain = analyzer.analyze_spectrum(fs_plain).freq_shift_left_peak_ghz
+    shift_psf = analyzer.analyze_spectrum(fs_psf).freq_shift_left_peak_ghz
+
+    assert shift_plain == pytest.approx(
+        float(np.polyval(params_psf.freq_left_peak, 30.0)))
+    assert shift_psf == pytest.approx(
+        float(np.polyval(params_psf.psf_variant.freq_left_peak, 30.0)))
+
+
+# --- HDF5 round-trip of the nested variant -----------------------------------
+
+def test_h5_roundtrip_preserves_dual_chain(params_psf, tmp_path):
+    from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
+    from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+        dataclass_to_hdf5_native_dict,
+        dict_to_dataclass_tree,
+        load_dict_from_hdf5,
+        save_dict_to_hdf5,
+    )
+
+    path = str(tmp_path / "dual_chain.h5")
+    save_dict_to_hdf5(path, dataclass_to_hdf5_native_dict(params_psf))
+    loaded = dict_to_dataclass_tree(load_dict_from_hdf5(path), known=known_classes)
+
+    np.testing.assert_allclose(loaded.freq_left_peak, params_psf.freq_left_peak)
+    assert loaded.psf_left is None
+    assert loaded.psf_variant is not None
+    assert loaded.psf_variant.psf_variant is None
+    np.testing.assert_allclose(
+        loaded.psf_variant.freq_left_peak, params_psf.psf_variant.freq_left_peak)
+    np.testing.assert_allclose(
+        loaded.psf_variant.psf_left, params_psf.psf_variant.psf_left)
+    assert loaded.psf_variant.psf_grid_step_px == pytest.approx(
+        params_psf.psf_variant.psf_grid_step_px)
+
+
+def test_old_format_without_variant_loads_with_none(params_psf, tmp_path):
+    """Files written before the psf_variant field existed load with the
+    variant defaulting to None (main chain only)."""
+    from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
+    from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+        dataclass_to_hdf5_native_dict,
+        dict_to_dataclass_tree,
+        load_dict_from_hdf5,
+        save_dict_to_hdf5,
+    )
+
+    native = dataclass_to_hdf5_native_dict(params_psf)
+    del native["psf_variant"]  # simulate a pre-dual-chain file
+    path = str(tmp_path / "legacy.h5")
+    save_dict_to_hdf5(path, native)
+    loaded = dict_to_dataclass_tree(load_dict_from_hdf5(path), known=known_classes)
+
+    assert loaded.psf_variant is None
+    np.testing.assert_allclose(loaded.freq_left_peak, params_psf.freq_left_peak)

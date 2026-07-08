@@ -74,13 +74,17 @@ class SpectrumAnalyzer:
                 hwhm_right_peak_ghz=None,
             )
 
+        # Chain selection: the fit is stamped with the chain it was made
+        # against (PSF-centered for *_psf / dho fits, main chain otherwise).
+        calc = self.calibration_calculator.for_chain(fitting.calibration_chain)
+
         return AnalyzedFreqShifts(
-            freq_shift_left_peak_ghz=self.calibration_calculator.freq_left_peak(fitting.left_peak_center_px),
-            freq_shift_right_peak_ghz=self.calibration_calculator.freq_right_peak(fitting.right_peak_center_px),
-            freq_shift_peak_distance_ghz=self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance),
+            freq_shift_left_peak_ghz=calc.freq_left_peak(fitting.left_peak_center_px),
+            freq_shift_right_peak_ghz=calc.freq_right_peak(fitting.right_peak_center_px),
+            freq_shift_peak_distance_ghz=calc.freq_peak_distance(fitting.inter_peak_distance),
             hwhm_left_peak_ghz=float(
                 abs(
-                    self.calibration_calculator.df_left_peak(
+                    calc.df_left_peak(
                         fitting.left_peak_center_px,
                         fitting.left_peak_width_px
                     )
@@ -88,7 +92,7 @@ class SpectrumAnalyzer:
             ),
             hwhm_right_peak_ghz=float(
                 abs(
-                    self.calibration_calculator.df_right_peak(
+                    calc.df_right_peak(
                         fitting.right_peak_center_px,
                         fitting.right_peak_width_px
                     )
@@ -96,11 +100,11 @@ class SpectrumAnalyzer:
             ),
             material_hwhm_left_ghz=self._material_hwhm_ghz(
                 fitting.left_peak_center_px, fitting.material_hwhm_left_px,
-                self.calibration_calculator.df_left_peak,
+                calc.df_left_peak,
             ),
             material_hwhm_right_ghz=self._material_hwhm_ghz(
                 fitting.right_peak_center_px, fitting.material_hwhm_right_px,
-                self.calibration_calculator.df_right_peak,
+                calc.df_right_peak,
             ),
         )
 
@@ -130,8 +134,9 @@ class SpectrumAnalyzer:
         # Lorentzian Profile, approximate std with fwhm
         s_l, s_r = analyzed_spec.hwhm_left_peak_ghz, analyzed_spec.hwhm_right_peak_ghz
 
-        a_l = abs(self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1))
-        a_r = abs(self.calibration_calculator.df_right_peak(px=fs.right_peak_center_px, dpx=1))
+        calc = self.calibration_calculator.for_chain(fs.calibration_chain)
+        a_l = abs(calc.df_left_peak(px=fs.left_peak_center_px, dpx=1))
+        a_r = abs(calc.df_right_peak(px=fs.right_peak_center_px, dpx=1))
 
         n_l = photons.left_peak_photons
         n_r = photons.right_peak_photons

@@ -21,11 +21,17 @@ class ElasticAnchors:
 
     psf_left / psf_right / psf_grid_step_px : empirical per-order instrument
         response (ePSF = optical PSF including the 1-px binning),
-        reconstructed by a calibration run with centering="psf". When
-        present, the DHO uses the measured (possibly skewed) kernel instead
-        of the analytic Lorentzian IRF. The profile is sampled on a uniform
-        grid of spacing psf_grid_step_px, symmetric around its maximum at the
-        center index, area-normalised.
+        reconstructed from the calibration sweep. When present, the DHO uses
+        the measured (possibly skewed) kernel instead of the analytic
+        Lorentzian IRF. The profile is sampled on a uniform grid of spacing
+        psf_grid_step_px, symmetric around its maximum at the center index,
+        area-normalised.
+
+    chain : which calibration chain produced these anchors — "lorentzian"
+        (the main chain) or "psf" (the PSF-centered variant). Fits that
+        consume the anchors are stamped with this value
+        (FittedSpectrum.calibration_chain) so the analysis maps their pixels
+        through the same chain.
 
     See CalibrationCalculator.elastic_anchors.
     """
@@ -36,6 +42,7 @@ class ElasticAnchors:
     psf_left: np.ndarray = None
     psf_right: np.ndarray = None
     psf_grid_step_px: float = None
+    chain: str = "lorentzian"
 
 
 def dho_intensity(u, omega0, gamma):
@@ -198,9 +205,9 @@ def make_2dho_epsf_anchored(
 ):
     """
     Build the two-peak anchored DHO model convolved with the MEASURED
-    per-order instrument response (ePSF), e.g. from a calibration run with
-    centering="psf". Handles skewed (asymmetric) instrument responses that a
-    Lorentzian IRF cannot represent.
+    per-order instrument response (ePSF) from the calibration's PSF chain.
+    Handles skewed (asymmetric) instrument responses that a Lorentzian IRF
+    cannot represent.
 
     Free parameters (same layout as the Lorentzian-IRF variant):
         [amp1, omega1, gamma_mat1, amp2, omega2, gamma_mat2, offset]
@@ -227,7 +234,7 @@ def make_2lorentzian_epsf(psf_left, psf_right, grid_step_px):
     response (ePSF). The forward-model counterpart of the classic
     2lorentzian: because the instrument shape is in the model, the fitted
     centers are unbiased under a non-Lorentzian / skewed instrument response
-    (pairs consistently with centering="psf" calibrations), and the fitted
+    (pairs consistently with the calibration's PSF chain), and the fitted
     gammas are the MATERIAL HWHMs (instrument deconvolved). Needs no elastic
     anchors — centers are free parameters.
 

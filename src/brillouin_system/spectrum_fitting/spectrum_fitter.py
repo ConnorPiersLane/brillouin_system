@@ -227,8 +227,9 @@ class SpectrumFitter:
             ):
                 raise ValueError(
                     "The lorentzian_psf model requires the measured instrument "
-                    "PSFs from a calibration run with centering='psf'. Run or "
-                    "load such a calibration, or choose another fitting model."
+                    "PSFs, but the current calibration has no usable PSF "
+                    "reconstruction. Run or load a calibration whose PSF "
+                    "chain is available, or choose another fitting model."
                 )
 
         if requested_model in ("dho", "dho_window"):
@@ -262,10 +263,22 @@ class SpectrumFitter:
             ):
                 raise ValueError(
                     "The DHO model requires an instrument response: either "
-                    "measured PSFs (calibration centering='psf') or "
+                    "measured PSFs (the calibration's PSF chain) or "
                     "instrument-width polynomials (calibration_width_*_peak). "
                     "The calibration provided neither."
                 )
+
+        # Chain stamp: which calibration chain the fitted pixels pair with.
+        # PSF-aware models inherit it from the anchors they consume (the
+        # anchors know which chain produced them); everything else pairs with
+        # the Lorentzian-centered main chain. The analysis maps the result
+        # through this chain (CalibrationCalculator.for_chain).
+        if requested_model in (
+            "lorentzian_psf", "lorentzian_psf_window", "dho", "dho_window"
+        ) and anchors is not None:
+            calibration_chain = anchors.chain or "lorentzian"
+        else:
+            calibration_chain = "lorentzian"
 
         px = np.asarray(px, dtype=np.float64)
         sline = np.asarray(sline, dtype=np.float64)
@@ -473,8 +486,8 @@ class SpectrumFitter:
                 # material Brillouin resonances (px units) and gmat1/gmat2 the
                 # material dampings, both corrected for instrument broadening.
                 # The instrument response is the measured per-order ePSF when
-                # the calibration provides it (centering="psf"; handles skewed
-                # responses), otherwise a Lorentzian of the calibration width.
+                # the calibration provides it (handles skewed responses),
+                # otherwise a Lorentzian of the calibration width.
                 if has_psf:
                     fit_kind = "2dho_anchored_psf_window" if requested_model == "dho_window" else "2dho_anchored_psf"
                     gi_left = max(epsf_hwhm_px(anchors.psf_left, anchors.psf_grid_step_px), 1e-3)
@@ -684,7 +697,7 @@ class SpectrumFitter:
                 model=fit_kind,
             )
 
-        return self._build_result(
+        result = self._build_result(
             px=px,
             sline=sline,
             model_func=model_func,
@@ -694,6 +707,8 @@ class SpectrumFitter:
             anchors=anchors,
             instrument_hwhm=dho_instrument_hwhm,
         )
+        result.calibration_chain = calibration_chain
+        return result
 
     def _extract_peak_params(self, pk_ind, pk_info, px, sline):
         pk_ind = np.asarray(pk_ind, dtype=int)

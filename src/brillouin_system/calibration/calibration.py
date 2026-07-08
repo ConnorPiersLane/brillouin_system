@@ -49,13 +49,24 @@ class CalibrationPolyfitParameters:
     dist_freq_points: Optional[np.ndarray] = field(default=None)
 
     # Empirical per-order instrument response (ePSF = optical PSF including
-    # the 1-px binning), reconstructed from the reference sweep when the
-    # calibration ran with centering="psf". Sampled on a uniform grid of
-    # spacing psf_grid_step_px, symmetric around the profile maximum at the
-    # center index, area-normalised. None for classic calibrations.
+    # the 1-px binning), reconstructed from the reference sweep. Sampled on a
+    # uniform grid of spacing psf_grid_step_px, symmetric around the profile
+    # maximum at the center index, area-normalised. In a dual-chain
+    # calibration these live on the psf_variant, not here.
     psf_left: Optional[np.ndarray] = field(default=None)
     psf_right: Optional[np.ndarray] = field(default=None)
     psf_grid_step_px: Optional[float] = field(default=None)
+
+    # PSF-centered sibling chain, built by calibrate() whenever the sweep
+    # allows the ePSF reconstruction: same reference sweep, but every center
+    # re-fitted through the reconstructed ePSF (its psf_left / psf_right /
+    # psf_grid_step_px are set, its own psf_variant is None). The top-level
+    # fields above always hold the Lorentzian-centered chain. A fitted center
+    # is only unbiased against the chain whose centering matches the sample
+    # model, so CalibrationCalculator.for_chain selects the chain from the
+    # fit's calibration_chain stamp. None when the reconstruction failed and
+    # in files predating this field.
+    psf_variant: Optional["CalibrationPolyfitParameters"] = field(default=None)
 
 
 class CalibrationCalculator:
@@ -79,6 +90,45 @@ class CalibrationCalculator:
     def __init__(self, parameters: CalibrationPolyfitParameters):
         """Initialize the calculator with polynomial fit parameters."""
         self.p = parameters
+        self._variant_calc: CalibrationCalculator | None = None
+
+    def _variant(self) -> "CalibrationCalculator | None":
+        """Calculator over the PSF-centered chain, or None if not stored."""
+        if self.p is None or self.p.psf_variant is None:
+            return None
+        if self._variant_calc is None:
+            self._variant_calc = CalibrationCalculator(self.p.psf_variant)
+        return self._variant_calc
+
+    def for_chain(self, chain: str | None) -> "CalibrationCalculator":
+        """
+        Calculator over the calibration chain a fit was stamped with
+        (FittedSpectrum.calibration_chain, set by SpectrumFitter.fit from
+        ElasticAnchors.chain).
+
+        "lorentzian" (or empty/None, covering fits saved before the stamp
+        existed) selects the main chain; "psf" selects the PSF-centered
+        variant. Mixing the chains reintroduces the sub-pixel bias the PSF
+        calibration removes, so every px->GHz conversion of a fit result
+        must go through this selector.
+
+        A "psf" stamp against a calibration without a variant is a real
+        mismatch — the fit consumed PSF anchors this calibration cannot have
+        produced — so it raises instead of silently mapping the fit through
+        the wrong polynomials.
+        """
+        if not chain or chain == "lorentzian":
+            return self
+        if chain == "psf":
+            variant = self._variant()
+            if variant is None:
+                raise ValueError(
+                    "Fit is stamped with the 'psf' calibration chain, but "
+                    "this calibration has no PSF variant — the fit was made "
+                    "against a different calibration."
+                )
+            return variant
+        raise ValueError(f"Unknown calibration chain '{chain}'.")
 
     def compute_freq_shift(
             self,
@@ -119,26 +169,30 @@ class CalibrationCalculator:
         if mode not in {"poly", "interp"}:
             raise ValueError(f"Unknown mode '{mode}'. Use 'poly' or 'interp'.")
 
+        # Map the fitted pixels through the chain the fit was made against
+        # (PSF-centered variant for *_psf / dho fits, main chain otherwise).
+        calc = self.for_chain(fitting.calibration_chain)
+
         if reference == "left":
             px_value = fitting.left_peak_center_px
             if mode == "poly":
-                result = self.freq_left_peak(px_value)
+                result = calc.freq_left_peak(px_value)
             else:
-                result = self.freq_left_peak_interp(px_value)
+                result = calc.freq_left_peak_interp(px_value)
 
         elif reference == "right":
             px_value = fitting.right_peak_center_px
             if mode == "poly":
-                result = self.freq_right_peak(px_value)
+                result = calc.freq_right_peak(px_value)
             else:
-                result = self.freq_right_peak_interp(px_value)
+                result = calc.freq_right_peak_interp(px_value)
 
         elif reference == "distance":
             px_value = fitting.inter_peak_distance
             if mode == "poly":
-                result = self.freq_peak_distance(px_value)
+                result = calc.freq_peak_distance(px_value)
             else:
-                result = self.freq_peak_distance_interp(px_value)
+                result = calc.freq_peak_distance_interp(px_value)
 
         else:
             raise ValueError(
@@ -260,9 +314,23 @@ class CalibrationCalculator:
         inconsistent (left anchor must lie left of the right anchor). Note the
         DHO model requires anchors: passing anchors=None to
         SpectrumFitter.fit raises for the dho models.
+
+        Anchors are consumed only by the PSF-aware sample models (dho,
+        lorentzian_psf), so in a dual-chain calibration they come from the
+        PSF-centered variant — the chain those models pair with. The anchors
+        carry their chain of origin (ElasticAnchors.chain), which the fitter
+        stamps onto the resulting FittedSpectrum so the analysis maps it
+        through the same chain.
         """
         if self.p is None:
             return None
+
+        variant = self._variant()
+        if variant is not None:
+            anchors = variant.elastic_anchors()
+            if anchors is not None:
+                anchors.chain = "psf"
+            return anchors
 
         r_left = self._elastic_line_px(
             self.p.freq_left_peak, self.p.left_px_points, self.p.left_freq_points
@@ -288,9 +356,9 @@ class CalibrationCalculator:
         if not (np.all(np.isfinite(wl)) and np.all(np.isfinite(wr))):
             return None
 
-        # Empirical PSFs (present when the calibration ran with
-        # centering="psf"); the DHO fit then uses them as the instrument
-        # response instead of the Lorentzian width model.
+        # Empirical PSFs (present on the PSF-centered chain); the DHO fit
+        # then uses them as the instrument response instead of the
+        # Lorentzian width model.
         psf_left = psf_right = None
         psf_step = None
         if (
@@ -383,6 +451,17 @@ class CalibrationCalculator:
             )
         else:
             lines.append("Elastic lines (DHO anchors): not available")
+        if self._variant() is not None:
+            lines.append(
+                "PSF-centered variant chain: available "
+                "(used automatically by *_psf / dho sample models)"
+            )
+        else:
+            lines.append(
+                "PSF-centered variant chain: NOT available (ePSF "
+                "reconstruction not usable) — *_psf sample models will "
+                "refuse to fit against this calibration"
+            )
         lines.append("================================")
         return "\n".join(lines)
 
@@ -413,10 +492,10 @@ class CalibrationCalculator:
 
 
 def get_calibration_calculator_from_data(
-    calibration_data: CalibrationData, poyfit_degree, centering: str = "lorentzian"
+    calibration_data: CalibrationData, poyfit_degree
 ) -> CalibrationCalculator:
     return CalibrationCalculator(
-        calibrate(data=calibration_data, poyfit_degree=poyfit_degree, centering=centering)
+        calibrate(data=calibration_data, poyfit_degree=poyfit_degree)
     )
 
 def sort_xy(x, y):
@@ -691,36 +770,40 @@ def _refit_entries_with_epsf(entries, psf_left, psf_right) -> list[_ReferenceFit
 def calibrate(
     data: CalibrationData,
     poyfit_degree: int = 1,
-    centering: str = "lorentzian",
 ) -> CalibrationPolyfitParameters:
     """
-    Build calibration parameters from reference sweep data.
+    Build dual-chain calibration parameters from reference sweep data.
 
-    centering = "lorentzian": classic behavior — reference peak centers from
-        lorentzian_window fits (unchanged old pipeline).
-    centering = "psf": two-stage — bootstrap with lorentzian fits, reconstruct
-        the per-order empirical PSF from the sweep, re-fit every reference
-        center with a shifted-PSF model (immune to PSF skew and sub-pixel
-        sampling bias), rebuild the polynomials from the improved centers, and
-        store the PSFs for the DHO sample fits. Falls back to the lorentzian
-        result (with a printed warning) if the reconstruction is unusable.
+    The returned top-level parameters are ALWAYS the Lorentzian-centered
+    chain (reference peak centers from lorentzian_window fits — the classic
+    pipeline, paired with the plain sample models).
+
+    Whenever the sweep allows it, the PSF-centered sibling chain is built and
+    attached as .psf_variant: reconstruct the per-order empirical PSF from
+    the sweep, re-fit every reference center with a shifted-PSF model
+    (immune to PSF skew and sub-pixel sampling bias), rebuild the
+    polynomials from the improved centers, and store the PSFs on the variant
+    for the PSF-aware sample fits (lorentzian_psf, dho).
+    CalibrationCalculator then selects the chain per fit, so either model
+    family can be analyzed from the same calibration. Falls back to the
+    main chain alone (with a printed warning) if the reconstruction is
+    unusable — the *_psf sample models then refuse to fit.
     """
-    if centering not in ("lorentzian", "psf"):
-        raise ValueError(f"Unknown centering '{centering}'. Use 'lorentzian' or 'psf'.")
-
     entries = _bootstrap_reference_fits(data)
     if not entries:
         raise ValueError("No successful fits found in calibration data.")
 
     params = _build_polyfit_parameters(entries, poyfit_degree)
-    if centering == "lorentzian":
-        return params
 
     # Pass 1: reconstruct the ePSFs aligned with the bootstrap polynomials.
     psf_left = _reconstruct_epsf(entries, params.freq_left_peak, side="left")
     psf_right = _reconstruct_epsf(entries, params.freq_right_peak, side="right")
     if psf_left is None or psf_right is None:
-        print("[Calibration] PSF reconstruction not usable — keeping lorentzian centering.")
+        print(
+            "[Calibration] PSF reconstruction not usable — main (lorentzian) "
+            "chain only; *_psf / dho-with-PSF sample models will not be "
+            "available for this calibration."
+        )
         return params
 
     # Re-fit all reference centers with the shifted-PSF model and rebuild.
@@ -734,4 +817,9 @@ def calibrate(
     params_psf.psf_left = psf_left2 if psf_left2 is not None else psf_left
     params_psf.psf_right = psf_right2 if psf_right2 is not None else psf_right
     params_psf.psf_grid_step_px = PSF_GRID_STEP_PX
-    return params_psf
+
+    # Dual-chain result: the Lorentzian bootstrap chain stays the main
+    # parameters (old semantics, pairs with the plain sample models); the
+    # PSF-centered chain rides along as the variant.
+    params.psf_variant = params_psf
+    return params

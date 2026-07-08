@@ -62,18 +62,6 @@ class CalibrationConfigDialog(QDialog):
         mode_layout.addWidget(self.poly_radio)
         mode_layout.addWidget(self.interp_radio)
 
-        # Centering radio buttons (how reference peak centers are obtained)
-        self.centering_group = QButtonGroup(self)
-        self.lorentzian_centering_radio = QRadioButton("Lorentzian (classic)")
-        self.psf_centering_radio = QRadioButton("PSF (empirical instrument response)")
-
-        self.centering_group.addButton(self.lorentzian_centering_radio)
-        self.centering_group.addButton(self.psf_centering_radio)
-
-        centering_layout = QVBoxLayout()
-        centering_layout.addWidget(self.lorentzian_centering_radio)
-        centering_layout.addWidget(self.psf_centering_radio)
-
         # Save calibration frames checkbox
         self.save_frames_checkbox = QCheckBox("Save calibration frames with each scan")
 
@@ -85,7 +73,6 @@ class CalibrationConfigDialog(QDialog):
         form.addRow("Step (GHz):", self.step_input)
         form.addRow(QLabel("Reference Method:"), ref_layout)
         form.addRow(QLabel("Mode:"), mode_layout)
-        form.addRow(QLabel("Centering:"), centering_layout)
         form.addRow(QLabel("Storage:"), self.save_frames_checkbox)
 
         layout.addLayout(form)
@@ -117,11 +104,6 @@ class CalibrationConfigDialog(QDialog):
         else:
             self.interp_radio.setChecked(True)
 
-        if cfg.centering == "psf":
-            self.psf_centering_radio.setChecked(True)
-        else:
-            self.lorentzian_centering_radio.setChecked(True)
-
         self.save_frames_checkbox.setChecked(cfg.save_calibration_frames)
 
     def create_buttons(self):
@@ -152,7 +134,6 @@ class CalibrationConfigDialog(QDialog):
             )
 
             mode = "poly" if self.poly_radio.isChecked() else "interp"
-            centering = "psf" if self.psf_centering_radio.isChecked() else "lorentzian"
 
             calibration_config.update(
                 n_per_freq=int(self.n_per_freq_input.text()),
@@ -162,7 +143,6 @@ class CalibrationConfigDialog(QDialog):
                 step=float(self.step_input.text()),
                 reference=reference,
                 mode=mode,
-                centering=centering,
                 save_calibration_frames=self.save_frames_checkbox.isChecked(),
             )
 

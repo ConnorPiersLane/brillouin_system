@@ -18,13 +18,6 @@ class CalibrationConfig:
     step: float
     reference: str  # "left", "right", or "distance"
     mode: str  # "poly" or "interp"
-    # How the reference peak centers are obtained during calibrate():
-    # "lorentzian" = classic lorentzian_window fits (default, old behavior)
-    # "psf"        = two-stage: bootstrap lorentzian fits, reconstruct the
-    #                empirical per-order PSF from the sideband sweep, then
-    #                re-fit all centers with a shifted-PSF model. Also stores
-    #                the PSFs for the DHO sample fit.
-    centering: str = "lorentzian"
     # Whether to store the raw calibration reference frames on each axial
     # scan (AxialScan.calibration_data). Needed for later PSF reconstruction
     # / debugging, but adds frames to every saved scan. The PSF DHO fit does
@@ -58,7 +51,6 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         step=raw["step"],
         reference=raw["reference"],
         mode=raw["mode"],
-        centering=raw.get("centering", "lorentzian"),
         save_calibration_frames=raw.get("save_calibration_frames", True),
     )
 
@@ -78,7 +70,6 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
             "step",
             "reference",
             "mode",
-            "centering",
             "save_calibration_frames",
         ]
     }

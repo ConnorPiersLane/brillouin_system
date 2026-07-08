@@ -2,9 +2,10 @@
 """
 Diagnostic: does PSF centering flatten the calibration residuals?
 
-Loads one saved calibration (raw reference frames), rebuilds the calibration
-BOTH ways — centering="lorentzian" (classic) and centering="psf" (empirical
-instrument response) — and compares:
+Loads one saved calibration (raw reference frames), rebuilds the dual-chain
+calibration once, and compares its two chains — the Lorentzian-centered main
+chain (classic) and the PSF-centered variant (empirical instrument
+response):
 
   1. the pixel-phase residual sinusoid amplitude for each (left / right /
      distance). This is the metric from the weekly-update slides: a smaller
@@ -27,6 +28,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from brillouin_system.calibration.calibration import (
+    CalibrationCalculator,
     CalibrationData,
     get_calibration_calculator_from_data,
 )
@@ -98,17 +100,20 @@ def residuals_for(calculator, side):
 def run(data: CalibrationData):
     degree = calibration_config.get().degree
 
-    calc_lor = get_calibration_calculator_from_data(data, degree, centering="lorentzian")
-    calc_psf = get_calibration_calculator_from_data(data, degree, centering="psf")
+    # One dual-chain calibration: the top-level parameters are the
+    # Lorentzian-centered main chain, the PSF-centered chain is the variant.
+    calc_lor = get_calibration_calculator_from_data(data, degree)
 
-    psf_available = calc_psf.p.psf_left is not None
+    variant = calc_lor.p.psf_variant
+    psf_available = variant is not None and variant.psf_left is not None
+    calc_psf = CalibrationCalculator(variant) if psf_available else calc_lor
     print("=" * 60)
     print(f"Calibration degree: {degree}")
     print(f"PSF reconstruction succeeded: {psf_available}")
     if not psf_available:
-        print("  -> PSF centering fell back to lorentzian (reconstruction "
-              "not usable). The two columns below will look identical; see the "
-              "console warning printed during calibrate() for the reason.")
+        print("  -> no PSF variant chain (reconstruction not usable). The two "
+              "rows below will look identical; see the console warning "
+              "printed during calibrate() for the reason.")
     print("=" * 60)
 
     sides = ["left", "right", "dist"]

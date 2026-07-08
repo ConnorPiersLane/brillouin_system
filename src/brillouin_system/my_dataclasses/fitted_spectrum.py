@@ -38,6 +38,16 @@ class FittedSpectrum:
     # the TOTAL observed HWHM (material + instrument), used for photon counts.
     material_hwhm_left_px: float = None
     material_hwhm_right_px: float = None
+    # Which calibration chain this fit pairs with when converting px -> GHz:
+    # "lorentzian" = the main (Lorentzian-centered) chain, "psf" = the
+    # PSF-centered variant. Stamped by SpectrumFitter.fit: plain models are
+    # always "lorentzian"; PSF-aware models (lorentzian_psf, dho) inherit the
+    # chain of the anchors they were fitted with (ElasticAnchors.chain). A
+    # fitted center is only unbiased against the matching chain, so all
+    # px->GHz mapping goes through CalibrationCalculator.for_chain. Fits
+    # saved before this field existed load as "lorentzian" (correct: they
+    # predate the PSF-aware models or used single-chain calibrations).
+    calibration_chain: str = "lorentzian"
 
 @dataclass
 class GratingSpectrum:

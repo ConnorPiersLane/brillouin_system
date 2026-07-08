@@ -71,8 +71,8 @@ def absolute_shift_collection_only_uniform(
 
 if __name__ == "__main__":
     # uniform collection
-    f180 = 3.7  # GHz
-    n_sample = 1.47 #1.328
+    f180 = 6.564  # GHz
+    n_sample = 1.41 #1.328
 
     result_5x = absolute_shift_collection_only_uniform(
         f180=f180,

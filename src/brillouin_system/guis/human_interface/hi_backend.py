@@ -461,7 +461,11 @@ class HiBackend:
                        if self.calibration_calculator is not None else None)
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode, anchors=anchors)
         except Exception as e:
-            log.info(f"Fitting error: {e}")
+            # A raised fit (as opposed to an unsuccessful FittedSpectrum) means
+            # a real misconfiguration — e.g. a *_psf sample model selected
+            # while the calibration has no PSF chain. Warn loudly so it is not
+            # mistaken for an ordinary no-peak frame; no fit is shown.
+            log.warning(f"Fitting skipped (no result): {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
     def update_calibration_calculator(self):
@@ -470,8 +474,7 @@ class HiBackend:
             self.calibration_calculator = None
         else:
             self.calibration_poly_fit_params = calibrate(data=self.calibration_data,
-                                                         poyfit_degree=self.calibration_config.degree,
-                                                         centering=self.calibration_config.centering)
+                                                         poyfit_degree=self.calibration_config.degree)
             self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(
                 parameters=self.calibration_poly_fit_params)
 
@@ -607,15 +610,16 @@ class HiBackend:
         if self.calibration_calculator is None:
             return None, None
         else:
+            calc = self.calibration_calculator.for_chain(fitting.calibration_chain)
             hwhm_left_peak_ghz = float(
                 abs(
-                    self.calibration_calculator.df_left_peak(
+                    calc.df_left_peak(
                         fitting.left_peak_center_px,
                         fitting.left_peak_width_px
                     )))
             hwhm_right_peak_ghz = float(
                 abs(
-                    self.calibration_calculator.df_right_peak(
+                    calc.df_right_peak(
                         fitting.right_peak_center_px,
                         fitting.right_peak_width_px
                     )))

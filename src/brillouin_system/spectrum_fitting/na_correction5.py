@@ -79,8 +79,8 @@ def absolute_shift_collection_only_gaussian(
 
 if __name__ == "__main__":
     # collection only but gaussian
-    f180 = 5.07  # GHz
-    n_sample = 1.328 # 1.328
+    f180 = 6.564  # GHz
+    n_sample = 1.42 # 1.328
 
     result_5x = absolute_shift_collection_only_gaussian(
         f180=f180,
