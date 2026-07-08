@@ -25,7 +25,7 @@ from brillouin_system.spectrum_fitting.voigt_model import (
 from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
     dho_peak_height,
-    make_2dho_anchored,
+    make_2dho_conv_anchored,
 )
 
 
@@ -211,8 +211,10 @@ class SpectrumFitter:
             )
 
         if requested_model in ("dho", "dho_window"):
-            # The DHO model is eq. S2 anchored at the elastic (Rayleigh)
-            # lines; without calibration-derived anchors it is not defined.
+            # The DHO model is eq. S2 anchored at the elastic (Rayleigh) lines
+            # and convolved with the instrument response; without the
+            # calibration-derived anchors and instrument widths it is not
+            # defined.
             if anchors is None:
                 raise ValueError(
                     "The DHO model requires elastic anchors from a calibration "
@@ -227,6 +229,15 @@ class SpectrumFitter:
                 raise ValueError(
                     f"Invalid elastic anchors: left={anchors.rayleigh_left_px}, "
                     f"right={anchors.rayleigh_right_px}."
+                )
+            if (
+                anchors.instrument_width_left_poly is None
+                or anchors.instrument_width_right_poly is None
+            ):
+                raise ValueError(
+                    "The DHO model requires instrument-width polynomials "
+                    "(calibration_width_*_peak) to build the instrument "
+                    "response. The calibration did not provide them."
                 )
 
         px = np.asarray(px, dtype=np.float64)
@@ -267,6 +278,7 @@ class SpectrumFitter:
         offset = float(np.amin(sline))
 
         r_left = r_right = None
+        dho_instrument_hwhm = None
 
         if requested_model in ("dho", "dho_window"):
             # The DHO fits both peaks jointly (eq. S2 anchored at each
@@ -384,38 +396,44 @@ class SpectrumFitter:
                 model_func = _2voigt_binned
 
             elif requested_model in ("dho", "dho_window"):
-                # Eq. S2 anchored at the calibration-derived elastic lines:
-                # omega1/omega2 are the Brillouin resonances (px units),
-                # strongly determined by the peak positions.
+                # Eq. S2 anchored at the calibration-derived elastic lines and
+                # convolved with the instrument response: omega1/omega2 are the
+                # material Brillouin resonances (px units) and gmat1/gmat2 the
+                # material dampings, both corrected for instrument broadening.
                 fit_kind = "2dho_anchored_window" if requested_model == "dho_window" else "2dho_anchored"
+
+                # Instrument HWHM (px) at each detected peak, from calibration.
+                gi_left = max(float(np.polyval(anchors.instrument_width_left_poly, cen[0])), 1e-3)
+                gi_right = max(float(np.polyval(anchors.instrument_width_right_poly, cen[1])), 1e-3)
 
                 # cen is sorted ascending here (see dho block above).
                 d = max(float(cen[1] - cen[0]), 1.0)
 
-                # wid from find_peaks is HWHM-like; DHO HWHM ~ gamma / 2.
-                # gamma1/gamma2 are independent so the two peaks may take
-                # different widths.
-                def _gamma_guess(w):
-                    return min(max(2.0 * float(w), 1e-2), 2.0 * d)
-                gamma1_0 = _gamma_guess(wid[0])
-                gamma2_0 = _gamma_guess(wid[1])
+                # wid from find_peaks is a total HWHM-like value; the material
+                # gamma guess subtracts the instrument HWHM. gmat1/gmat2 are
+                # independent so the two peaks may take different widths.
+                def _gmat_guess(w, gi):
+                    return min(max(2.0 * (float(w) - gi), 1e-2), 2.0 * d)
+                gmat1_0 = _gmat_guess(wid[0], gi_left)
+                gmat2_0 = _gmat_guess(wid[1], gi_right)
 
                 fsr_px = r_right - r_left
                 omega1_0 = max(float(cen[0]) - r_left, 1.0)
                 omega2_0 = max(r_right - float(cen[1]), 1.0)
-                height_unit1 = dho_peak_height(omega1_0, gamma1_0)
-                height_unit2 = dho_peak_height(omega2_0, gamma2_0)
+                height_unit1 = dho_peak_height(omega1_0, gmat1_0)
+                height_unit2 = dho_peak_height(omega2_0, gmat2_0)
 
                 p0 = [
-                    amp[0] / height_unit1, omega1_0, gamma1_0,
-                    amp[1] / height_unit2, omega2_0, gamma2_0,
+                    amp[0] / height_unit1, omega1_0, gmat1_0,
+                    amp[1] / height_unit2, omega2_0, gmat2_0,
                     offset,
                 ]
                 bounds = (
                     [0, 1e-2, 1e-3, 0, 1e-2, 1e-3, 0],
                     [np.inf, fsr_px, 2.0 * d, np.inf, fsr_px, 2.0 * d, np.inf],
                 )
-                model_func = make_2dho_anchored(r_left, r_right)
+                model_func = make_2dho_conv_anchored(r_left, r_right, gi_left, gi_right)
+                dho_instrument_hwhm = (gi_left, gi_right)
 
         if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
@@ -565,6 +583,7 @@ class SpectrumFitter:
             model=fit_kind,
             mask=mask_used,
             anchors=anchors,
+            instrument_hwhm=dho_instrument_hwhm,
         )
 
     def _extract_peak_params(self, pk_ind, pk_info, px, sline):
@@ -598,25 +617,40 @@ class SpectrumFitter:
         model: str,
         mask: np.ndarray,
         anchors: ElasticAnchors | None = None,
+        instrument_hwhm: tuple | None = None,
     ) -> FittedSpectrum:
         fitted = model_func(px, *popt)
         x_fit, y_fit = refine_fitted_spectrum(model_func, px, popt, factor=10)
 
         if len(popt) == 7 and model.startswith("2dho_anchored"):
-            amp1, omega1, gamma1, amp2, omega2, gamma2, offset = popt
+            amp1, omega1, gmat1, amp2, omega2, gmat2, offset = popt
 
             r_left = float(anchors.rayleigh_left_px)
             r_right = float(anchors.rayleigh_right_px)
+            gi_left, gi_right = instrument_hwhm
 
-            # The reported peak centers are the RESONANCE positions
-            # (rayleigh +/- omega), so the downstream calibration converts
-            # them directly into the true (damping-corrected) Brillouin
-            # shift. The visible maximum sits slightly closer to the elastic
-            # line, at rayleigh +/- sqrt(omega^2 - gamma^2/2); it can be
-            # reconstructed from `parameters` and the rayleigh fields if
-            # ever needed.
+            # The reported peak centers are the material RESONANCE positions
+            # (rayleigh +/- omega), so the downstream calibration converts them
+            # directly into the true (instrument- and damping-corrected)
+            # Brillouin shift.
             cen1 = r_left + float(omega1)
             cen2 = r_right - float(omega2)
+
+            # Width fields (option 2): report the TOTAL, observed HWHM so
+            # photon counts see the real peak area (convolution conserves
+            # area). The material HWHM (for the loss modulus) is reported
+            # separately. In the near-Lorentzian limit total HWHM =
+            # material HWHM + instrument HWHM, and the convolved peak height
+            # follows from area conservation.
+            hwhm_mat1 = 0.5 * float(gmat1)
+            hwhm_mat2 = 0.5 * float(gmat2)
+            hwhm_tot1 = hwhm_mat1 + float(gi_left)
+            hwhm_tot2 = hwhm_mat2 + float(gi_right)
+
+            height_mat1 = float(amp1) * dho_peak_height(float(omega1), float(gmat1))
+            height_mat2 = float(amp2) * dho_peak_height(float(omega2), float(gmat2))
+            height_obs1 = height_mat1 * (hwhm_mat1 / hwhm_tot1) if hwhm_tot1 > 0 else height_mat1
+            height_obs2 = height_mat2 * (hwhm_mat2 / hwhm_tot2) if hwhm_tot2 > 0 else height_mat2
 
             return FittedSpectrum(
                 is_success=True,
@@ -629,15 +663,17 @@ class SpectrumFitter:
                 mask_for_fitting=mask,
                 parameters=popt,
                 left_peak_center_px=float(cen1),
-                left_peak_width_px=0.5 * float(gamma1),
-                left_peak_amplitude=float(amp1) * dho_peak_height(float(omega1), float(gamma1)),
+                left_peak_width_px=hwhm_tot1,
+                left_peak_amplitude=height_obs1,
                 right_peak_center_px=float(cen2),
-                right_peak_width_px=0.5 * float(gamma2),
-                right_peak_amplitude=float(amp2) * dho_peak_height(float(omega2), float(gamma2)),
+                right_peak_width_px=hwhm_tot2,
+                right_peak_amplitude=height_obs2,
                 inter_peak_distance=float(cen2 - cen1),
                 offset=float(offset),
                 rayleigh_left_px=r_left,
                 rayleigh_right_px=r_right,
+                material_hwhm_left_px=hwhm_mat1,
+                material_hwhm_right_px=hwhm_mat2,
             )
 
         if len(popt) == 4:

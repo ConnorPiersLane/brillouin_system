@@ -1,18 +1,31 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.signal import fftconvolve
 
 
 @dataclass
 class ElasticAnchors:
     """
-    Pixel positions of the elastic (Rayleigh) lines bracketing the two
-    Brillouin peaks, derived from the frequency calibration (see
-    CalibrationCalculator.elastic_anchors). The left Rayleigh order sits left
-    of the left peak, the right order right of the right peak.
+    Calibration-derived inputs for the anchored DHO fit.
+
+    rayleigh_left_px / rayleigh_right_px : pixel positions of the elastic
+        (Rayleigh) lines bracketing the two Brillouin peaks (the left order
+        sits left of the left peak, the right order right of the right peak).
+
+    instrument_width_left_poly / instrument_width_right_poly : polynomial
+        coefficients (np.polyval order) giving the instrument HWHM in pixels
+        as a function of pixel position, i.e. the calibration_width_*_peak
+        models. These define the Lorentzian IRF that the DHO model is
+        convolved with, so the fitted gammas are the *material* widths.
+        Required by the fit; None only for tests of the bare kernel.
+
+    See CalibrationCalculator.elastic_anchors.
     """
     rayleigh_left_px: float
     rayleigh_right_px: float
+    instrument_width_left_poly: np.ndarray = None
+    instrument_width_right_poly: np.ndarray = None
 
 
 def dho_intensity(u, omega0, gamma):
@@ -33,58 +46,96 @@ def dho_intensity(u, omega0, gamma):
     return omega0**2 * gamma / (np.square(omega0**2 - u2) + u2 * gamma**2)
 
 
-def dho_peak_offset(omega0, gamma):
-    """Offset of the intensity maximum from the elastic line: sqrt(omega0^2 - gamma^2/2)."""
-    return float(np.sqrt(max(omega0**2 - 0.5 * gamma**2, 1e-12)))
-
-
 def dho_peak_height(omega0, gamma):
     """Value of dho_intensity at its maximum (for unit amplitude)."""
     denom = gamma * max(omega0**2 - 0.25 * gamma**2, 1e-12)
     return omega0**2 / denom
 
 
-def _dho_pixel_integrated(x, amp, rayleigh_px, omega0, gamma, oversample=100):
-    """
-    Pixel-integrated DHO, anchored at the elastic-line position rayleigh_px.
+def lorentzian_irf(t, gamma_inst):
+    """Area-normalised Lorentzian instrument response, HWHM gamma_inst (pixels).
 
-    amp         = amplitude scale factor (peak height = amp * dho_peak_height)
-    rayleigh_px = pixel position of the elastic (Rayleigh) line
+    Lorentzian to match how the instrument width is measured: the calibration
+    fits the reference sidebands (the physical IRF) with a Lorentzian, so the
+    stored width IS a Lorentzian HWHM. In the sharp limit this convolution
+    reduces to simple width addition.
+    """
+    gamma_inst = max(float(gamma_inst), 1e-6)
+    return (1.0 / np.pi) * gamma_inst / (np.square(t) + gamma_inst**2)
+
+
+# Convolution resolution: fine grid spacing = 1 / _CONV_OVERSAMPLE pixel; the
+# IRF kernel spans +/- _CONV_KERNEL_HALF * gamma_inst. The Lorentzian is
+# truncated there (a real VIPA IRF does not have infinite Lorentzian tails).
+_CONV_OVERSAMPLE = 8
+_CONV_KERNEL_HALF = 15.0
+
+
+def _dho_conv_pixel_integrated(
+    x, amp, rayleigh_px, omega, gamma_mat, gamma_inst,
+    oversample=_CONV_OVERSAMPLE, kernel_half=_CONV_KERNEL_HALF,
+):
+    """
+    Material DHO (anchored at rayleigh_px) convolved with the Lorentzian
+    instrument response and integrated over each pixel.
+
+    omega / gamma_mat are the material resonance and damping; gamma_inst is the
+    fixed instrument HWHM. Convolution is evaluated numerically on a fine grid
+    extended by the kernel span so window edges are not corrupted.
     """
     x = np.asarray(x, dtype=float)
+    gamma_inst = max(float(gamma_inst), 1e-6)
+    dt = 1.0 / oversample
+    margin = kernel_half * gamma_inst
 
-    u = np.linspace(-0.5, 0.5, oversample)
-    xx = x[:, None] + u[None, :]
+    lo = float(x.min()) - margin - 0.5
+    hi = float(x.max()) + margin + 0.5
+    n = int(np.ceil((hi - lo) / dt)) + 1
+    fine = lo + dt * np.arange(n)
 
-    y = dho_intensity(xx - rayleigh_px, omega0, gamma)
+    dho_fine = amp * dho_intensity(fine - rayleigh_px, omega, gamma_mat)
 
-    return amp * np.trapezoid(y, u, axis=1)
+    half = int(np.ceil(margin / dt))
+    kt = dt * np.arange(-half, half + 1)
+    kernel = lorentzian_irf(kt, gamma_inst)
+    kernel = kernel / kernel.sum()
+
+    conv = fftconvolve(dho_fine, kernel, mode="same")
+
+    # Pixel-integrate: mean of the fine samples inside [xi - 0.5, xi + 0.5].
+    csum = np.concatenate([[0.0], np.cumsum(conv)])
+    li = np.searchsorted(fine, x - 0.5, side="left")
+    ri = np.searchsorted(fine, x + 0.5, side="right")
+    counts = np.maximum(ri - li, 1)
+    return (csum[ri] - csum[li]) / counts
 
 
-def make_2dho_anchored(rayleigh_left_px, rayleigh_right_px):
+def make_2dho_conv_anchored(
+    rayleigh_left_px, rayleigh_right_px, gamma_inst_left, gamma_inst_right
+):
     """
-    Build a two-peak DHO model (eq. S2 twice) with fixed elastic-line anchors.
+    Build the two-peak anchored DHO model convolved with the instrument
+    response (eq. S2 twice, each convolved with its own Lorentzian IRF).
 
-    Each peak is a DHO anchored at its own Rayleigh order: the left peak is
-    the Stokes hump of the left order (visible at rayleigh_left_px + u_pk1),
-    the right peak the anti-Stokes hump of the right order (visible at
-    rayleigh_right_px - u_pk2). With the anchors fixed by the calibration,
-    omega1 and omega2 are directly the Brillouin resonances of the two peaks
-    in pixel units, measured from their own elastic lines. The fitted gammas
-    are total (material + instrument) widths; instrument subtraction happens
-    downstream.
+    Anchors and instrument widths are fixed; the free parameters are the
+    material amplitude, resonance and damping of each peak:
 
-    Parameter order:
-        [amp1, omega1, gamma1, amp2, omega2, gamma2, offset]
+        [amp1, omega1, gamma_mat1, amp2, omega2, gamma_mat2, offset]
+
+    omega1 / omega2 are the true Brillouin resonances (pixel units, measured
+    from each peak's elastic line) and gamma_mat1 / gamma_mat2 the material
+    dampings, both corrected for instrument broadening by the convolution.
     """
-    rayleigh_left_px = float(rayleigh_left_px)
-    rayleigh_right_px = float(rayleigh_right_px)
+    rL = float(rayleigh_left_px)
+    rR = float(rayleigh_right_px)
+    giL = float(gamma_inst_left)
+    giR = float(gamma_inst_right)
 
-    def _2dho_anchored(x, amp1, omega1, gamma1, amp2, omega2, gamma2, offset):
+    def _2dho_conv_anchored(x, amp1, omega1, gmat1, amp2, omega2, gmat2, offset):
         return (
-            _dho_pixel_integrated(x, amp1, rayleigh_left_px, omega1, gamma1)
-            + _dho_pixel_integrated(x, amp2, rayleigh_right_px, omega2, gamma2)
+            _dho_conv_pixel_integrated(x, amp1, rL, omega1, gmat1, giL)
+            + _dho_conv_pixel_integrated(x, amp2, rR, omega2, gmat2, giR)
             + offset
         )
 
-    return _2dho_anchored
+    return _2dho_conv_anchored

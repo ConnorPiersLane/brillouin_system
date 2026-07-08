@@ -266,7 +266,24 @@ class CalibrationCalculator:
         if not r_left < r_right:
             return None
 
-        return ElasticAnchors(rayleigh_left_px=r_left, rayleigh_right_px=r_right)
+        # Instrument-width polynomials define the Lorentzian IRF the DHO is
+        # convolved with. They are required for the fit, so if they are
+        # missing or non-finite there are no usable anchors.
+        wl = self.p.calibration_width_left_peak
+        wr = self.p.calibration_width_right_peak
+        if wl is None or wr is None:
+            return None
+        wl = np.asarray(wl, dtype=float)
+        wr = np.asarray(wr, dtype=float)
+        if not (np.all(np.isfinite(wl)) and np.all(np.isfinite(wr))):
+            return None
+
+        return ElasticAnchors(
+            rayleigh_left_px=r_left,
+            rayleigh_right_px=r_right,
+            instrument_width_left_poly=wl,
+            instrument_width_right_poly=wr,
+        )
 
     def calibration_width_left_peak_dpx(self, px):
         """Ideal FWHM width of the left peak in pixels."""

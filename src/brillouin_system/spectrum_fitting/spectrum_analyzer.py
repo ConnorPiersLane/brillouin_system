@@ -33,6 +33,10 @@ class AnalyzedFreqShifts:
     freq_shift_peak_distance_ghz: float | None
     hwhm_left_peak_ghz: float | None
     hwhm_right_peak_ghz: float | None
+    # Anchored DHO fit only: material (instrument-deconvolved) HWHM, for the
+    # loss modulus M''. hwhm_left/right above are the total observed widths.
+    material_hwhm_left_ghz: float | None = None
+    material_hwhm_right_ghz: float | None = None
 
 
 @dataclass
@@ -90,7 +94,23 @@ class SpectrumAnalyzer:
                     )
                 )
             ),
+            material_hwhm_left_ghz=self._material_hwhm_ghz(
+                fitting.left_peak_center_px, fitting.material_hwhm_left_px,
+                self.calibration_calculator.df_left_peak,
+            ),
+            material_hwhm_right_ghz=self._material_hwhm_ghz(
+                fitting.right_peak_center_px, fitting.material_hwhm_right_px,
+                self.calibration_calculator.df_right_peak,
+            ),
         )
+
+    @staticmethod
+    def _material_hwhm_ghz(center_px, material_hwhm_px, df_func) -> float | None:
+        """Convert a material HWHM from pixels to GHz via the local dispersion."""
+        if material_hwhm_px is None:
+            return None
+        value = float(abs(df_func(center_px, material_hwhm_px)))
+        return value if math.isfinite(value) else None
 
 
     def theoretical_precision(self, fs: FittedSpectrum,

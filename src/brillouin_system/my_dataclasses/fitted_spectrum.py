@@ -33,6 +33,11 @@ class FittedSpectrum:
     # models.
     rayleigh_left_px: float = None
     rayleigh_right_px: float = None
+    # Anchored DHO fit only: the MATERIAL HWHM in pixels (instrument response
+    # deconvolved), for the loss modulus M''. The *_peak_width_px fields hold
+    # the TOTAL observed HWHM (material + instrument), used for photon counts.
+    material_hwhm_left_px: float = None
+    material_hwhm_right_px: float = None
 
 @dataclass
 class GratingSpectrum:

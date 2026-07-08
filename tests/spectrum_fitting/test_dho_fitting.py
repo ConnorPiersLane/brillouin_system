@@ -9,7 +9,7 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
     dho_intensity,
-    make_2dho_anchored,
+    make_2dho_conv_anchored,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig
 from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
@@ -18,15 +18,31 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 # Ground truth for the synthetic spectrum. Rayleigh anchors sit outside the
 # fitted pixel window so only the inner Stokes / anti-Stokes pair is visible,
-# as on the real spectrometer.
+# as on the real spectrometer. GAMMA is the MATERIAL damping; the data is
+# convolved with a Lorentzian instrument response of HWHM GAMMA_INST.
 RAYLEIGH_LEFT = 120.0
 RAYLEIGH_RIGHT = 392.0
 OMEGA0 = 60.0
-GAMMA = 8.0
+GAMMA = 8.0           # material gamma -> material HWHM = 4.0
+GAMMA_INST = 2.0      # instrument HWHM (px)
 AMP_LEFT = 8000.0
 AMP_RIGHT = 6000.0
 OFFSET = 50.0
 
+INST_WIDTH_POLY = np.array([GAMMA_INST])  # constant instrument HWHM vs px
+
+
+def anchors_with_widths(r_left, r_right, gi=GAMMA_INST) -> ElasticAnchors:
+    poly = np.array([float(gi)])
+    return ElasticAnchors(
+        rayleigh_left_px=r_left,
+        rayleigh_right_px=r_right,
+        instrument_width_left_poly=poly,
+        instrument_width_right_poly=poly,
+    )
+
+
+TRUE_ANCHORS = anchors_with_widths(RAYLEIGH_LEFT, RAYLEIGH_RIGHT)
 
 
 def make_config(model: str) -> FindPeaksConfig:
@@ -41,13 +57,11 @@ def make_config(model: str) -> FindPeaksConfig:
     )
 
 
-def make_synthetic_dho_sline(seed=0):
+def make_synthetic_dho_sline(seed=0, gamma_left=GAMMA, gamma_right=GAMMA):
+    """Material DHO pair convolved with the Lorentzian instrument response."""
     px = np.arange(150, 380, dtype=float)
-    signal = (
-        AMP_LEFT * dho_intensity(px - RAYLEIGH_LEFT, OMEGA0, GAMMA)
-        + AMP_RIGHT * dho_intensity(px - RAYLEIGH_RIGHT, OMEGA0, GAMMA)
-        + OFFSET
-    )
+    model = make_2dho_conv_anchored(RAYLEIGH_LEFT, RAYLEIGH_RIGHT, GAMMA_INST, GAMMA_INST)
+    signal = model(px, AMP_LEFT, OMEGA0, gamma_left, AMP_RIGHT, OMEGA0, gamma_right, OFFSET)
     rng = np.random.default_rng(seed)
     noisy = signal + rng.normal(0.0, np.sqrt(np.clip(signal, 1.0, None)))
     return px, noisy
@@ -59,15 +73,10 @@ def fit_with_model(model: str, px, sline, anchors=None):
     return fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
 
 
-TRUE_ANCHORS = ElasticAnchors(
-    rayleigh_left_px=RAYLEIGH_LEFT,
-    rayleigh_right_px=RAYLEIGH_RIGHT,
-)
-
-
 def test_dho_without_anchors_raises():
-    """The DHO model is eq. S2 anchored at the elastic lines; without
-    calibration anchors it must refuse to fit rather than silently degrade."""
+    """The DHO model is eq. S2 anchored at the elastic lines and convolved
+    with the instrument response; without calibration inputs it must refuse
+    to fit rather than silently degrade."""
     px, sline = make_synthetic_dho_sline()
 
     with pytest.raises(ValueError, match="anchors"):
@@ -86,68 +95,65 @@ def test_dho_with_invalid_anchors_raises():
                        anchors=ElasticAnchors(rayleigh_left_px=np.nan, rayleigh_right_px=392.0))
 
 
+def test_dho_without_instrument_widths_raises():
+    """Anchors without instrument-width polynomials cannot build the IRF."""
+    px, sline = make_synthetic_dho_sline()
+    with pytest.raises(ValueError, match="instrument-width"):
+        fit_with_model("dho", px, sline,
+                       anchors=ElasticAnchors(rayleigh_left_px=RAYLEIGH_LEFT,
+                                              rayleigh_right_px=RAYLEIGH_RIGHT))
+
+
 def test_dho_fit_fails_gracefully_with_one_peak():
     px = np.arange(0, 200, dtype=float)
     sline = 1000.0 * np.exp(-0.5 * ((px - 100.0) / 3.0) ** 2) + 20.0
 
-    result = fit_with_model("dho", px, sline,
-                            anchors=ElasticAnchors(rayleigh_left_px=20.0, rayleigh_right_px=180.0))
+    result = fit_with_model("dho", px, sline, anchors=anchors_with_widths(20.0, 180.0))
 
     assert not result.is_success
 
 
-def test_2dho_anchored_model_is_consistent_with_kernel():
-    px = np.arange(150, 380, dtype=float)
-    model_func = make_2dho_anchored(RAYLEIGH_LEFT, RAYLEIGH_RIGHT)
-    binned = model_func(px, AMP_LEFT, OMEGA0, GAMMA, AMP_RIGHT, OMEGA0, GAMMA, OFFSET)
-
-    unbinned = (
+def test_convolution_conserves_area():
+    """Convolving with the instrument response must preserve the peak area
+    (photon counts rely on this)."""
+    px = np.arange(60, 452, dtype=float)
+    model = make_2dho_conv_anchored(RAYLEIGH_LEFT, RAYLEIGH_RIGHT, 3.0, 3.0)
+    conv = model(px, AMP_LEFT, OMEGA0, GAMMA, AMP_RIGHT, OMEGA0, GAMMA, 0.0)
+    bare = (
         AMP_LEFT * dho_intensity(px - RAYLEIGH_LEFT, OMEGA0, GAMMA)
         + AMP_RIGHT * dho_intensity(px - RAYLEIGH_RIGHT, OMEGA0, GAMMA)
-        + OFFSET
     )
-
-    # Pixel integration smooths the curve slightly; agreement should be close.
-    np.testing.assert_allclose(binned, unbinned, rtol=0.05, atol=1.0)
+    assert conv.sum() == pytest.approx(bare.sum(), rel=0.05)
 
 
-def test_dho_fit_recovers_two_different_widths():
-    """The two peaks may have genuinely different linewidths; the fit must
-    recover them independently rather than collapsing to a single width."""
-    gamma_left = 6.0
-    gamma_right = 12.0
-
-    px = np.arange(150, 380, dtype=float)
-    signal = (
-        AMP_LEFT * dho_intensity(px - RAYLEIGH_LEFT, OMEGA0, gamma_left)
-        + AMP_RIGHT * dho_intensity(px - RAYLEIGH_RIGHT, OMEGA0, gamma_right)
-        + OFFSET
-    )
-    rng = np.random.default_rng(3)
-    sline = signal + rng.normal(0.0, np.sqrt(np.clip(signal, 1.0, None)))
+def test_dho_fit_recovers_two_different_material_widths():
+    """The two peaks may have genuinely different material linewidths; the fit
+    must recover them independently (instrument-deconvolved)."""
+    gamma_left = 6.0    # material HWHM 3.0
+    gamma_right = 12.0  # material HWHM 6.0
+    px, sline = make_synthetic_dho_sline(seed=3, gamma_left=gamma_left, gamma_right=gamma_right)
 
     result = fit_with_model("dho", px, sline, anchors=TRUE_ANCHORS)
 
     assert result.is_success
     assert result.model == "2dho_anchored"
-    # Widths recovered independently (HWHM ~ gamma / 2)
-    assert result.left_peak_width_px == pytest.approx(gamma_left / 2, rel=0.2)
-    assert result.right_peak_width_px == pytest.approx(gamma_right / 2, rel=0.2)
-    # And they are clearly distinct, not collapsed to one shared value
-    assert result.right_peak_width_px > 1.4 * result.left_peak_width_px
-    # Centers are the resonance positions: both peaks have the same true
-    # omega despite the different widths, so both sit omega away from their
-    # own elastic lines (the visible maxima cen_left/cen_right differ more).
-    assert result.left_peak_center_px == pytest.approx(RAYLEIGH_LEFT + OMEGA0, abs=0.7)
-    assert result.right_peak_center_px == pytest.approx(RAYLEIGH_RIGHT - OMEGA0, abs=0.7)
+    # Material widths recovered independently (HWHM ~ gamma / 2)
+    assert result.material_hwhm_left_px == pytest.approx(gamma_left / 2, rel=0.25)
+    assert result.material_hwhm_right_px == pytest.approx(gamma_right / 2, rel=0.25)
+    assert result.material_hwhm_right_px > 1.4 * result.material_hwhm_left_px
+    # Total widths carry the instrument HWHM on top
+    assert result.left_peak_width_px == pytest.approx(gamma_left / 2 + GAMMA_INST, rel=0.2)
+    assert result.right_peak_width_px == pytest.approx(gamma_right / 2 + GAMMA_INST, rel=0.2)
+    # Centers are the resonance positions
+    assert result.left_peak_center_px == pytest.approx(RAYLEIGH_LEFT + OMEGA0, abs=0.8)
+    assert result.right_peak_center_px == pytest.approx(RAYLEIGH_RIGHT - OMEGA0, abs=0.8)
 
 
 @pytest.mark.parametrize("model", ["dho", "dho_window"])
-def test_anchored_dho_recovers_omega_and_gamma(model):
-    """With calibration-derived anchors the reported peak centers are the
-    RESONANCE positions (rayleigh +/- omega), i.e. the true Brillouin shift
-    location — not the visible maximum, which damping pulls toward the
-    elastic line."""
+def test_anchored_dho_recovers_resonance_and_material_width(model):
+    """With calibration inputs the reported peak centers are the material
+    RESONANCE positions (rayleigh +/- omega) and the material HWHM is the
+    instrument-deconvolved width."""
     px, sline = make_synthetic_dho_sline()
 
     result = fit_with_model(model, px, sline, anchors=TRUE_ANCHORS)
@@ -160,25 +166,27 @@ def test_anchored_dho_recovers_omega_and_gamma(model):
     assert result.rayleigh_right_px == RAYLEIGH_RIGHT
 
     # Centers are the resonance positions: rayleigh +/- omega
-    assert result.left_peak_center_px == pytest.approx(RAYLEIGH_LEFT + OMEGA0, abs=0.5)
-    assert result.right_peak_center_px == pytest.approx(RAYLEIGH_RIGHT - OMEGA0, abs=0.5)
+    assert result.left_peak_center_px == pytest.approx(RAYLEIGH_LEFT + OMEGA0, abs=0.6)
+    assert result.right_peak_center_px == pytest.approx(RAYLEIGH_RIGHT - OMEGA0, abs=0.6)
 
-    # Omega recovered tightly (this is the whole point of anchoring)
     omega_left = result.left_peak_center_px - result.rayleigh_left_px
     omega_right = result.rayleigh_right_px - result.right_peak_center_px
     assert omega_left == pytest.approx(OMEGA0, rel=0.02)
     assert omega_right == pytest.approx(OMEGA0, rel=0.02)
 
-    assert result.left_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
-    assert result.right_peak_width_px == pytest.approx(GAMMA / 2, rel=0.2)
-    assert result.offset == pytest.approx(OFFSET, abs=10.0)
+    # Material HWHM recovered (instrument deconvolved)
+    assert result.material_hwhm_left_px == pytest.approx(GAMMA / 2, rel=0.25)
+    assert result.material_hwhm_right_px == pytest.approx(GAMMA / 2, rel=0.25)
+    # Total (observed) width carries the instrument HWHM
+    assert result.left_peak_width_px == pytest.approx(GAMMA / 2 + GAMMA_INST, rel=0.2)
+    assert result.offset == pytest.approx(OFFSET, abs=15.0)
 
 
 def test_non_bracketing_anchors_return_unsuccessful_fit():
     """Anchors that do not bracket the detected peaks (e.g. calibration
     drift) must not produce a fit — and must not crash a scan loop."""
     px, sline = make_synthetic_dho_sline()
-    bad_anchors = ElasticAnchors(rayleigh_left_px=250.0, rayleigh_right_px=300.0)
+    bad_anchors = anchors_with_widths(250.0, 300.0)
 
     result = fit_with_model("dho", px, sline, anchors=bad_anchors)
 
@@ -191,7 +199,7 @@ def test_other_models_ignore_anchors():
     result = fit_with_model("lorentzian_window", px, sline, anchors=TRUE_ANCHORS)
     assert result.is_success
     assert result.rayleigh_left_px is None
-    assert result.rayleigh_right_px is None
+    assert result.material_hwhm_left_px is None
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +223,8 @@ def make_linear_calibration_params() -> CalibrationPolyfitParameters:
         freq_left_peak=np.polyfit(left_px, left_freqs, 1),
         freq_right_peak=np.polyfit(right_px, right_freqs, 1),
         freq_peak_distance=np.array([-0.025, 10.0]),
+        calibration_width_left_peak=INST_WIDTH_POLY,
+        calibration_width_right_peak=INST_WIDTH_POLY,
         left_px_points=left_px,
         left_freq_points=left_freqs,
         right_px_points=right_px,
@@ -229,6 +239,7 @@ def test_elastic_anchors_linear_calibration_exact():
     assert anchors is not None
     assert anchors.rayleigh_left_px == pytest.approx(RAYLEIGH_LEFT, abs=1e-6)
     assert anchors.rayleigh_right_px == pytest.approx(RAYLEIGH_RIGHT, abs=1e-6)
+    assert anchors.instrument_width_left_poly is not None
 
 
 def test_elastic_anchors_quadratic_calibration_small_bias():
@@ -249,6 +260,8 @@ def test_elastic_anchors_quadratic_calibration_small_bias():
         freq_left_peak=np.polyfit(left_px, left_freqs, 2),
         freq_right_peak=np.polyfit(right_px, right_freqs, 2),
         freq_peak_distance=np.array([-0.025, 10.0]),
+        calibration_width_left_peak=INST_WIDTH_POLY,
+        calibration_width_right_peak=INST_WIDTH_POLY,
         left_px_points=np.sort(left_px),
         left_freq_points=left_freqs,
         right_px_points=np.sort(right_px),
@@ -268,6 +281,12 @@ def test_elastic_anchors_nan_calibration_returns_none():
     assert CalibrationCalculator(params).elastic_anchors() is None
 
 
+def test_elastic_anchors_missing_width_returns_none():
+    params = make_linear_calibration_params()
+    params.calibration_width_left_peak = None
+    assert CalibrationCalculator(params).elastic_anchors() is None
+
+
 def test_elastic_anchors_degree2_without_points_returns_none():
     params = make_linear_calibration_params()
     params.freq_left_peak = np.array([1e-6, 0.05, -6.0])  # degree 2
@@ -278,8 +297,8 @@ def test_elastic_anchors_degree2_without_points_returns_none():
 
 def test_freq_shifts_of_anchored_fit_are_true_brillouin_shifts():
     """For the anchored DHO the peak centers hold the resonance positions,
-    so the standard freq_shift outputs directly carry the true shift —
-    no separate omega field, one value chain downstream."""
+    so the standard freq_shift outputs directly carry the true shift, and
+    material HWHM is exposed separately for the loss modulus."""
     calc = CalibrationCalculator(make_linear_calibration_params())
     analyzer = SpectrumAnalyzer(calibration_calculator=calc)
 
@@ -289,18 +308,23 @@ def test_freq_shifts_of_anchored_fit_are_true_brillouin_shifts():
         sline=np.zeros(10),
         model="2dho_anchored",
         left_peak_center_px=RAYLEIGH_LEFT + OMEGA0,
-        left_peak_width_px=GAMMA / 2,
+        left_peak_width_px=GAMMA / 2 + GAMMA_INST,
         right_peak_center_px=RAYLEIGH_RIGHT - OMEGA0,
-        right_peak_width_px=GAMMA / 2,
+        right_peak_width_px=GAMMA / 2 + GAMMA_INST,
         inter_peak_distance=(RAYLEIGH_RIGHT - OMEGA0) - (RAYLEIGH_LEFT + OMEGA0),
         rayleigh_left_px=RAYLEIGH_LEFT,
         rayleigh_right_px=RAYLEIGH_RIGHT,
+        material_hwhm_left_px=GAMMA / 2,
+        material_hwhm_right_px=GAMMA / 2,
     )
 
     shifts = analyzer.analyze_spectrum(fitting)
 
     assert shifts.freq_shift_left_peak_ghz == pytest.approx(A_LEFT * OMEGA0, rel=1e-9)
     assert shifts.freq_shift_right_peak_ghz == pytest.approx(abs(A_RIGHT) * OMEGA0, rel=1e-9)
+    # Material HWHM in GHz (for the loss modulus)
+    assert shifts.material_hwhm_left_ghz == pytest.approx(A_LEFT * GAMMA / 2, rel=1e-9)
+    assert shifts.material_hwhm_right_ghz == pytest.approx(abs(A_RIGHT) * GAMMA / 2, rel=1e-9)
 
 
 def test_lorentzian_window_regression_for_calibration_pipeline():
