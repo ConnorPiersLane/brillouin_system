@@ -180,20 +180,24 @@ On the next start, `init_stereo_cameras.py` builds the `StereoCameras` object fr
 
 ## 2. Camera → Zaber (rig) coordinate transform
 
-This fits a rigid SE3 transform `T_left_to_zaber` (Umeyama/Kabsch, in `fit_coordinate_system.py`) from 3D point correspondences: points triangulated by the stereo pair in the LEFT-camera frame vs. the same physical points in Zaber stage coordinates. It requires a valid stereo calibration (step 1).
+This fits a rigid SE3 transform `T_left_to_zaber` (Umeyama/Kabsch, in `fit_coordinate_system.py`) from 3D point correspondences: points triangulated by the stereo pair in the LEFT-camera frame (mm) vs. the same physical points in Zaber stage coordinates. It requires a valid stereo calibration (step 1).
 
-Two workflows exist:
+**Main workflow — live capture** (`point_capture_gui_coordinates_only.py`):
 
-- **Live capture:** `point_capture_gui_coordinates_only.py`. Streams both cameras, detects a dot/target with a blob detector (`detect_dot.py`), triangulates it in the LEFT frame, and lets you type the corresponding Zaber x, y, z for each capture. After collecting points (minimum 3, more is better — spread them over the working volume), press the calculate-transform button; it fits and prompts to save the JSON.
-- **Offline from a saved dataset:** `calibrate_transformation.py`. Point it at a folder with `left/`, `right/` (`<base>_left.png` / `<base>_right.png`) and `coordinates/<base>.txt` (one line: `x y z` in Zaber coordinates). **Scan & Compute** detects and triangulates the dot per pair, then **Fit Transform & Save** fits (with 20 % robust trimming) and saves. Check the reported RMS — it is in Zaber units (µm/mm depending on what you typed).
+1. Mount the calibration dot on the stage, **Start** the cameras. The dot is detected live (subpixel blob detector) and triangulated; the overlay shows the 3D LEFT-frame position and the triangulation RMS in px (orange warning if the two cameras likely see different blobs).
+2. Optionally **Connect** the Zaber stage (COM port field; fails if the HI GUI has the port open). With *Auto-read on capture* enabled the stage position is read and stored automatically — no typing. The unit factor (default 0.001) converts Zaber µm to mm so both sides of the fit use the same units. Without a stage connection, type X/Y/Z manually.
+3. Move the stage, hold still ~2 s, press **Capture** (or Space). The capture averages the detections of the last 2 s (median) to suppress jitter.
+4. The transform is re-fitted automatically after every capture. The panel shows N, fit RMS, per-point residuals in the table (worst in red), a **scale check** (a value far from 1.0 means LEFT/Zaber units don't match), and geometry hints (too few points, small axis spans, coplanar/collinear point sets).
+   In addition, a **motion check** compares the displacement seen by the cameras against the displacement reported by the stage between consecutive captures — it flags step-size mismatches (wrong unit factor, dot slipped on its mount) and, once a fit exists, direction mismatches (wrong axis moved, axis swapped, sign flipped). Green = consistent; orange = investigate before continuing.
+   Note: connecting the stage from this GUI attaches **without homing** — it never moves the rig.
+5. Bad points can be unchecked (Use column) or removed; the fit updates immediately. Every change is auto-saved to a session file, restorable via **Load Session**.
+6. **Install as active** writes `stereo_configs/left_to_zaber.json` directly, backing up the previous file with a timestamp. Restart the HI GUI afterwards (the transform is loaded at import).
 
-Save/copy the result to:
+Aim for 8–15 points spread over the full working volume, including z variation — the old minimum of 3 points in a small cross gives a transform that extrapolates poorly.
 
-```
-src/brillouin_system/eye_tracker/stereo_imaging/stereo_configs/left_to_zaber.json
-```
+**Offline alternative:** `calibrate_transformation.py` fits from a saved dataset (folder with `left/`, `right/`, `coordinates/<base>.txt`).
 
-`init_se3.py` loads it as `left_to_ref`, which the `PupilDetector` / eye tracker uses to express triangulated pupil positions in stage coordinates.
+`init_se3.py` loads the installed JSON as `left_to_ref`, which the `PupilDetector` / eye tracker uses to express triangulated pupil positions in stage coordinates.
 
 ## 3. Laser XY position calibration
 

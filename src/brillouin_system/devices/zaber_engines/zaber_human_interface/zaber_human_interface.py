@@ -6,7 +6,12 @@ log = get_logger(__name__)
 
 
 class ZaberHumanInterface:
-    def __init__(self, port="COM6", axis_index=1):
+    def __init__(self, port="COM6", axis_index=1, home_on_connect=True):
+        """
+        home_on_connect=True (default) homes all axes and drives to the init
+        position — the normal HI startup. Pass False to attach to the stage
+        WITHOUT moving it (e.g. reading positions during calibration).
+        """
         Library.enable_device_db_store()
         self.connection = Connection.open_serial_port(port)
         devices = self.connection.detect_devices()
@@ -22,8 +27,9 @@ class ZaberHumanInterface:
             'z': self.z_axis,
         }
 
-        self.home()
-        self.move_to_init_position()
+        if home_on_connect:
+            self.home()
+            self.move_to_init_position()
 
     def home(self):
         self.x_axis.home()
@@ -77,7 +83,7 @@ class ZaberHumanInterface:
         self.connection.close()
 
 class ZaberHumanInterfaceDummy:
-    def __init__(self, port="COM5", axis_index=1):
+    def __init__(self, port="COM5", axis_index=1, home_on_connect=True):
         self.port = port
         self.axis_index = axis_index
         self._positions = {
@@ -88,8 +94,9 @@ class ZaberHumanInterfaceDummy:
         self.homed = False
         log.info(f"[ZaberDummy] Initialized on port {port}, axis {axis_index}")
 
-        self.home()
-        self.move_to_init_position()
+        if home_on_connect:
+            self.home()
+            self.move_to_init_position()
 
     def home(self):
         for axis in self._positions:
