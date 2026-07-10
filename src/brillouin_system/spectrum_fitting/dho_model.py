@@ -7,25 +7,19 @@ from scipy.signal import fftconvolve
 @dataclass
 class ElasticAnchors:
     """
-    Calibration-derived inputs for the anchored DHO fit.
+    Calibration-derived inputs for the anchored DHO / PSF sample fits.
 
     rayleigh_left_px / rayleigh_right_px : pixel positions of the elastic
         (Rayleigh) lines bracketing the two Brillouin peaks (the left order
         sits left of the left peak, the right order right of the right peak).
-
-    instrument_width_left_poly / instrument_width_right_poly : polynomial
-        coefficients (np.polyval order) giving the instrument HWHM in pixels
-        as a function of pixel position, i.e. the calibration_width_*_peak
-        models. These define the Lorentzian IRF that the DHO model is
-        convolved with, so the fitted gammas are the *material* widths.
+        This is ALL the pure eq.-S2 "dho" model needs.
 
     psf_left / psf_right / psf_grid_step_px : empirical per-order instrument
         response (ePSF = optical PSF including the 1-px binning),
-        reconstructed from the calibration sweep. When present, the DHO uses
-        the measured (possibly skewed) kernel instead of the analytic
-        Lorentzian IRF. The profile is sampled on a uniform grid of spacing
-        psf_grid_step_px, symmetric around its maximum at the center index,
-        area-normalised.
+        reconstructed from the calibration sweep. Consumed by the PSF-aware
+        models (dho_psf, lorentzian_psf). The profile is sampled on a uniform
+        grid of spacing psf_grid_step_px, symmetric around its maximum at the
+        center index, area-normalised.
 
     chain : which calibration chain produced these anchors — "lorentzian"
         (the main chain) or "psf" (the PSF-centered variant). Fits that
@@ -33,16 +27,21 @@ class ElasticAnchors:
         (FittedSpectrum.calibration_chain) so the analysis maps their pixels
         through the same chain.
 
+    psf_variant : anchors of the PSF-centered sibling chain (rayleigh
+        positions from the variant polynomials + the ePSFs, chain="psf"),
+        mirroring CalibrationPolyfitParameters.psf_variant. None when the
+        calibration has no PSF chain. The fitter picks the base anchors for
+        the pure dho and the variant for the PSF-aware models.
+
     See CalibrationCalculator.elastic_anchors.
     """
     rayleigh_left_px: float
     rayleigh_right_px: float
-    instrument_width_left_poly: np.ndarray = None
-    instrument_width_right_poly: np.ndarray = None
     psf_left: np.ndarray = None
     psf_right: np.ndarray = None
     psf_grid_step_px: float = None
     chain: str = "lorentzian"
+    psf_variant: "ElasticAnchors" = None
 
 
 def dho_intensity(u, omega0, gamma):
@@ -69,62 +68,53 @@ def dho_peak_height(omega0, gamma):
     return omega0**2 / denom
 
 
-def lorentzian_irf(t, gamma_inst):
-    """Area-normalised Lorentzian instrument response, HWHM gamma_inst (pixels).
+# Sub-pixel sampling used to integrate the bare eq.-S2 profile over each
+# 1-px camera bin (same role the arctan closed form plays for the Lorentzian).
+_S2_OVERSAMPLE = 11
 
-    Lorentzian to match how the instrument width is measured: the calibration
-    fits the reference sidebands (the physical IRF) with a Lorentzian, so the
-    stored width IS a Lorentzian HWHM. In the sharp limit this convolution
-    reduces to simple width addition.
+
+def _dho_s2_pixel_integrated(x, amp, rayleigh_px, omega, gamma, oversample=_S2_OVERSAMPLE):
     """
-    gamma_inst = max(float(gamma_inst), 1e-6)
-    return (1.0 / np.pi) * gamma_inst / (np.square(t) + gamma_inst**2)
-
-
-# Convolution resolution: fine grid spacing = 1 / _CONV_OVERSAMPLE pixel; the
-# IRF kernel spans +/- _CONV_KERNEL_HALF * gamma_inst. The Lorentzian is
-# truncated there (a real VIPA IRF does not have infinite Lorentzian tails).
-_CONV_OVERSAMPLE = 8
-_CONV_KERNEL_HALF = 15.0
-
-
-def _dho_conv_pixel_integrated(
-    x, amp, rayleigh_px, omega, gamma_mat, gamma_inst,
-    oversample=_CONV_OVERSAMPLE, kernel_half=_CONV_KERNEL_HALF,
-):
-    """
-    Material DHO (anchored at rayleigh_px) convolved with the Lorentzian
-    instrument response and integrated over each pixel.
-
-    omega / gamma_mat are the material resonance and damping; gamma_inst is the
-    fixed instrument HWHM. Convolution is evaluated numerically on a fine grid
-    extended by the kernel span so window edges are not corrupted.
+    Bare eq. S2 (no instrument model) anchored at rayleigh_px, integrated
+    over each pixel. The fitted gamma is the TOTAL observed damping —
+    material and instrument broadening mixed, exactly as the paper's direct
+    S2 fit.
     """
     x = np.asarray(x, dtype=float)
-    gamma_inst = max(float(gamma_inst), 1e-6)
-    dt = 1.0 / oversample
-    margin = kernel_half * gamma_inst
+    sub = (np.arange(oversample) + 0.5) / oversample - 0.5
+    u = (x[:, None] + sub[None, :]) - float(rayleigh_px)
+    return amp * dho_intensity(u, omega, gamma).mean(axis=1)
 
-    lo = float(x.min()) - margin - 0.5
-    hi = float(x.max()) + margin + 0.5
-    n = int(np.ceil((hi - lo) / dt)) + 1
-    fine = lo + dt * np.arange(n)
 
-    dho_fine = amp * dho_intensity(fine - rayleigh_px, omega, gamma_mat)
+def make_2dho_s2_anchored(rayleigh_left_px, rayleigh_right_px):
+    """
+    Build the two-peak PURE eq.-S2 model: one bare DHO per Rayleigh order,
+    anchored at the fixed elastic-line positions, pixel-integrated. No
+    instrument response — the only calibration input is the anchors, and the
+    fitted gammas are TOTAL observed dampings. Deliberately does NOT use the
+    calibrated reference-line widths: coupling a fixed IRF width into the
+    anchored fit proved ill-conditioned on ~1-px peaks (2026-07-10 analysis),
+    while the bare fit's inputs (anchors) are insensitive.
 
-    half = int(np.ceil(margin / dt))
-    kt = dt * np.arange(-half, half + 1)
-    kernel = lorentzian_irf(kt, gamma_inst)
-    kernel = kernel / kernel.sum()
+    Free parameters:
+        [amp1, omega1, gamma1, amp2, omega2, gamma2, offset]
 
-    conv = fftconvolve(dho_fine, kernel, mode="same")
+    omega1 / omega2 are the resonances in pixel units, measured from each
+    peak's elastic line.
+    """
+    rL = float(rayleigh_left_px)
+    rR = float(rayleigh_right_px)
 
-    # Pixel-integrate: mean of the fine samples inside [xi - 0.5, xi + 0.5].
-    csum = np.concatenate([[0.0], np.cumsum(conv)])
-    li = np.searchsorted(fine, x - 0.5, side="left")
-    ri = np.searchsorted(fine, x + 0.5, side="right")
-    counts = np.maximum(ri - li, 1)
-    return (csum[ri] - csum[li]) / counts
+    def _2dho_s2_anchored(x, amp1, omega1, gamma1, amp2, omega2, gamma2, offset):
+        return (
+            _dho_s2_pixel_integrated(x, amp1, rL, omega1, gamma1)
+            + _dho_s2_pixel_integrated(x, amp2, rR, omega2, gamma2)
+            + offset
+        )
+
+    return _2dho_s2_anchored
+
+
 
 
 def epsf_grid(psf, grid_step_px):
@@ -260,32 +250,3 @@ def make_2lorentzian_epsf(psf_left, psf_right, grid_step_px):
     return _2lorentzian_epsf
 
 
-def make_2dho_conv_anchored(
-    rayleigh_left_px, rayleigh_right_px, gamma_inst_left, gamma_inst_right
-):
-    """
-    Build the two-peak anchored DHO model convolved with the instrument
-    response (eq. S2 twice, each convolved with its own Lorentzian IRF).
-
-    Anchors and instrument widths are fixed; the free parameters are the
-    material amplitude, resonance and damping of each peak:
-
-        [amp1, omega1, gamma_mat1, amp2, omega2, gamma_mat2, offset]
-
-    omega1 / omega2 are the true Brillouin resonances (pixel units, measured
-    from each peak's elastic line) and gamma_mat1 / gamma_mat2 the material
-    dampings, both corrected for instrument broadening by the convolution.
-    """
-    rL = float(rayleigh_left_px)
-    rR = float(rayleigh_right_px)
-    giL = float(gamma_inst_left)
-    giR = float(gamma_inst_right)
-
-    def _2dho_conv_anchored(x, amp1, omega1, gmat1, amp2, omega2, gmat2, offset):
-        return (
-            _dho_conv_pixel_integrated(x, amp1, rL, omega1, gmat1, giL)
-            + _dho_conv_pixel_integrated(x, amp2, rR, omega2, gmat2, giR)
-            + offset
-        )
-
-    return _2dho_conv_anchored

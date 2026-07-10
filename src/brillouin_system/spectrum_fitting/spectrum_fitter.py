@@ -26,8 +26,8 @@ from brillouin_system.spectrum_fitting.dho_model import (
     ElasticAnchors,
     dho_peak_height,
     epsf_hwhm_px,
-    make_2dho_conv_anchored,
     make_2dho_epsf_anchored,
+    make_2dho_s2_anchored,
     make_2lorentzian_epsf,
 )
 
@@ -207,76 +207,76 @@ class SpectrumFitter:
             "voigt_window",
             "dho",
             "dho_window",
+            "dho_psf",
+            "dho_psf_window",
         ):
             raise ValueError(
                 f"Unknown model: '{requested_model}'. "
                 f"Supported models are 'lorentzian', 'lorentzian_window', "
                 f"'lorentzian_psf', 'lorentzian_psf_window', "
                 f"'asym_lorentzian', 'asym_lorentzian_window', "
-                f"'voigt', 'voigt_window', 'dho', and 'dho_window'."
+                f"'voigt', 'voigt_window', 'dho', 'dho_window', "
+                f"'dho_psf', and 'dho_psf_window'."
             )
 
-        if requested_model in ("lorentzian_psf", "lorentzian_psf_window"):
-            # Forward model through the measured instrument response; only
+        # Which anchors the model consumes: the pure dho takes the base
+        # (main-chain) anchors; the PSF-aware models take the PSF-chain
+        # anchors carrying the measured kernels.
+        psf_anchors = self._psf_anchors(anchors)
+
+        if requested_model in (
+            "lorentzian_psf", "lorentzian_psf_window", "dho_psf", "dho_psf_window"
+        ):
+            # Forward models through the measured instrument response; only
             # defined when the calibration reconstructed the PSFs.
-            if (
-                anchors is None
-                or anchors.psf_left is None
-                or anchors.psf_right is None
-                or not anchors.psf_grid_step_px
-            ):
+            if psf_anchors is None:
                 raise ValueError(
-                    "The lorentzian_psf model requires the measured instrument "
-                    "PSFs, but the current calibration has no usable PSF "
-                    "reconstruction. Run or load a calibration whose PSF "
+                    f"The {requested_model} model requires the measured "
+                    "instrument PSFs, but the current calibration has no "
+                    "usable PSF chain. Run or load a calibration whose PSF "
                     "chain is available, or choose another fitting model."
                 )
 
-        if requested_model in ("dho", "dho_window"):
-            # The DHO model is eq. S2 anchored at the elastic (Rayleigh) lines
-            # and convolved with the instrument response; without the
-            # calibration-derived anchors and instrument widths it is not
-            # defined.
-            if anchors is None:
+        if requested_model in ("dho", "dho_window", "dho_psf", "dho_psf_window"):
+            # The DHO models are eq. S2 anchored at the elastic (Rayleigh)
+            # lines; without the calibration-derived anchors they are not
+            # defined. The pure dho needs NOTHING but the anchor positions.
+            dho_anchors = (
+                psf_anchors
+                if requested_model in ("dho_psf", "dho_psf_window")
+                else anchors
+            )
+            if dho_anchors is None:
                 raise ValueError(
                     "The DHO model requires elastic anchors from a calibration "
                     "(CalibrationCalculator.elastic_anchors()). Run or load a "
                     "calibration first, or choose another fitting model."
                 )
             if not (
-                np.isfinite(anchors.rayleigh_left_px)
-                and np.isfinite(anchors.rayleigh_right_px)
-                and anchors.rayleigh_left_px < anchors.rayleigh_right_px
+                np.isfinite(dho_anchors.rayleigh_left_px)
+                and np.isfinite(dho_anchors.rayleigh_right_px)
+                and dho_anchors.rayleigh_left_px < dho_anchors.rayleigh_right_px
             ):
                 raise ValueError(
-                    f"Invalid elastic anchors: left={anchors.rayleigh_left_px}, "
-                    f"right={anchors.rayleigh_right_px}."
+                    f"Invalid elastic anchors: left={dho_anchors.rayleigh_left_px}, "
+                    f"right={dho_anchors.rayleigh_right_px}."
                 )
-            has_psf = (
-                anchors.psf_left is not None
-                and anchors.psf_right is not None
-                and anchors.psf_grid_step_px
-            )
-            if not has_psf and (
-                anchors.instrument_width_left_poly is None
-                or anchors.instrument_width_right_poly is None
-            ):
-                raise ValueError(
-                    "The DHO model requires an instrument response: either "
-                    "measured PSFs (the calibration's PSF chain) or "
-                    "instrument-width polynomials (calibration_width_*_peak). "
-                    "The calibration provided neither."
-                )
+            # From here on, "anchors" is the set this dho variant consumes
+            # (base for the pure S2 dho, PSF-chain for dho_psf);
+            # _build_result reads its rayleigh positions.
+            anchors = dho_anchors
 
         # Chain stamp: which calibration chain the fitted pixels pair with.
-        # PSF-aware models inherit it from the anchors they consume (the
-        # anchors know which chain produced them); everything else pairs with
-        # the Lorentzian-centered main chain. The analysis maps the result
+        # Models inherit it from the anchors they consume (the anchors know
+        # which chain produced them); plain models pair with the
+        # Lorentzian-centered main chain. The analysis maps the result
         # through this chain (CalibrationCalculator.for_chain).
         if requested_model in (
-            "lorentzian_psf", "lorentzian_psf_window", "dho", "dho_window"
-        ) and anchors is not None:
-            calibration_chain = anchors.chain or "lorentzian"
+            "lorentzian_psf", "lorentzian_psf_window", "dho_psf", "dho_psf_window"
+        ):
+            calibration_chain = psf_anchors.chain or "lorentzian"
+        elif requested_model in ("dho", "dho_window"):
+            calibration_chain = dho_anchors.chain or "lorentzian"
         else:
             calibration_chain = "lorentzian"
 
@@ -320,7 +320,7 @@ class SpectrumFitter:
         r_left = r_right = None
         dho_instrument_hwhm = None
 
-        if requested_model in ("dho", "dho_window"):
+        if requested_model in ("dho", "dho_window", "dho_psf", "dho_psf_window"):
             # The DHO fits both peaks jointly (eq. S2 anchored at each
             # Rayleigh order), so it needs both peaks to be present.
             if n_peaks < 2:
@@ -340,8 +340,8 @@ class SpectrumFitter:
 
             # The elastic anchors must bracket the detected peaks; if they do
             # not (e.g. calibration drift), the fit is not meaningful.
-            r_left = float(anchors.rayleigh_left_px)
-            r_right = float(anchors.rayleigh_right_px)
+            r_left = float(dho_anchors.rayleigh_left_px)
+            r_right = float(dho_anchors.rayleigh_right_px)
             if not (r_left < cen[0] and cen[1] < r_right):
                 print(
                     "[SpectrumFitter] Elastic anchors do not bracket the "
@@ -460,8 +460,8 @@ class SpectrumFitter:
                 # above) so peak 1 gets the left-order kernel.
                 fit_kind = "2lorentzian_psf_window" if requested_model == "lorentzian_psf_window" else "2lorentzian_psf"
 
-                gi_left = max(epsf_hwhm_px(anchors.psf_left, anchors.psf_grid_step_px), 1e-3)
-                gi_right = max(epsf_hwhm_px(anchors.psf_right, anchors.psf_grid_step_px), 1e-3)
+                gi_left = max(epsf_hwhm_px(psf_anchors.psf_left, psf_anchors.psf_grid_step_px), 1e-3)
+                gi_right = max(epsf_hwhm_px(psf_anchors.psf_right, psf_anchors.psf_grid_step_px), 1e-3)
 
                 # wid from find_peaks is the observed HWHM; material ~ observed
                 # minus instrument. Observed height ~ amp * g / (g + gi).
@@ -476,62 +476,62 @@ class SpectrumFitter:
                     [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf],
                 )
                 model_func = make_2lorentzian_epsf(
-                    anchors.psf_left, anchors.psf_right, anchors.psf_grid_step_px
+                    psf_anchors.psf_left, psf_anchors.psf_right, psf_anchors.psf_grid_step_px
                 )
                 dho_instrument_hwhm = (gi_left, gi_right)
 
-            elif requested_model in ("dho", "dho_window"):
-                # Eq. S2 anchored at the calibration-derived elastic lines and
-                # convolved with the instrument response: omega1/omega2 are the
-                # material Brillouin resonances (px units) and gmat1/gmat2 the
-                # material dampings, both corrected for instrument broadening.
-                # The instrument response is the measured per-order ePSF when
-                # the calibration provides it (handles skewed responses),
-                # otherwise a Lorentzian of the calibration width.
-                if has_psf:
-                    fit_kind = "2dho_anchored_psf_window" if requested_model == "dho_window" else "2dho_anchored_psf"
-                    gi_left = max(epsf_hwhm_px(anchors.psf_left, anchors.psf_grid_step_px), 1e-3)
-                    gi_right = max(epsf_hwhm_px(anchors.psf_right, anchors.psf_grid_step_px), 1e-3)
+            elif requested_model in ("dho", "dho_window", "dho_psf", "dho_psf_window"):
+                is_psf_dho = requested_model in ("dho_psf", "dho_psf_window")
+                if is_psf_dho:
+                    # Eq. S2 convolved with the measured per-order ePSF:
+                    # omega/gamma are MATERIAL values (instrument deconvolved,
+                    # handles skewed / non-Lorentzian responses).
+                    fit_kind = "2dho_anchored_psf_window" if requested_model == "dho_psf_window" else "2dho_anchored_psf"
+                    gi_left = max(epsf_hwhm_px(psf_anchors.psf_left, psf_anchors.psf_grid_step_px), 1e-3)
+                    gi_right = max(epsf_hwhm_px(psf_anchors.psf_right, psf_anchors.psf_grid_step_px), 1e-3)
+                    dho_instrument_hwhm = (gi_left, gi_right)
                 else:
-                    fit_kind = "2dho_anchored_window" if requested_model == "dho_window" else "2dho_anchored"
-                    # Instrument HWHM (px) at each detected peak, from calibration.
-                    gi_left = max(float(np.polyval(anchors.instrument_width_left_poly, cen[0])), 1e-3)
-                    gi_right = max(float(np.polyval(anchors.instrument_width_right_poly, cen[1])), 1e-3)
+                    # PURE eq. S2 from the paper: bare DHO anchored at the
+                    # elastic lines, no instrument model. The only calibration
+                    # input is the anchor positions; the fitted gammas are the
+                    # TOTAL observed dampings (material + instrument mixed).
+                    fit_kind = "2dho_s2_window" if requested_model == "dho_window" else "2dho_s2"
+                    gi_left = gi_right = 0.0
 
                 # cen is sorted ascending here (see dho block above).
                 d = max(float(cen[1] - cen[0]), 1.0)
 
-                # wid from find_peaks is a total HWHM-like value; the material
-                # gamma guess subtracts the instrument HWHM. gmat1/gmat2 are
-                # independent so the two peaks may take different widths.
-                def _gmat_guess(w, gi):
+                # wid from find_peaks is a total HWHM-like value; the gamma
+                # guess subtracts the instrument HWHM (zero for the pure S2).
+                # The two peaks' gammas are independent.
+                def _g_guess(w, gi):
                     return min(max(2.0 * (float(w) - gi), 1e-2), 2.0 * d)
-                gmat1_0 = _gmat_guess(wid[0], gi_left)
-                gmat2_0 = _gmat_guess(wid[1], gi_right)
+                g1_0 = _g_guess(wid[0], gi_left)
+                g2_0 = _g_guess(wid[1], gi_right)
 
                 fsr_px = r_right - r_left
                 omega1_0 = max(float(cen[0]) - r_left, 1.0)
                 omega2_0 = max(r_right - float(cen[1]), 1.0)
-                height_unit1 = dho_peak_height(omega1_0, gmat1_0)
-                height_unit2 = dho_peak_height(omega2_0, gmat2_0)
+                height_unit1 = dho_peak_height(omega1_0, g1_0)
+                height_unit2 = dho_peak_height(omega2_0, g2_0)
 
                 p0 = [
-                    amp[0] / height_unit1, omega1_0, gmat1_0,
-                    amp[1] / height_unit2, omega2_0, gmat2_0,
+                    amp[0] / height_unit1, omega1_0, g1_0,
+                    amp[1] / height_unit2, omega2_0, g2_0,
                     offset,
                 ]
                 bounds = (
                     [0, 1e-2, 1e-3, 0, 1e-2, 1e-3, 0],
                     [np.inf, fsr_px, 2.0 * d, np.inf, fsr_px, 2.0 * d, np.inf],
                 )
-                if has_psf:
+                if is_psf_dho:
                     model_func = make_2dho_epsf_anchored(
                         r_left, r_right,
-                        anchors.psf_left, anchors.psf_right, anchors.psf_grid_step_px,
+                        psf_anchors.psf_left, psf_anchors.psf_right,
+                        psf_anchors.psf_grid_step_px,
                     )
                 else:
-                    model_func = make_2dho_conv_anchored(r_left, r_right, gi_left, gi_right)
-                dho_instrument_hwhm = (gi_left, gi_right)
+                    model_func = make_2dho_s2_anchored(r_left, r_right)
 
         if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
@@ -627,7 +627,7 @@ class SpectrumFitter:
             bounds = (lo, hi)
             mask_used = mask
 
-        elif requested_model == "dho_window":
+        elif requested_model in ("dho_window", "dho_psf_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
 
             mask = self._build_window_mask(px, cen, wid, beta=beta)
@@ -710,6 +710,27 @@ class SpectrumFitter:
         result.calibration_chain = calibration_chain
         return result
 
+    @staticmethod
+    def _psf_anchors(anchors: ElasticAnchors | None) -> ElasticAnchors | None:
+        """
+        The anchors carrying the measured ePSFs, for the PSF-aware models:
+        the nested PSF-chain anchors when present, otherwise the base anchors
+        if they carry PSFs themselves (legacy single-chain calibrations that
+        stored the PSFs at the top level), otherwise None.
+        """
+        if anchors is None:
+            return None
+        variant = getattr(anchors, "psf_variant", None)
+        for cand in (variant, anchors):
+            if (
+                cand is not None
+                and cand.psf_left is not None
+                and cand.psf_right is not None
+                and cand.psf_grid_step_px
+            ):
+                return cand
+        return None
+
     def _extract_peak_params(self, pk_ind, pk_info, px, sline):
         pk_ind = np.asarray(pk_ind, dtype=int)
 
@@ -781,35 +802,44 @@ class SpectrumFitter:
                 material_hwhm_right_px=hwhm_mat2,
             )
 
-        if len(popt) == 7 and model.startswith("2dho_anchored"):
-            amp1, omega1, gmat1, amp2, omega2, gmat2, offset = popt
+        if len(popt) == 7 and model.startswith("2dho"):
+            amp1, omega1, g1, amp2, omega2, g2, offset = popt
 
             r_left = float(anchors.rayleigh_left_px)
             r_right = float(anchors.rayleigh_right_px)
-            gi_left, gi_right = instrument_hwhm
 
-            # The reported peak centers are the material RESONANCE positions
+            # The reported peak centers are the RESONANCE positions
             # (rayleigh +/- omega), so the downstream calibration converts them
-            # directly into the true (instrument- and damping-corrected)
-            # Brillouin shift.
+            # directly into the damping-corrected Brillouin shift.
             cen1 = r_left + float(omega1)
             cen2 = r_right - float(omega2)
 
-            # Width fields (option 2): report the TOTAL, observed HWHM so
-            # photon counts see the real peak area (convolution conserves
-            # area). The material HWHM (for the loss modulus) is reported
-            # separately. In the near-Lorentzian limit total HWHM =
-            # material HWHM + instrument HWHM, and the convolved peak height
-            # follows from area conservation.
-            hwhm_mat1 = 0.5 * float(gmat1)
-            hwhm_mat2 = 0.5 * float(gmat2)
-            hwhm_tot1 = hwhm_mat1 + float(gi_left)
-            hwhm_tot2 = hwhm_mat2 + float(gi_right)
+            height1 = float(amp1) * dho_peak_height(float(omega1), float(g1))
+            height2 = float(amp2) * dho_peak_height(float(omega2), float(g2))
 
-            height_mat1 = float(amp1) * dho_peak_height(float(omega1), float(gmat1))
-            height_mat2 = float(amp2) * dho_peak_height(float(omega2), float(gmat2))
-            height_obs1 = height_mat1 * (hwhm_mat1 / hwhm_tot1) if hwhm_tot1 > 0 else height_mat1
-            height_obs2 = height_mat2 * (hwhm_mat2 / hwhm_tot2) if hwhm_tot2 > 0 else height_mat2
+            if instrument_hwhm is None:
+                # Pure eq. S2 ("2dho_s2*"): no instrument model, so gamma is
+                # the TOTAL observed damping. No material/instrument split.
+                hwhm_mat1 = hwhm_mat2 = None
+                hwhm_tot1 = 0.5 * float(g1)
+                hwhm_tot2 = 0.5 * float(g2)
+                height_obs1 = height1
+                height_obs2 = height2
+            else:
+                # ePSF-convolved ("2dho_anchored_psf*"): gamma is MATERIAL.
+                # Width fields (option 2): report the TOTAL, observed HWHM so
+                # photon counts see the real peak area (convolution conserves
+                # area). The material HWHM (for the loss modulus) is reported
+                # separately. In the near-Lorentzian limit total HWHM =
+                # material HWHM + instrument HWHM, and the convolved peak
+                # height follows from area conservation.
+                gi_left, gi_right = instrument_hwhm
+                hwhm_mat1 = 0.5 * float(g1)
+                hwhm_mat2 = 0.5 * float(g2)
+                hwhm_tot1 = hwhm_mat1 + float(gi_left)
+                hwhm_tot2 = hwhm_mat2 + float(gi_right)
+                height_obs1 = height1 * (hwhm_mat1 / hwhm_tot1) if hwhm_tot1 > 0 else height1
+                height_obs2 = height2 * (hwhm_mat2 / hwhm_tot2) if hwhm_tot2 > 0 else height2
 
             return FittedSpectrum(
                 is_success=True,

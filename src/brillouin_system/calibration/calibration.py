@@ -304,34 +304,13 @@ class CalibrationCalculator:
 
         return None
 
-    def elastic_anchors(self) -> ElasticAnchors | None:
+    def _own_chain_anchors(self) -> ElasticAnchors | None:
         """
-        Pixel positions of the elastic (Rayleigh) lines bracketing the two
-        Brillouin peaks, or None if the calibration cannot provide them.
-
-        Used by the anchored DHO fit (eq. S2 with a pinned frequency zero).
-        Returns None when either anchor is unavailable or the geometry is
-        inconsistent (left anchor must lie left of the right anchor). Note the
-        DHO model requires anchors: passing anchors=None to
-        SpectrumFitter.fit raises for the dho models.
-
-        Anchors are consumed only by the PSF-aware sample models (dho,
-        lorentzian_psf), so in a dual-chain calibration they come from the
-        PSF-centered variant — the chain those models pair with. The anchors
-        carry their chain of origin (ElasticAnchors.chain), which the fitter
-        stamps onto the resulting FittedSpectrum so the analysis maps it
-        through the same chain.
+        Anchors of THIS calculator's own (top-level) chain: Rayleigh pixel
+        positions extracted from its polynomials, plus its ePSFs when the
+        chain carries them (the PSF variant; also legacy single-chain files
+        that stored PSFs at the top level).
         """
-        if self.p is None:
-            return None
-
-        variant = self._variant()
-        if variant is not None:
-            anchors = variant.elastic_anchors()
-            if anchors is not None:
-                anchors.chain = "psf"
-            return anchors
-
         r_left = self._elastic_line_px(
             self.p.freq_left_peak, self.p.left_px_points, self.p.left_freq_points
         )
@@ -344,21 +323,6 @@ class CalibrationCalculator:
         if not r_left < r_right:
             return None
 
-        # Instrument-width polynomials define the Lorentzian IRF the DHO is
-        # convolved with. They are required for the fit, so if they are
-        # missing or non-finite there are no usable anchors.
-        wl = self.p.calibration_width_left_peak
-        wr = self.p.calibration_width_right_peak
-        if wl is None or wr is None:
-            return None
-        wl = np.asarray(wl, dtype=float)
-        wr = np.asarray(wr, dtype=float)
-        if not (np.all(np.isfinite(wl)) and np.all(np.isfinite(wr))):
-            return None
-
-        # Empirical PSFs (present on the PSF-centered chain); the DHO fit
-        # then uses them as the instrument response instead of the
-        # Lorentzian width model.
         psf_left = psf_right = None
         psf_step = None
         if (
@@ -375,12 +339,46 @@ class CalibrationCalculator:
         return ElasticAnchors(
             rayleigh_left_px=r_left,
             rayleigh_right_px=r_right,
-            instrument_width_left_poly=wl,
-            instrument_width_right_poly=wr,
             psf_left=psf_left,
             psf_right=psf_right,
             psf_grid_step_px=psf_step,
+            chain="lorentzian",
         )
+
+    def elastic_anchors(self) -> ElasticAnchors | None:
+        """
+        Pixel positions of the elastic (Rayleigh) lines bracketing the two
+        Brillouin peaks, or None if the calibration cannot provide them.
+
+        Returns the MAIN-chain anchors (all the pure eq.-S2 dho needs), with
+        the PSF-chain anchors nested as .psf_variant when the calibration
+        stores the variant — mirroring the dual-chain parameters. The fitter
+        selects the base anchors for the pure dho and the variant for the
+        PSF-aware models (dho_psf, lorentzian_psf); each carries its chain of
+        origin (ElasticAnchors.chain), which the fitter stamps onto the
+        resulting FittedSpectrum so the analysis maps it through the same
+        chain.
+
+        Returns None only when no chain can provide anchors (anchor
+        unavailable or geometry inconsistent). If the main chain cannot but
+        the variant can, the variant anchors are returned directly.
+        """
+        if self.p is None:
+            return None
+
+        main = self._own_chain_anchors()
+
+        variant_calc = self._variant()
+        var_anchors = None
+        if variant_calc is not None:
+            var_anchors = variant_calc._own_chain_anchors()
+            if var_anchors is not None:
+                var_anchors.chain = "psf"
+
+        if main is None:
+            return var_anchors
+        main.psf_variant = var_anchors
+        return main
 
     def calibration_width_left_peak_dpx(self, px):
         """Ideal FWHM width of the left peak in pixels."""

@@ -266,15 +266,17 @@ def sample_config(model="dho_window"):
 def test_dho_with_measured_psf_recovers_material_parameters(params_psf):
     anchors = CalibrationCalculator(params_psf).elastic_anchors()
     assert anchors is not None
-    assert anchors.psf_left is not None  # PSF carried through
+    assert anchors.psf_variant is not None  # PSF chain carried through
+    assert anchors.psf_variant.psf_left is not None
 
     px, sline = make_sample_sline()
     fitter = SpectrumFitter()
-    fitter.update_sample_config(sample_config())
+    fitter.update_sample_config(sample_config("dho_psf_window"))
     result = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
 
     assert result.is_success
     assert result.model == "2dho_anchored_psf_window"
+    assert result.calibration_chain == "psf"
 
     omega_left = result.left_peak_center_px - result.rayleigh_left_px
     omega_right = result.rayleigh_right_px - result.right_peak_center_px
@@ -381,23 +383,52 @@ def test_lorentzian_psf_one_peak_fails_gracefully(params_psf):
     assert not result.is_success
 
 
-def test_dho_without_psf_still_uses_lorentzian_irf(params_psf):
-    """A calibration without the PSF chain keeps the Lorentzian-IRF DHO path,
-    and the fit is stamped for the main chain."""
+def test_pure_dho_works_without_psf_chain(params_psf):
+    """The pure eq.-S2 dho needs only the anchor positions: it must fit
+    against a calibration without the PSF chain and stamp the main chain."""
     params_classic = classic_params(params_psf)
     anchors = CalibrationCalculator(params_classic).elastic_anchors()
     assert anchors is not None
     assert anchors.psf_left is None
+    assert anchors.psf_variant is None
     assert anchors.chain == "lorentzian"
 
     px, sline = make_sample_sline()
     fitter = SpectrumFitter()
-    fitter.update_sample_config(sample_config())
+    fitter.update_sample_config(sample_config())  # "dho_window"
     result = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
 
     assert result.is_success
-    assert result.model == "2dho_anchored_window"
+    assert result.model == "2dho_s2_window"
     assert result.calibration_chain == "lorentzian"
+    # No instrument model -> no material/instrument width split.
+    assert result.material_hwhm_left_px is None
+
+
+def test_pure_dho_with_dual_chain_uses_main_anchors(params_psf):
+    """With a dual-chain calibration the pure dho consumes the MAIN-chain
+    anchors and is stamped for the main chain (dho_psf is the variant-chain
+    sibling)."""
+    anchors = CalibrationCalculator(params_psf).elastic_anchors()
+    px, sline = make_sample_sline()
+    fitter = SpectrumFitter()
+    fitter.update_sample_config(sample_config())  # "dho_window"
+    result = fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
+
+    assert result.is_success
+    assert result.model == "2dho_s2_window"
+    assert result.calibration_chain == "lorentzian"
+    assert result.rayleigh_left_px == pytest.approx(anchors.rayleigh_left_px)
+
+
+def test_dho_psf_without_psf_chain_raises(params_psf):
+    params_classic = classic_params(params_psf)
+    anchors = CalibrationCalculator(params_classic).elastic_anchors()
+    px, sline = make_sample_sline()
+    fitter = SpectrumFitter()
+    fitter.update_sample_config(sample_config("dho_psf_window"))
+    with pytest.raises(ValueError, match="dho_psf"):
+        fitter.fit(px, sline, is_reference_mode=False, anchors=anchors)
 
 
 # --- Dual-chain selection ----------------------------------------------------
@@ -443,9 +474,12 @@ def test_for_chain_psf_without_variant_raises(params_psf):
 
 def test_fits_are_stamped_with_their_chain(params_psf):
     """The fitter stamps each result with the chain of the anchors it
-    consumed; plain models always pair with the main chain."""
+    consumed: plain models and the pure dho pair with the main chain, the
+    PSF-aware models with the PSF chain."""
     anchors = CalibrationCalculator(params_psf).elastic_anchors()
-    assert anchors.chain == "psf"
+    assert anchors.chain == "lorentzian"
+    assert anchors.psf_variant is not None
+    assert anchors.psf_variant.chain == "psf"
 
     px, sline = make_lorentzian_sample_sline()
     fitter = SpectrumFitter()
@@ -476,19 +510,26 @@ def test_compute_freq_shift_uses_matching_chain(params_psf):
         float(np.polyval(params_psf.psf_variant.freq_left_peak, px_val)))
 
 
-def test_elastic_anchors_come_from_variant(params_psf):
-    """Anchors feed only the PSF-aware models, so a dual-chain calibration
-    serves them from the PSF-centered chain (PSFs included) and marks their
-    origin for the fit stamp."""
+def test_elastic_anchors_are_dual_chain(params_psf):
+    """A dual-chain calibration serves MAIN-chain anchors (for the pure dho)
+    with the PSF-chain anchors nested as psf_variant (for dho_psf /
+    lorentzian_psf), each marked with its chain of origin."""
     anchors = CalibrationCalculator(params_psf).elastic_anchors()
-    anchors_variant = CalibrationCalculator(params_psf.psf_variant).elastic_anchors()
 
     assert anchors is not None
-    assert anchors.psf_left is not None
-    assert anchors.chain == "psf"
-    assert anchors_variant.chain == "lorentzian"  # served as its own main
-    assert anchors.rayleigh_left_px == pytest.approx(anchors_variant.rayleigh_left_px)
-    assert anchors.rayleigh_right_px == pytest.approx(anchors_variant.rayleigh_right_px)
+    assert anchors.chain == "lorentzian"
+    assert anchors.psf_left is None  # main chain carries no PSFs
+
+    var = anchors.psf_variant
+    assert var is not None
+    assert var.chain == "psf"
+    assert var.psf_left is not None
+    assert var.psf_grid_step_px is not None
+
+    # The variant's rayleigh positions come from the variant polynomials.
+    var_own = CalibrationCalculator(params_psf.psf_variant).elastic_anchors()
+    assert var.rayleigh_left_px == pytest.approx(var_own.rayleigh_left_px)
+    assert var.rayleigh_right_px == pytest.approx(var_own.rayleigh_right_px)
 
 
 def test_spectrum_analyzer_uses_matching_chain(params_psf):
