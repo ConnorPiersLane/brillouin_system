@@ -182,18 +182,19 @@ On the next start, `init_stereo_cameras.py` builds the `StereoCameras` object fr
 
 This fits a rigid SE3 transform `T_left_to_zaber` (Umeyama/Kabsch, in `fit_coordinate_system.py`) from 3D point correspondences: points triangulated by the stereo pair in the LEFT-camera frame (mm) vs. the same physical points in Zaber stage coordinates. It requires a valid stereo calibration (step 1).
 
+**Rig-frame convention** (must match the runtime): the frame moves with the stage (cameras + laser ride on it); x = y = 0 on the laser beam axis; z is anchored to the **eye-lens scale** — the laser focus sits at z = (lens reading in mm), so a dot the laser is focused on is at z = lens position. A dot fixed in the room has rig coordinates `x,y = −Δstage`, `z = lens_ref − Δstage_z` (mm, relative to the reference pose) — moving the stage +5 mm makes the dot appear at −5 mm.
+
 **Main workflow — live capture** (`point_capture_gui_coordinates_only.py`):
 
-1. Mount the calibration dot on the stage, **Start** the cameras. The dot is detected live (subpixel blob detector) and triangulated; the overlay shows the 3D LEFT-frame position and the triangulation RMS in px (orange warning if the two cameras likely see different blobs).
-2. Optionally **Connect** the Zaber stage (COM port field; fails if the HI GUI has the port open). With *Auto-read on capture* enabled the stage position is read and stored automatically — no typing. The unit factor (default 0.001) converts Zaber µm to mm so both sides of the fit use the same units. Without a stage connection, type X/Y/Z manually.
-3. Move the stage, hold still ~2 s, press **Capture** (or Space). The capture averages the detections of the last 2 s (median) to suppress jitter.
-4. The transform is re-fitted automatically after every capture. The panel shows N, fit RMS, per-point residuals in the table (worst in red), a **scale check** (a value far from 1.0 means LEFT/Zaber units don't match), and geometry hints (too few points, small axis spans, coplanar/collinear point sets).
-   In addition, a **motion check** compares the displacement seen by the cameras against the displacement reported by the stage between consecutive captures — it flags step-size mismatches (wrong unit factor, dot slipped on its mount) and, once a fit exists, direction mismatches (wrong axis moved, axis swapped, sign flipped). Green = consistent; orange = investigate before continuing.
-   Note: connecting the stage from this GUI attaches **without homing** — it never moves the rig.
-5. Bad points can be unchecked (Use column) or removed; the fit updates immediately. Every change is auto-saved to a session file, restorable via **Load Session**.
-6. **Install as active** writes `stereo_configs/left_to_zaber.json` directly, backing up the previous file with a timestamp. Restart the HI GUI afterwards (the transform is loaded at import).
+1. Print/mount a small black dot (fixed in the room), **Start** the cameras. The dot is detected live (subpixel blob detector) and triangulated; the overlay shows the LEFT-frame position and the triangulation RMS in px (orange warning if the two cameras likely see different blobs).
+2. **Connect** the eye lens (COM5) and the stage (COM6) — both attach **without homing**, they never move on connect. Park the lens at its working position (target-µm field + **Move Lens**, e.g. 12000) and leave it there for the whole calibration (the GUI warns if it moves after the reference is set, and asks for confirmation before any lens move once a reference exists).
+3. Jog the stage (frontend-style ± buttons per axis) until the laser hits the dot and is **focused** on it, then press **Set Reference Pose** — the dot is now at rig (0, 0, lens reading in mm) by definition; the lens reading is captured automatically.
+4. Jog to a new pose, hold still ~2 s, press **Capture** (or Space). Rig coordinates are computed automatically from the stage position; the capture averages the last 2 s of detections (median) to suppress jitter. If an image folder is chosen, each capture also saves `left/`, `right/` PNGs and `coordinates/<base>.txt` — the exact layout `calibrate_transformation.py` reads for offline re-processing.
+5. The transform is re-fitted after every capture: N, fit RMS, per-point residuals (worst in red), a **scale check** (far from 1.0 = units mismatch), geometry hints (too few points, small spans, coplanar/collinear sets), and a **motion check** comparing camera vs stage displacement between captures (catches wrong-axis moves, sign flips, slipped dot). **Show 3D View** opens a live plot of the rig frame, the stage points, the fitted camera points and residual lines. The **Overlay ZABER coords** checkbox (or **Load Transform JSON**) displays the dot's rig coordinates live on the images.
+6. Bad points can be unchecked (Use column) or removed; the fit updates immediately. Every change is auto-saved to a session file (including the reference pose), restorable via **Load Session**.
+7. **Install as active** writes `stereo_configs/left_to_zaber.json` directly, backing up the previous file with a timestamp. Restart the HI GUI afterwards (the transform is loaded at import).
 
-Aim for 8–15 points spread over the full working volume, including z variation — the old minimum of 3 points in a small cross gives a transform that extrapolates poorly.
+Aim for 8–15 points spread over the full working volume, including z variation — a minimal cross of points gives a transform that extrapolates poorly.
 
 **Offline alternative:** `calibrate_transformation.py` fits from a saved dataset (folder with `left/`, `right/`, `coordinates/<base>.txt`).
 

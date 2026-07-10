@@ -1,20 +1,27 @@
 """
-Point-capture GUI for the LEFT-camera -> Zaber coordinate transform.
+Point-capture GUI for the LEFT-camera -> Zaber (rig) coordinate transform.
+
+Rig-frame convention (must match the runtime, see hi_frontend/eye_tracker):
+  - The frame MOVES WITH the zaber stage (cameras + laser ride on it).
+  - x = y = 0 : on the laser beam axis.
+  - z = 0    : laser focus with the eye lens at 0 µm.
+  - The dot is FIXED in the room, so its rig coordinates are
+        dot_rig = -(stage - reference_pose)        [mm]
+    where the reference pose is the stage position at which the laser
+    (lens parked at 0 µm) is centered and focused ON the dot.
 
 Workflow:
-  1. Mount the calibration dot on the Zaber stage, start the cameras.
-  2. Move the stage to a pose; the GUI detects the dot in both cameras,
-     triangulates it (LEFT frame, mm) and shows the reprojection RMS live.
-  3. Press Save (Space): the capture averages the last ~2 s of detections,
-     and the Zaber position is read automatically (if connected) or taken
-     from the X/Y/Z fields.
-  4. Repeat over the working volume. The transform is re-fitted after every
-     capture; per-point residuals, RMS, a units sanity check and geometry
-     hints update live.
-  5. "Install as active" writes stereo_configs/left_to_zaber.json directly
-     (with a timestamped backup of the previous file).
-
-Every capture is auto-saved to a session file so a crash loses nothing.
+  1. Start cameras. Connect stage (COM6) and lens (COM5) — both attach
+     WITHOUT homing. Move the lens to 0 µm (button) and leave it there.
+  2. Jog the stage until the laser hits the dot and is focused on it,
+     then press "Set Reference Pose".
+  3. Jog the stage to a new pose (the dot moves opposite in the images),
+     hold still ~2 s, press Capture (Space). Rig coordinates are computed
+     automatically; images are saved if a folder is chosen.
+  4. The fit updates after every capture: RMS, per-point residuals,
+     scale check, motion check, geometry hints, live 3D view.
+  5. "Install as active" writes stereo_configs/left_to_zaber.json
+     (with a timestamped backup). Restart the HI GUI afterwards.
 """
 
 import sys
@@ -33,11 +40,15 @@ import cv2
 
 from PyQt5.QtWidgets import (
     QApplication, QLabel, QWidget, QVBoxLayout, QPushButton, QHBoxLayout,
-    QFileDialog, QLineEdit, QShortcut, QCheckBox, QDoubleSpinBox,
+    QFileDialog, QLineEdit, QShortcut, QCheckBox,
     QTableWidget, QTableWidgetItem, QGroupBox, QMessageBox, QHeaderView,
+    QGridLayout,
 )
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence, QColor
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
@@ -52,13 +63,37 @@ STEREO_CONFIGS_DIR = Path(_stereo_imaging_pkg.__file__).resolve().parent / "ster
 ACTIVE_TRANSFORM_PATH = STEREO_CONFIGS_DIR / "left_to_zaber.json"
 SESSION_PATH = Path(__file__).resolve().parent / "point_capture_session.json"
 
+UM_TO_MM = 1e-3
 TRI_RMS_WARN_PX = 2.0        # triangulation reprojection RMS above this = suspicious detection
 SCALE_WARN = 0.02            # |scale-1| above this suggests a units mismatch
 CAPTURE_WINDOW_S = 2.0       # average detections over this window on capture
 CAPTURE_MIN_SAMPLES = 5
+LENS_MOVED_TOL_UM = 10.0     # lens must not move after the reference pose is set
+
+FRAME_INFO = (
+    "Rig frame: x=y=0 on the laser axis; z anchored to the lens scale (z=0 = focus @ lens 0 µm). "
+    "Park the lens at its working position (e.g. 10 mm init), FOCUS the laser on the dot, Set Reference Pose "
+    "— the dot is then at (0, 0, lens reading in mm). Do not move the lens afterwards. "
+    "Captured dot coords: x,y = −Δstage, z = lens_ref − Δstage_z [mm]."
+)
 
 
 # ---------------- pure helpers (testable without Qt) ----------------
+def rig_coords_from_stage(stage_um, reference_um, lens_ref_um: float = 0.0) -> list[float]:
+    """
+    Dot position in the moving rig frame [mm].
+
+    x,y,z all move as -(stage - reference); the absolute z level is anchored
+    to the lens scale: at the reference pose (laser focused on the dot) the
+    dot sits at z = lens reading in mm (runtime convention: focus z = lens mm).
+    """
+    s = np.asarray(stage_um, float)
+    r = np.asarray(reference_um, float)
+    out = -(s - r) * UM_TO_MM
+    out[2] += float(lens_ref_um) * UM_TO_MM
+    return list(out)
+
+
 def fit_pairs(A: np.ndarray, B: np.ndarray) -> dict:
     """
     Rigid Umeyama fit LEFT->ZABER plus diagnostics.
@@ -119,7 +154,7 @@ def motion_check(prev_left, prev_zaber, left, zaber, R: np.ndarray | None = None
                                 "— wrong axis moved, or axis swapped/sign flipped?")
     if problems:
         return ("; ".join(problems), False)
-    msg = f"motion OK: stage Δ=({dZ[0]:+.3f}, {dZ[1]:+.3f}, {dZ[2]:+.3f}), camera Δ={nL:.3f}"
+    msg = f"motion OK: rig Δ=({dZ[0]:+.3f}, {dZ[1]:+.3f}, {dZ[2]:+.3f}), camera Δ={nL:.3f}"
     if ang is not None:
         msg += f", angle {ang:.1f}°"
     return (msg, True)
@@ -173,6 +208,90 @@ def numpy_to_qpixmap_gray(arr: np.ndarray) -> QPixmap:
     return QPixmap.fromImage(qimg)
 
 
+# ---------------- 3D viewer (live) ----------------
+class Fit3DDialog(QWidget):
+    """Live 3D view: zaber points, fitted LEFT points mapped into the zaber
+    frame, residual lines, rig axes at the origin, LEFT-camera axes at its
+    fitted pose."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("Fitted Coordinate System & Points")
+        self.fig = Figure(figsize=(7, 6), constrained_layout=True)
+        self.ax = self.fig.add_subplot(111, projection="3d")
+        self.canvas = FigureCanvas(self.fig)
+        self.info = QLabel("—")
+        layout = QVBoxLayout()
+        layout.addWidget(self.canvas)
+        layout.addWidget(self.info)
+        self.setLayout(layout)
+        self.resize(820, 720)
+
+    def _plot_axes(self, origin, R, length, prefix):
+        o = np.asarray(origin, float).reshape(3)
+        colors = ("r", "g", "b")
+        for k, (axis_name, c) in enumerate(zip("xyz", colors)):
+            d = np.asarray(R, float)[:, k]
+            seg = np.vstack([o, o + length * d])
+            self.ax.plot(seg[:, 0], seg[:, 1], seg[:, 2], color=c, linewidth=2,
+                         label=f"{prefix}{axis_name}")
+
+    def _set_equal(self, X):
+        if X is None or X.size == 0:
+            return
+        mins, maxs = X.min(axis=0), X.max(axis=0)
+        center = (mins + maxs) / 2
+        half = max(float(np.max(maxs - mins)) / 2, 1.0)
+        self.ax.set_xlim(center[0] - half, center[0] + half)
+        self.ax.set_ylim(center[1] - half, center[1] + half)
+        self.ax.set_zlim(center[2] - half, center[2] + half)
+        self.ax.set_box_aspect((1, 1, 1))
+
+    def update_data(self, A: np.ndarray | None, B: np.ndarray | None,
+                    T: SE3 | None, rms: float | None = None):
+        self.ax.clear()
+        self.ax.set_xlabel("rig X [mm]")
+        self.ax.set_ylabel("rig Y [mm]")
+        self.ax.set_zlabel("rig Z [mm]")
+        self.ax.set_title("Rig frame (z=0: laser focus @ lens 0)")
+
+        pts = []
+        # rig frame at origin
+        length = 5.0
+        self._plot_axes(np.zeros(3), np.eye(3), length, "rig-")
+        self.ax.scatter([0], [0], [0], color="k", s=30)
+
+        if B is not None and len(B):
+            B = np.asarray(B, float)
+            self.ax.scatter(B[:, 0], B[:, 1], B[:, 2], marker="^", s=40,
+                            color="tab:orange", label="stage points (rig)")
+            pts.append(B)
+
+        if T is not None and A is not None and len(A):
+            A = np.asarray(A, float)
+            TA = T.apply_points(A)
+            self.ax.scatter(TA[:, 0], TA[:, 1], TA[:, 2], marker="o", s=25,
+                            color="tab:blue", label="camera points → rig (fit)")
+            pts.append(TA)
+            if B is not None and len(B) == len(TA):
+                for p, q in zip(TA, B):
+                    seg = np.vstack([p, q])
+                    self.ax.plot(seg[:, 0], seg[:, 1], seg[:, 2],
+                                 color="gray", linewidth=0.8, alpha=0.7)
+            # LEFT camera pose in the rig frame: origin = T.t, axes = columns of T.R
+            self._plot_axes(T.t, T.R, length, "cam-")
+            pts.append(T.t.reshape(1, 3))
+
+        if pts:
+            self._set_equal(np.vstack(pts))
+        self.ax.legend(loc="upper right", fontsize=8)
+        self.canvas.draw_idle()
+        if rms is not None:
+            self.info.setText(f"N = {0 if A is None else len(A)}   fit RMS = {rms:.4f} mm")
+        else:
+            self.info.setText("No fit yet — capture ≥3 points.")
+
+
 # ---------------- main GUI ----------------
 class PointCaptureGUI(QWidget):
     status_changed = pyqtSignal(str)
@@ -182,11 +301,11 @@ class PointCaptureGUI(QWidget):
         self.setWindowTitle("LEFT → Zaber Point Capture")
 
         self.stereo = stereo_cameras
-        self._detector = make_blob_detector()
+        self._detector = make_blob_detector()  # dark dot on bright paper
 
         # capture data model: list of dicts
-        # {"label": str, "left": [x,y,z]|None, "zaber": [x,y,z]|None,
-        #  "tri_rms": float|None, "use": bool}
+        # {"label", "left":[x,y,z]|None, "zaber":[x,y,z]|None, "stage_um":[..]|None,
+        #  "tri_rms": float|None, "use": bool, "base": str|None}
         self.rows: list[dict] = []
         self.fit_result: dict | None = None
         self._updating_table = False
@@ -194,13 +313,26 @@ class PointCaptureGUI(QWidget):
         # live detection state
         self._last_left = None
         self._last_right = None
-        self._last_uv = (None, None)          # (uvL, uvR)
+        self._last_uv = (None, None)
         self._last_X_left = None
         self._last_tri_rms = None
-        self._samples = deque(maxlen=200)     # (t, uvL, uvR) with both detected
+        self._samples = deque(maxlen=200)
         self._detect_counter = 0
 
-        self.zaber = None                     # optional ZaberHumanInterface
+        # devices
+        self.stage = None                     # ZaberHumanInterface (COM6)
+        self.lens = None                      # ZaberEyeLens (COM5)
+        self.reference_um: list[float] | None = None
+        self.reference_lens_um: float = 0.0   # lens reading when the reference pose was set
+
+        # transform overlay
+        self.loaded_T: SE3 | None = None
+        self.loaded_T_name: str = ""
+
+        # image saving
+        self.save_dir: Path | None = None
+
+        self.viewer3d: Fit3DDialog | None = None
 
         self._build_ui()
 
@@ -230,7 +362,7 @@ class PointCaptureGUI(QWidget):
         self.left_label = QLabel("Left")
         self.right_label = QLabel("Right")
         for lbl in (self.left_label, self.right_label):
-            lbl.setFixedSize(560, 420)
+            lbl.setFixedSize(520, 390)
             lbl.setStyleSheet("background-color: black;")
             lbl.setAlignment(Qt.AlignCenter)
             blank = QPixmap(lbl.size())
@@ -240,6 +372,11 @@ class PointCaptureGUI(QWidget):
         top = QHBoxLayout()
         top.addWidget(self.left_label)
         top.addWidget(self.right_label)
+
+        # frame-convention banner
+        self.banner = QLabel(FRAME_INFO)
+        self.banner.setWordWrap(True)
+        self.banner.setStyleSheet("background: #fff6d6; border: 1px solid #d8c775; padding: 4px;")
 
         # camera controls
         self.start_btn = QPushButton("Start")
@@ -256,45 +393,75 @@ class PointCaptureGUI(QWidget):
         btns.addWidget(self.left_cfg_btn)
         btns.addWidget(self.right_cfg_btn)
 
-        # Zaber group
-        zbox = QGroupBox("Zaber stage")
-        zrow = QHBoxLayout(zbox)
-        zrow.addWidget(QLabel("Port:"))
-        self.zaber_port = QLineEdit("COM6")
-        self.zaber_port.setFixedWidth(70)
-        zrow.addWidget(self.zaber_port)
-        self.zaber_connect_btn = QPushButton("Connect")
-        zrow.addWidget(self.zaber_connect_btn)
-        self.zaber_read_btn = QPushButton("Read Now")
-        self.zaber_read_btn.setEnabled(False)
-        zrow.addWidget(self.zaber_read_btn)
-        self.zaber_auto = QCheckBox("Auto-read on capture")
-        self.zaber_auto.setChecked(True)
-        self.zaber_auto.setEnabled(False)
-        zrow.addWidget(self.zaber_auto)
-        zrow.addWidget(QLabel("Unit factor (µm→):"))
-        self.unit_factor = QDoubleSpinBox()
-        self.unit_factor.setDecimals(6)
-        self.unit_factor.setRange(1e-9, 1e9)
-        self.unit_factor.setValue(0.001)  # µm -> mm (LEFT frame is mm)
-        self.unit_factor.setToolTip("Raw Zaber position (µm) is multiplied by this before storing.\n"
-                                    "0.001 stores mm — matching the LEFT-camera frame units.")
-        zrow.addWidget(self.unit_factor)
-        zrow.addStretch()
+        # ---- Stage group (frontend-style jog) ----
+        sbox = QGroupBox("Zaber stage (COM6) — rig moves, dot appears opposite")
+        sgrid = QGridLayout(sbox)
+        srow0 = QHBoxLayout()
+        self.stage_port = QLineEdit("COM6"); self.stage_port.setFixedWidth(60)
+        self.stage_connect_btn = QPushButton("Connect")
+        srow0.addWidget(QLabel("Port:")); srow0.addWidget(self.stage_port)
+        srow0.addWidget(self.stage_connect_btn); srow0.addStretch()
+        sgrid.addLayout(srow0, 0, 0, 1, 5)
 
-        # manual coordinates + capture
+        self.stage_pos_labels = {}
+        self.stage_step_inputs = {}
+        for i, ax in enumerate("xyz"):
+            pos_lbl = QLabel(f"{ax.upper()} — µm")
+            step = QLineEdit("1000"); step.setFixedWidth(60)
+            minus = QPushButton(f"−{ax}"); plus = QPushButton(f"+{ax}")
+            minus.setFixedWidth(45); plus.setFixedWidth(45)
+            minus.clicked.connect(lambda _, a=ax: self._jog_stage(a, -1))
+            plus.clicked.connect(lambda _, a=ax: self._jog_stage(a, +1))
+            sgrid.addWidget(pos_lbl, i + 1, 0)
+            sgrid.addWidget(QLabel("step µm:"), i + 1, 1)
+            sgrid.addWidget(step, i + 1, 2)
+            sgrid.addWidget(minus, i + 1, 3)
+            sgrid.addWidget(plus, i + 1, 4)
+            self.stage_pos_labels[ax] = pos_lbl
+            self.stage_step_inputs[ax] = step
+
+        self.set_ref_btn = QPushButton("Set Reference Pose (laser focused on dot)")
+        self.set_ref_btn.setEnabled(False)
+        self.ref_label = QLabel("Reference: not set")
+        sgrid.addWidget(self.set_ref_btn, 4, 0, 1, 3)
+        sgrid.addWidget(self.ref_label, 4, 3, 1, 2)
+
+        # ---- Lens group ----
+        lbox = QGroupBox("Eye lens (COM5) — park at working position, do NOT move after Set Reference")
+        lrow = QHBoxLayout(lbox)
+        self.lens_port = QLineEdit("COM5"); self.lens_port.setFixedWidth(60)
+        self.lens_connect_btn = QPushButton("Connect")
+        self.lens_target_input = QLineEdit("12000"); self.lens_target_input.setFixedWidth(70)
+        self.lens_move_btn = QPushButton("Move Lens")
+        self.lens_move_btn.setEnabled(False)
+        self.lens_pos_label = QLabel("Lens: — µm")
+        lrow.addWidget(QLabel("Port:")); lrow.addWidget(self.lens_port)
+        lrow.addWidget(self.lens_connect_btn)
+        lrow.addWidget(QLabel("target µm:")); lrow.addWidget(self.lens_target_input)
+        lrow.addWidget(self.lens_move_btn)
+        lrow.addWidget(self.lens_pos_label)
+        lrow.addStretch()
+
+        dev_row = QHBoxLayout()
+        dev_row.addWidget(sbox, stretch=3)
+        dev_row.addWidget(lbox, stretch=2)
+
+        # ---- capture row ----
         crow = QHBoxLayout()
+        self.auto_fill_checkbox = QCheckBox("Auto rig coords = −(stage − ref)")
+        self.auto_fill_checkbox.setChecked(True)
+        crow.addWidget(self.auto_fill_checkbox)
         crow.addWidget(QLabel("X:"))
-        self.x_input = QLineEdit(); self.x_input.setFixedWidth(90); self.x_input.setPlaceholderText("x")
+        self.x_input = QLineEdit(); self.x_input.setFixedWidth(80); self.x_input.setPlaceholderText("mm")
         crow.addWidget(self.x_input)
         crow.addWidget(QLabel("Y:"))
-        self.y_input = QLineEdit(); self.y_input.setFixedWidth(90); self.y_input.setPlaceholderText("y")
+        self.y_input = QLineEdit(); self.y_input.setFixedWidth(80); self.y_input.setPlaceholderText("mm")
         crow.addWidget(self.y_input)
         crow.addWidget(QLabel("Z:"))
-        self.z_input = QLineEdit(); self.z_input.setFixedWidth(90); self.z_input.setPlaceholderText("z")
+        self.z_input = QLineEdit(); self.z_input.setFixedWidth(80); self.z_input.setPlaceholderText("mm")
         crow.addWidget(self.z_input)
         crow.addWidget(QLabel("Label:"))
-        self.label_input = QLineEdit(); self.label_input.setFixedWidth(120); self.label_input.setPlaceholderText("optional")
+        self.label_input = QLineEdit(); self.label_input.setFixedWidth(100); self.label_input.setPlaceholderText("optional")
         crow.addWidget(self.label_input)
         self.capture_btn = QPushButton("Capture (Space)")
         crow.addWidget(self.capture_btn)
@@ -302,22 +469,40 @@ class PointCaptureGUI(QWidget):
         self.save_status = QLabel("Ready")
         crow.addWidget(self.save_status)
 
-        # table
+        # ---- image saving + transform overlay row ----
+        orow = QHBoxLayout()
+        self.folder_btn = QPushButton("Image Folder…")
+        self.save_images_checkbox = QCheckBox("Save images on capture")
+        self.save_images_checkbox.setChecked(True)
+        self.folder_label = QLabel("no folder")
+        orow.addWidget(self.folder_btn)
+        orow.addWidget(self.save_images_checkbox)
+        orow.addWidget(self.folder_label)
+        orow.addStretch()
+        self.track_fit_checkbox = QCheckBox("Overlay ZABER coords (current fit)")
+        self.load_T_btn = QPushButton("Load Transform JSON…")
+        self.transform_src_label = QLabel("")
+        orow.addWidget(self.track_fit_checkbox)
+        orow.addWidget(self.load_T_btn)
+        orow.addWidget(self.transform_src_label)
+
+        # ---- table ----
         self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(
-            ["Use", "Label", "L x", "L y", "L z", "Z x", "Z y", "Z z", "tri px", "resid"])
+            ["Use", "Label", "L x", "L y", "L z", "Rig x", "Rig y", "Rig z", "tri px", "resid"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.itemChanged.connect(self._on_table_item_changed)
 
-        # table buttons
         trow = QHBoxLayout()
         self.remove_selected_btn = QPushButton("Remove Selected")
         self.remove_all_btn = QPushButton("Remove All")
         self.load_session_btn = QPushButton("Load Session")
+        self.view3d_btn = QPushButton("Show 3D View")
         trow.addWidget(self.remove_selected_btn)
         trow.addWidget(self.remove_all_btn)
         trow.addWidget(self.load_session_btn)
+        trow.addWidget(self.view3d_btn)
         trow.addStretch()
         self.save_as_btn = QPushButton("Save Transform As…")
         self.install_btn = QPushButton("Install as active (left_to_zaber.json)")
@@ -334,9 +519,11 @@ class PointCaptureGUI(QWidget):
 
         layout = QVBoxLayout()
         layout.addLayout(top)
+        layout.addWidget(self.banner)
         layout.addLayout(btns)
-        layout.addWidget(zbox)
+        layout.addLayout(dev_row)
         layout.addLayout(crow)
+        layout.addLayout(orow)
         layout.addWidget(self.table)
         layout.addLayout(trow)
         layout.addWidget(self.fit_label)
@@ -353,10 +540,15 @@ class PointCaptureGUI(QWidget):
         self.remove_selected_btn.clicked.connect(self.on_remove_selected)
         self.remove_all_btn.clicked.connect(self.on_remove_all)
         self.load_session_btn.clicked.connect(self.on_load_session)
+        self.view3d_btn.clicked.connect(self.on_show_3d)
         self.save_as_btn.clicked.connect(self.on_save_as)
         self.install_btn.clicked.connect(self.on_install_active)
-        self.zaber_connect_btn.clicked.connect(self.on_zaber_connect)
-        self.zaber_read_btn.clicked.connect(self.on_zaber_read)
+        self.stage_connect_btn.clicked.connect(self.on_stage_connect)
+        self.lens_connect_btn.clicked.connect(self.on_lens_connect)
+        self.lens_move_btn.clicked.connect(self.on_lens_move)
+        self.set_ref_btn.clicked.connect(self.on_set_reference)
+        self.folder_btn.clicked.connect(self.on_choose_folder)
+        self.load_T_btn.clicked.connect(self.on_load_transform)
         self.status_changed.connect(self.save_status.setText)
 
     # ---------------- camera stream ----------------
@@ -399,7 +591,6 @@ class PointCaptureGUI(QWidget):
         self._last_left = left
         self._last_right = right
 
-        # detect every 2nd frame (blob detection is cheap, but keep the UI fluid)
         self._detect_counter = (self._detect_counter + 1) % 2
         if self._detect_counter == 0:
             self._update_detection(left, right)
@@ -423,12 +614,20 @@ class PointCaptureGUI(QWidget):
             except Exception:
                 pass
 
+    def _active_transform(self) -> tuple[SE3 | None, str]:
+        if self.track_fit_checkbox.isChecked() and self.fit_result is not None:
+            return self.fit_result["T"], "current fit"
+        if self.loaded_T is not None:
+            return self.loaded_T, self.loaded_T_name
+        return None, ""
+
     def _paint(self, left_gray, right_gray):
         if not self.overlay_checkbox.isChecked():
             self._set_pixmap_fit(self.left_label, numpy_to_qpixmap_gray(left_gray))
             self._set_pixmap_fit(self.right_label, numpy_to_qpixmap_gray(right_gray))
             return
 
+        T, T_name = self._active_transform()
         uvL, uvR = self._last_uv
         for gray, uv, label in ((left_gray, uvL, self.left_label), (right_gray, uvR, self.right_label)):
             vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
@@ -436,18 +635,20 @@ class PointCaptureGUI(QWidget):
                 u, v = int(round(uv[0])), int(round(uv[1]))
                 cv2.circle(vis, (u, v), 6, (0, 255, 0), 2, cv2.LINE_AA)
                 cv2.drawMarker(vis, (u, v), (0, 255, 0), cv2.MARKER_CROSS, 14, 2, cv2.LINE_AA)
-                cv2.putText(vis, f"({uv[0]:.1f}, {uv[1]:.1f})", (10, 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
             if self._last_X_left is not None:
                 X = self._last_X_left
                 rms = self._last_tri_rms
                 ok = rms is not None and rms <= TRI_RMS_WARN_PX
                 color = (0, 255, 0) if ok else (255, 80, 0)
-                cv2.putText(vis, f"X=({X[0]:.2f}, {X[1]:.2f}, {X[2]:.2f}) mm  rms={rms:.2f}px",
-                            (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+                cv2.putText(vis, f"LEFT=({X[0]:.2f}, {X[1]:.2f}, {X[2]:.2f}) mm  rms={rms:.2f}px",
+                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+                if T is not None:
+                    Xz = T.apply_points(X)
+                    cv2.putText(vis, f"ZABER=({Xz[0]:.2f}, {Xz[1]:.2f}, {Xz[2]:.2f}) mm [{T_name}]",
+                                (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2, cv2.LINE_AA)
                 if not ok:
                     cv2.putText(vis, "CHECK DETECTION (L/R mismatch?)", (10, 75),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 80, 0), 2, cv2.LINE_AA)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 80, 0), 2, cv2.LINE_AA)
             self._set_pixmap_fit(label, numpy_to_qpixmap_rgb(vis))
 
     def _set_pixmap_fit(self, label: QLabel, pm: QPixmap):
@@ -473,52 +674,145 @@ class PointCaptureGUI(QWidget):
             if was_running:
                 self.on_start()
 
-    # ---------------- Zaber ----------------
-    def on_zaber_connect(self):
-        if self.zaber is not None:
+    # ---------------- Zaber stage ----------------
+    def on_stage_connect(self):
+        if self.stage is not None:
             try:
-                self.zaber.close()
+                self.stage.close()
             except Exception:
                 pass
-            self.zaber = None
-            self.zaber_connect_btn.setText("Connect")
-            self.zaber_read_btn.setEnabled(False)
-            self.zaber_auto.setEnabled(False)
-            self.status_changed.emit("Zaber disconnected")
+            self.stage = None
+            self.stage_connect_btn.setText("Connect")
+            self.set_ref_btn.setEnabled(False)
+            self.status_changed.emit("Stage disconnected")
             return
         try:
             from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import (
                 ZaberHumanInterface,
             )
-            # home_on_connect=False: attach WITHOUT homing/moving the stage —
-            # a connect during calibration must never cause physical motion.
-            self.zaber = ZaberHumanInterface(port=self.zaber_port.text().strip(), home_on_connect=False)
-            self.zaber_connect_btn.setText("Disconnect")
-            self.zaber_read_btn.setEnabled(True)
-            self.zaber_auto.setEnabled(True)
-            self.status_changed.emit(f"Zaber connected on {self.zaber_port.text().strip()} (no homing)")
+            # never home/move on connect during calibration
+            self.stage = ZaberHumanInterface(port=self.stage_port.text().strip(), home_on_connect=False)
+            self.stage_connect_btn.setText("Disconnect")
+            self.set_ref_btn.setEnabled(True)
+            self._update_stage_display()
+            self.status_changed.emit(f"Stage connected on {self.stage_port.text().strip()} (no homing)")
         except Exception as e:
-            self.zaber = None
-            self.status_changed.emit(f"Zaber connect failed: {e}")
-            QMessageBox.warning(self, "Zaber", f"Could not connect:\n{e}\n\n"
+            self.stage = None
+            self.status_changed.emit(f"Stage connect failed: {e}")
+            QMessageBox.warning(self, "Zaber stage", f"Could not connect:\n{e}\n\n"
                                 "Note: the port is busy if the Human Interface GUI is running.")
 
-    def _read_zaber_scaled(self):
-        pos = self.zaber.get_position()  # µm
-        f = float(self.unit_factor.value())
-        return [float(pos[0]) * f, float(pos[1]) * f, float(pos[2]) * f]
-
-    def on_zaber_read(self):
-        if self.zaber is None:
+    def _jog_stage(self, axis: str, sign: int):
+        if self.stage is None:
+            self.status_changed.emit("Stage not connected")
             return
         try:
-            x, y, z = self._read_zaber_scaled()
-            self.x_input.setText(f"{x:.4f}")
-            self.y_input.setText(f"{y:.4f}")
-            self.z_input.setText(f"{z:.4f}")
-            self.status_changed.emit(f"Zaber: ({x:.4f}, {y:.4f}, {z:.4f})")
+            step = float(self.stage_step_inputs[axis].text())
+        except ValueError:
+            self.status_changed.emit(f"Invalid step for {axis}")
+            return
+        try:
+            kwargs = {f"d{axis}": sign * step}
+            self.stage.move_rel(**kwargs)
+            self._update_stage_display()
         except Exception as e:
-            self.status_changed.emit(f"Zaber read failed: {e}")
+            self.status_changed.emit(f"Stage move failed: {e}")
+
+    def _update_stage_display(self):
+        if self.stage is None:
+            return
+        try:
+            x, y, z = self.stage.get_position()
+            for ax, val in zip("xyz", (x, y, z)):
+                self.stage_pos_labels[ax].setText(f"{ax.upper()} {val:.1f} µm")
+        except Exception as e:
+            self.status_changed.emit(f"Stage read failed: {e}")
+
+    def on_set_reference(self):
+        if self.stage is None:
+            return
+        try:
+            self.reference_um = list(self.stage.get_position())
+        except Exception as e:
+            self.status_changed.emit(f"Stage read failed: {e}")
+            return
+        lens_note = " (lens not connected — assuming lens at 0 µm for the z anchor)"
+        if self.lens is not None:
+            try:
+                self.reference_lens_um = float(self.lens.get_position())
+                lens_note = f" (lens at {self.reference_lens_um:.1f} µm — keep it there)"
+            except Exception:
+                pass
+        r = self.reference_um
+        self.ref_label.setText(f"Reference: ({r[0]:.1f}, {r[1]:.1f}, {r[2]:.1f}) µm | "
+                               f"lens {self.reference_lens_um:.1f} µm")
+        self.status_changed.emit(
+            f"Reference set — dot is at rig (0, 0, {self.reference_lens_um * UM_TO_MM:.3f} mm)." + lens_note)
+        self._autosave_session()
+
+    # ---------------- Eye lens ----------------
+    def on_lens_connect(self):
+        if self.lens is not None:
+            try:
+                self.lens.close()
+            except Exception:
+                pass
+            self.lens = None
+            self.lens_connect_btn.setText("Connect")
+            self.lens_move_btn.setEnabled(False)
+            self.lens_pos_label.setText("Lens: — µm")
+            self.status_changed.emit("Lens disconnected")
+            return
+        try:
+            from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
+            self.lens = ZaberEyeLens(port=self.lens_port.text().strip(), home_on_connect=False)
+            self.lens_connect_btn.setText("Disconnect")
+            self.lens_move_btn.setEnabled(True)
+            self._update_lens_display()
+            self.status_changed.emit(f"Lens connected on {self.lens_port.text().strip()} (no homing)")
+        except Exception as e:
+            self.lens = None
+            self.status_changed.emit(f"Lens connect failed: {e}")
+            QMessageBox.warning(self, "Eye lens", f"Could not connect:\n{e}")
+
+    def on_lens_move(self):
+        if self.lens is None:
+            return
+        try:
+            target = float(self.lens_target_input.text())
+        except ValueError:
+            self.status_changed.emit("Invalid lens target (µm)")
+            return
+        if self.reference_um is not None and abs(target - self.reference_lens_um) > LENS_MOVED_TOL_UM:
+            if QMessageBox.question(
+                    self, "Lens move",
+                    "A reference pose is already set — moving the lens breaks the z convention.\n"
+                    "Move anyway? (You must then set a NEW reference pose.)") != QMessageBox.Yes:
+                return
+        try:
+            self.lens.move_abs(target)
+            self._update_lens_display()
+            self.status_changed.emit(f"Lens parked at {target:.1f} µm — focus the laser on the dot, "
+                                     "then Set Reference Pose, and leave the lens there.")
+        except Exception as e:
+            self.status_changed.emit(f"Lens move failed: {e}")
+
+    def _update_lens_display(self):
+        if self.lens is None:
+            return
+        try:
+            pos = float(self.lens.get_position())
+            txt = f"Lens: {pos:.1f} µm → focus z = {pos * UM_TO_MM:.3f} mm"
+            if self.reference_um is not None:
+                moved = abs(pos - self.reference_lens_um) > LENS_MOVED_TOL_UM
+                txt += "  ⚠ MOVED since reference!" if moved else "  ✓"
+                self.lens_pos_label.setStyleSheet(
+                    "color: #cc0000; font-weight: bold;" if moved else "color: #007700;")
+            else:
+                self.lens_pos_label.setStyleSheet("")
+            self.lens_pos_label.setText(txt)
+        except Exception as e:
+            self.status_changed.emit(f"Lens read failed: {e}")
 
     # ---------------- capture ----------------
     def _read_xyz_inputs(self):
@@ -556,36 +850,55 @@ class PointCaptureGUI(QWidget):
         elif self._last_X_left is not None:
             left_xyz = [float(v) for v in self._last_X_left]
             tri_rms = self._last_tri_rms
-            self.status_changed.emit("Only a single-frame detection was available (hold the target still ~2s for averaging).")
+            self.status_changed.emit("Only a single-frame detection was available (hold still ~2s for averaging).")
         else:
             self.status_changed.emit("No dot detected in both cameras — nothing captured.")
             return
 
-        # 2) Zaber coordinates: auto-read or manual fields
+        # 2) rig coordinates: auto from stage or manual fields
         zaber_xyz = None
-        if self.zaber is not None and self.zaber_auto.isChecked():
+        stage_um = None
+        if self.stage is not None and self.auto_fill_checkbox.isChecked():
+            if self.reference_um is None:
+                self.status_changed.emit("Set the Reference Pose first (laser on dot, lens at 0).")
+                return
             try:
-                zaber_xyz = self._read_zaber_scaled()
+                stage_um = list(self.stage.get_position())
+                zaber_xyz = rig_coords_from_stage(stage_um, self.reference_um, self.reference_lens_um)
                 self.x_input.setText(f"{zaber_xyz[0]:.4f}")
                 self.y_input.setText(f"{zaber_xyz[1]:.4f}")
                 self.z_input.setText(f"{zaber_xyz[2]:.4f}")
+                self._update_stage_display()
             except Exception as e:
-                self.status_changed.emit(f"Zaber auto-read failed: {e}")
+                self.status_changed.emit(f"Stage read failed: {e}")
         if zaber_xyz is None:
             zaber_xyz = self._read_xyz_inputs()
         if zaber_xyz is None:
-            self.status_changed.emit("Zaber coordinates missing — connect the stage or fill X/Y/Z.")
+            self.status_changed.emit("Rig coordinates missing — connect the stage or fill X/Y/Z (mm).")
+
+        # lens sanity: it must not have moved since the reference pose was set
+        if self.lens is not None and self.reference_um is not None:
+            try:
+                lp = float(self.lens.get_position())
+                if abs(lp - self.reference_lens_um) > LENS_MOVED_TOL_UM:
+                    self.status_changed.emit(
+                        f"WARNING: lens moved ({lp:.1f} µm vs {self.reference_lens_um:.1f} µm at reference) "
+                        "— z convention broken! Move it back or set a new reference.")
+                self._update_lens_display()
+            except Exception:
+                pass
 
         new_row = {
             "label": self.label_input.text().strip(),
             "left": left_xyz,
             "zaber": zaber_xyz,
+            "stage_um": stage_um,
             "tri_rms": tri_rms,
             "use": True,
+            "base": None,
         }
 
-        # 3) motion consistency vs the previous complete capture:
-        #    the stage and the cameras must have seen the same displacement.
+        # 3) motion consistency vs the previous complete capture
         prev = next((r for r in reversed(self.rows) if self._row_valid(r) and r["use"]), None)
         if prev is not None and self._row_valid(new_row):
             R = self.fit_result["T"].R if self.fit_result is not None else None
@@ -594,11 +907,79 @@ class PointCaptureGUI(QWidget):
             self.motion_label.setText(f"Motion check: {msg}")
             self.motion_label.setStyleSheet("color: #007700;" if ok else "color: #cc6600; font-weight: bold;")
 
+        # 4) save images (calibrate_transformation.py-compatible layout)
+        if self.save_images_checkbox.isChecked() and self.save_dir is not None \
+                and self._last_left is not None and self._last_right is not None:
+            try:
+                new_row["base"] = self._save_capture_images(self._last_left, self._last_right, zaber_xyz)
+            except Exception as e:
+                self.status_changed.emit(f"Image save failed: {e}")
+
         self.rows.append(new_row)
         self._refresh_table()
         self._refit()
         self._autosave_session()
-        self.status_changed.emit(f"Captured point #{len(self.rows) - 1:03d}")
+        self.status_changed.emit(f"Captured point #{len(self.rows) - 1:03d}"
+                                 + (f" ({new_row['base']})" if new_row["base"] else ""))
+
+    # ---------------- image saving ----------------
+    def on_choose_folder(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Image Output Folder")
+        if not path:
+            return
+        self.save_dir = Path(path)
+        (self.save_dir / "left").mkdir(parents=True, exist_ok=True)
+        (self.save_dir / "right").mkdir(exist_ok=True)
+        (self.save_dir / "coordinates").mkdir(exist_ok=True)
+        self.folder_label.setText(str(self.save_dir))
+        self.status_changed.emit(f"Images will be saved to {self.save_dir}")
+
+    def _save_capture_images(self, left, right, zaber_xyz) -> str:
+        existing = list((self.save_dir / "left").glob("point_*_left.png"))
+        idx = len(existing)
+        base = f"point_{idx:04d}"
+        cv2.imwrite(str(self.save_dir / "left" / f"{base}_left.png"), left)
+        cv2.imwrite(str(self.save_dir / "right" / f"{base}_right.png"), right)
+        if zaber_xyz is not None:
+            (self.save_dir / "coordinates" / f"{base}.txt").write_text(
+                f"{zaber_xyz[0]:.6f} {zaber_xyz[1]:.6f} {zaber_xyz[2]:.6f}\n", encoding="utf-8")
+        return base
+
+    # ---------------- transform overlay ----------------
+    def on_load_transform(self):
+        start = str(ACTIVE_TRANSFORM_PATH) if ACTIVE_TRANSFORM_PATH.exists() else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Load Transform JSON", start, "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            R = np.asarray(d["R"], float).reshape(3, 3)
+            t = np.asarray(d["t"], float).reshape(3)
+            self.loaded_T = SE3(R, t)
+            self.loaded_T_name = Path(path).stem
+            self.transform_src_label.setText(f"loaded: {self.loaded_T_name}")
+            self.status_changed.emit(f"Transform '{self.loaded_T_name}' loaded — ZABER overlay active.")
+        except Exception as e:
+            QMessageBox.critical(self, "Load failed", str(e))
+
+    # ---------------- 3D view ----------------
+    def on_show_3d(self):
+        if self.viewer3d is None:
+            self.viewer3d = Fit3DDialog(self)
+        self._update_3d()
+        self.viewer3d.show()
+        self.viewer3d.raise_()
+
+    def _update_3d(self):
+        if self.viewer3d is None or not self.viewer3d.isVisible():
+            if self.viewer3d is None:
+                return
+        A, B = self._used_AB()
+        if self.fit_result is not None and A is not None:
+            self.viewer3d.update_data(A, B, self.fit_result["T"], self.fit_result["rms"])
+        else:
+            self.viewer3d.update_data(A, B, None, None)
 
     # ---------------- table ----------------
     def _refresh_table(self):
@@ -625,7 +1006,7 @@ class PointCaptureGUI(QWidget):
                         it.setForeground(QColor("#cc0000"))
                     return it
 
-                self.table.setItem(i, 1, cell(r["label"] or ""))
+                self.table.setItem(i, 1, cell(r["label"] or (r.get("base") or "")))
                 for k in range(3):
                     self.table.setItem(i, 2 + k, cell(f"{r['left'][k]:.3f}" if r["left"] else "–"))
                 for k in range(3):
@@ -689,32 +1070,42 @@ class PointCaptureGUI(QWidget):
             self.fit_label.setText(f"Fit: need ≥3 complete included points "
                                    f"(have {sum(1 for r in self.rows if r['use'] and self._row_valid(r))}).")
             self.hints_label.setText("")
+            self._update_3d()
             return
         try:
             self.fit_result = fit_pairs(A, B)
         except Exception as e:
             self.fit_label.setText(f"Fit failed: {e}")
             self.hints_label.setText("")
+            self._update_3d()
             return
 
         rms = self.fit_result["rms"]
         scale = self.fit_result["scale"]
-        txt = f"Fit: N={len(A)}  RMS={rms:.4f} (zaber units)  |  scale check: {scale:.4f}"
+        txt = f"Fit: N={len(A)}  RMS={rms:.4f} mm  |  scale check: {scale:.4f}"
         style = "font-weight: bold;"
         if np.isfinite(scale) and abs(scale - 1.0) > SCALE_WARN:
-            txt += "  ⚠ scale far from 1 — LEFT (mm) and Zaber values use different units?"
+            txt += "  ⚠ scale far from 1 — LEFT (mm) and rig values use different units?"
             style += " color: #cc6600;"
         self.fit_label.setStyleSheet(style)
         self.fit_label.setText(txt)
 
         hints = geometry_hints(B)
         self.hints_label.setText("Hints: " + " | ".join(hints))
+        self._update_3d()
 
     # ---------------- session persistence ----------------
     def _autosave_session(self):
         try:
+            payload = {
+                "rows": self.rows,
+                "reference_um": self.reference_um,
+                "reference_lens_um": self.reference_lens_um,
+                "save_dir": str(self.save_dir) if self.save_dir else None,
+                "saved_at": datetime.datetime.now().isoformat(),
+            }
             with open(SESSION_PATH, "w", encoding="utf-8") as f:
-                json.dump({"rows": self.rows, "saved_at": datetime.datetime.now().isoformat()}, f, indent=2)
+                json.dump(payload, f, indent=2)
         except Exception as e:
             print(f"[PointCapture] session autosave failed: {e}")
 
@@ -729,6 +1120,16 @@ class PointCaptureGUI(QWidget):
             with open(path, "r", encoding="utf-8") as f:
                 d = json.load(f)
             self.rows = d["rows"]
+            self.reference_um = d.get("reference_um")
+            self.reference_lens_um = float(d.get("reference_lens_um", 0.0))
+            if self.reference_um is not None:
+                r = self.reference_um
+                self.ref_label.setText(f"Reference: ({r[0]:.1f}, {r[1]:.1f}, {r[2]:.1f}) µm | "
+                                       f"lens {self.reference_lens_um:.1f} µm")
+            sd = d.get("save_dir")
+            if sd:
+                self.save_dir = Path(sd)
+                self.folder_label.setText(sd)
             self._refit()
             self._refresh_table()
             self.status_changed.emit(f"Loaded {len(self.rows)} points from {path.name}")
@@ -744,7 +1145,7 @@ class PointCaptureGUI(QWidget):
         T: SE3 = self.fit_result["T"]
         return {
             "name": "left_to_zaber",
-            "description": "Transformation from left camera frame to zaber coordinate system",
+            "description": "Transformation from left camera frame to zaber rig coordinate system",
             "R": T.R.tolist(),
             "t": T.t.tolist(),
             "source": {
@@ -752,11 +1153,19 @@ class PointCaptureGUI(QWidget):
                 "num_points": int(len(A)),
                 "rms_error": self.fit_result["rms"],
                 "scale_check": self.fit_result["scale"],
-                "unit_factor_um": float(self.unit_factor.value()),
+            },
+            "convention": {
+                "frame": "moving rig frame, axes parallel to stage axes",
+                "xy_zero": "laser beam axis",
+                "z_zero": "laser focus with eye lens at 0 um (dot z at reference = lens reading in mm)",
+                "rig_coords": "x,y = -(stage - reference); z = lens_ref_mm - delta_stage_z  [mm]",
+                "reference_pose_um": self.reference_um,
+                "reference_lens_um": self.reference_lens_um,
             },
             "data": {
                 "all_pairs": [{"left": r["left"], "input": r["zaber"], "use": r["use"],
-                               "label": r["label"], "tri_rms": r["tri_rms"]} for r in self.rows],
+                               "label": r["label"], "tri_rms": r["tri_rms"],
+                               "stage_um": r.get("stage_um"), "base": r.get("base")} for r in self.rows],
                 "valid_pairs": {"left": A.tolist(), "input": B.tolist()},
             },
             "created_at": datetime.datetime.utcnow().isoformat() + "Z",
@@ -781,7 +1190,7 @@ class PointCaptureGUI(QWidget):
         if obj is None:
             return
         msg = (f"Overwrite the ACTIVE transform?\n\n{ACTIVE_TRANSFORM_PATH}\n\n"
-               f"N={obj['source']['num_points']}, RMS={obj['source']['rms_error']:.4f}\n"
+               f"N={obj['source']['num_points']}, RMS={obj['source']['rms_error']:.4f} mm\n"
                f"The current file will be backed up first.")
         if QMessageBox.question(self, "Install transform", msg) != QMessageBox.Yes:
             return
@@ -805,11 +1214,12 @@ class PointCaptureGUI(QWidget):
         try:
             self.on_stop()
         finally:
-            if self.zaber is not None:
-                try:
-                    self.zaber.close()
-                except Exception:
-                    pass
+            for dev in (self.stage, self.lens):
+                if dev is not None:
+                    try:
+                        dev.close()
+                    except Exception:
+                        pass
             if self.proxy is not None:
                 try:
                     self.proxy.shutdown()
@@ -828,6 +1238,6 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     w = PointCaptureGUI(use_dummy=False)  # set True to run without hardware
-    w.resize(1180, 980)
+    w.resize(1220, 1050)
     w.show()
     sys.exit(app.exec_())

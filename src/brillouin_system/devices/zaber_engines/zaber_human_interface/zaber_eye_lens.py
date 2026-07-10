@@ -12,7 +12,12 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_position
 
 
 class ZaberEyeLens:
-    def __init__(self, port="COM5", axis_index=1):
+    def __init__(self, port="COM5", axis_index=1, home_on_connect=True):
+        """
+        home_on_connect=True (default) homes the axis and moves to the init
+        position — the normal HI startup. Pass False to attach to the lens
+        WITHOUT moving it (e.g. during calibration).
+        """
         Library.enable_device_db_store()
         self.connection = Connection.open_serial_port(port)
         devices = self.connection.detect_devices()
@@ -32,8 +37,9 @@ class ZaberEyeLens:
         self._log_t = []
         self._log_z = []
 
-        self.home()
-        self.move_init()
+        if home_on_connect:
+            self.home()
+            self.move_init()
 
 
     def home(self):

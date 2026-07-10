@@ -16,7 +16,7 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens
 
 
 class ZaberEyeLensDummy:
-    def __init__(self, port="COM5", axis_index=1):
+    def __init__(self, port="COM5", axis_index=1, home_on_connect=True):
         self.port = port
         self.axis_index = axis_index
         self._position = 100.0
@@ -36,7 +36,8 @@ class ZaberEyeLensDummy:
         self._log_z = []
 
         print(f"[ZaberEyeLensDummy] Initialized on port {port}, axis {axis_index}")
-        self.home()
+        if home_on_connect:
+            self.home()
 
     def home(self):
         self._position = 100.0

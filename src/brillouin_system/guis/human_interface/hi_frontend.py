@@ -1275,7 +1275,7 @@ class HiFrontend(QWidget):
         self._zaber_lens_um = pos
         self.lens_pos_display.setText(f"Lens {pos:.2f} µm")
         dx, dy, dz = self._laser_offset.dx, self._laser_offset.dy, self._laser_offset.dz
-        self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dy/1000)
+        self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dz/1000)
 
     # ---------------- GUI Update Loop ---------------- #
 
