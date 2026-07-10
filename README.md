@@ -161,9 +161,10 @@ Run `calibrate_stereo_cameras.py` (Tkinter GUI):
    - **Cols / Rows** = number of *inner corners* (squares − 1 per side), not the number of squares.
    - **Square (mm)** = physical square edge length. This sets the metric scale of everything downstream (baseline, triangulation, transform) — get it right.
    - **Model**: `pinhole` (default; `fisheye` also supported).
-3. **Scan & Validate Frames** — detects corners in every pair; the viewer lets you step through pairs and see which failed.
-4. **Run Left Mono**, then **Run Right Mono** — computes intrinsics (K, dist) per camera and writes `<prefix>_left.json` / `<prefix>_right.json` into the image folder.
-5. **Run Stereo (Extrinsics Only)** — solves R, T between the cameras with intrinsics held fixed (`cv2.stereoCalibrate` + `CALIB_FIX_INTRINSIC`) and writes `<prefix>_stereo.json`. Convention: RIGHT camera w.r.t. LEFT; LEFT is the reference/world frame.
+3. **Scan & Validate Frames** — detects corners in every pair once (same detector as the capture GUI's live overlay) and fills the pair table: detection status, board area %, tilt. Coverage hints are printed to the log (missing image regions, too few tilted views, missing close-ups).
+4. **Include/exclude pairs** — every pair has a Use checkbox in the table (click it, or select a row and press Space). Excluded pairs are skipped by all calibration steps, so you can drop bad frames and re-run without recapturing.
+5. **Run Left Mono**, then **Run Right Mono** — computes intrinsics (K, dist) per camera from the included frames and writes `<prefix>_left.json` / `<prefix>_right.json` into the image folder. Per-view reprojection errors appear in the table; frames above 1 px are marked red — exclude them and re-run.
+6. **Run Stereo (Extrinsics Only)** — solves R, T between the cameras with intrinsics held fixed (`cv2.stereoCalibrate` + `CALIB_FIX_INTRINSIC`) and writes `<prefix>_stereo.json`. Convention: RIGHT camera w.r.t. LEFT; LEFT is the reference/world frame. The log reports the stereo RMS (aim for well under 1 px) and the baseline — sanity-check it against the real camera separation.
 
 ### Step 1c — Install the result
 

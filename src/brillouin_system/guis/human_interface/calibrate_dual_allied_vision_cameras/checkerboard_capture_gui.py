@@ -20,6 +20,9 @@ from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
 # ⬇️ import your config dialog
 from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.devices.cameras.allied.own_subprocess.dual_camera_proxy import DualCameraProxy
+# Same detector the calibration GUI uses — the live overlay must show exactly
+# what the calibration step will later accept or reject.
+from brillouin_system.eye_tracker.stereo_imaging.calibrate_single import detect_corners
 
 def numpy_to_qpixmap_rgb(arr_rgb: np.ndarray) -> QPixmap:
     # arr_rgb: HxWx3, dtype=uint8, RGB
@@ -204,14 +207,13 @@ class DualCamImageCapture(QWidget):
         gray: HxW uint8
         pattern_size: (cols, rows) = number of inner corners per chessboard row and column.
         """
-        flags = cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
-        ret, corners = cv2.findChessboardCornersSB(gray, pattern_size, flags=flags)
-        if not ret:
+        corners = detect_corners(gray, pattern_size)
+        if corners is None:
             return None
 
         # draw on color copy
         vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-        cv2.drawChessboardCorners(vis, pattern_size, corners, ret)
+        cv2.drawChessboardCorners(vis, pattern_size, corners, True)
 
         # optional: annotate with corner count
         cv2.putText(vis, f"{pattern_size[0] * pattern_size[1]} corners",

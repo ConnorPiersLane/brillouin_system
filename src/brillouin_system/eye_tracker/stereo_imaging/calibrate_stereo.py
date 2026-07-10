@@ -50,6 +50,7 @@ class StereoResult:
     T: np.ndarray   # translation RIGHT wrt LEFT
     E: np.ndarray   # essential
     F: np.ndarray   # fundamental
+    rms: float = float("nan")  # stereo reprojection RMS [px]
 
 
 @dataclass
@@ -115,6 +116,7 @@ def stereo_calibrate_from_pairs(
     config: StereoCalibConfig,
     left_intr: CameraResult,
     right_intr: CameraResult,
+    corners: Optional[List[Tuple[Optional[np.ndarray], Optional[np.ndarray]]]] = None,
 ) -> StereoResult:
     """
     Estimate stereo extrinsics ONLY (R,T,E,F) with FIXED intrinsics from mono calibration.
@@ -124,9 +126,11 @@ def stereo_calibrate_from_pairs(
         config: chessboard geometry & metadata.
         left_intr/right_intr: CameraResult produced by your mono calibration (K, dist ...).
                               Only K and dist are used here; their R,t are ignored.
+        corners: optional precomputed detections aligned with valid_pairs.pairs,
+                 as (cL, cR) tuples (entries may be None). Skips re-detection.
 
     Returns:
-        StereoResult (R,T,E,F) with RIGHT w.r.t. LEFT convention.
+        StereoResult (R,T,E,F,rms) with RIGHT w.r.t. LEFT convention.
     """
     if not valid_pairs.pairs:
         raise RuntimeError("No valid pairs")
@@ -141,16 +145,19 @@ def stereo_calibrate_from_pairs(
     imgR: List[np.ndarray] = []
     image_size: Optional[Tuple[int, int]] = None
 
-    for L, R in valid_pairs.pairs:
-        cL = detect_corners(L, pattern)
-        cR = detect_corners(R, pattern)
+    for i, (L, R) in enumerate(valid_pairs.pairs):
+        if corners is not None:
+            cL, cR = corners[i]
+        else:
+            cL = detect_corners(L, pattern)
+            cR = detect_corners(R, pattern)
         if cL is None or cR is None:
             continue
         h, w = L.shape[:2]
         image_size = (w, h)
         objpoints.append(objp)
-        imgL.append(cL.astype(np.float32))
-        imgR.append(cR.astype(np.float32))
+        imgL.append(np.asarray(cL, dtype=np.float32))
+        imgR.append(np.asarray(cR, dtype=np.float32))
 
     if not objpoints or image_size is None:
         raise RuntimeError("No valid detections in pairs")
@@ -178,6 +185,7 @@ def stereo_calibrate_from_pairs(
         T=np.asarray(T, float),
         E=np.asarray(E, float),
         F=np.asarray(F, float),
+        rms=float(rms),
     )
 
 
@@ -204,6 +212,7 @@ def save_stereo_json(out_path: str, stereo: StereoResult, config: StereoCalibCon
             "T": _arr(stereo.T),
             "E": _arr(stereo.E),
             "F": _arr(stereo.F),
+            "rms": float(stereo.rms),
         },
     }
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
