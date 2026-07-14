@@ -2,10 +2,7 @@ import numpy as np
 import pytest
 from scipy.optimize import curve_fit
 
-from brillouin_system.spectrum_fitting.na_correction5 import (
-    gaussian_angle_width,
-    pupil_angle_limit,
-)
+from brillouin_system.spectrum_fitting.na_correction5 import pupil_angle_limit
 from brillouin_system.spectrum_fitting.na_lineshape import (
     make_na_lorentzian,
     na_angular_grid,
@@ -13,7 +10,7 @@ from brillouin_system.spectrum_fitting.na_lineshape import (
 
 
 # 20X objective geometry (na_correction5 __main__), clear aqueous sample.
-V0 = gaussian_angle_width(7.5, 10.0, 1.328)
+# Uniform-pupil (paper) model: only alpha, no Gaussian coupling.
 ALPHA = pupil_angle_limit(8.4, 10.0, 1.328)
 R = 0.0            # elastic-line pixel
 CENTER_180 = 21.0  # true 180-degree peak pixel (~5 GHz at 0.24 GHz/px)
@@ -28,7 +25,7 @@ def _plain_lorentzian(x, a, c, g, o):
 
 
 def make_data(seed=0):
-    model = make_na_lorentzian(R, V0, ALPHA, n_quad=61)
+    model = make_na_lorentzian(R, ALPHA, n_quad=61)
     px = np.arange(10, 33, dtype=float)
     true = model(px, AMP, CENTER_180, GAMMA, OFFSET)
     rng = np.random.default_rng(seed)
@@ -53,7 +50,7 @@ def test_plain_lorentzian_is_biased_low():
     p2, _ = curve_fit(_plain_lorentzian, px, data, p0=[AMP, 20.5, 1.2, OFFSET], maxfev=20000)
     lor_center = p2[1]
 
-    v, w, frac = na_angular_grid(V0, ALPHA, 61)
+    v, w, frac = na_angular_grid(ALPHA, 61)
     predicted_downshift_px = (
         np.trapezoid(w * frac, v) / np.trapezoid(w, v)
     ) * (CENTER_180 - R)
@@ -63,21 +60,19 @@ def test_plain_lorentzian_is_biased_low():
     assert abs((CENTER_180 - lor_center) - predicted_downshift_px) * DISP < 0.01
 
 
-def test_na_kernel_downshift_matches_na_correction5():
-    """The model's mean sub-peak downshift must equal na_correction5's
-    ⟨cos(v/2)⟩ post-hoc factor (same angular weight)."""
-    from brillouin_system.spectrum_fitting.na_correction5 import (
-        mean_shift_ratio_collection_only_gaussian,
-    )
-    v, w, frac = na_angular_grid(V0, ALPHA, 5000)
-    kernel_ratio = np.trapezoid(w * (1.0 - frac), v) / np.trapezoid(w, v)
-    posthoc_ratio = mean_shift_ratio_collection_only_gaussian(7.5, 8.4, 10.0, 1.328)
-    assert kernel_ratio == pytest.approx(posthoc_ratio, rel=1e-4)
+def test_default_weight_is_uniform_no_gaussian():
+    """Default angular weight is the paper's uniform pupil (solid angle sin(v))
+    with no Gaussian coupling factor."""
+    v, w, _ = na_angular_grid(ALPHA, 41)
+    np.testing.assert_allclose(w, np.sin(v))
+    # Passing v0 opts INTO the Gaussian apodization (not the default)
+    _, w_gauss, _ = na_angular_grid(ALPHA, 41, v0=np.radians(15.0))
+    assert np.any(w_gauss < w)  # apodization suppresses large angles
 
 
 def test_zero_na_recovers_plain_lorentzian():
     """In the alpha -> 0 limit the kernel collapses to a single Lorentzian."""
-    model = make_na_lorentzian(R, V0, alpha=1e-6, n_quad=11)
+    model = make_na_lorentzian(R, alpha=1e-6, n_quad=11)
     px = np.arange(10, 33, dtype=float)
     na = model(px, AMP, CENTER_180, GAMMA, OFFSET)
     plain = _plain_lorentzian(px, AMP, CENTER_180, GAMMA, OFFSET)
