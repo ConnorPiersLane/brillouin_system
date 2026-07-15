@@ -479,11 +479,11 @@ class HiSignaller(QObject):
 
     @pyqtSlot()
     def calibrate_laser_camera_position_delegate(self):
-        log.info(f"I disabled this function in normal use (for safety).\n"
-                 f"Go to hi_signaller.py -> def calibrate_laser_camera_position_delegate() and activate it "
-                 f"when required")
-        #laser_offset: LaserOffset = self.backend.run_laser_xy_calibration()
-        #self.laser_coord_calibration_ready.emit(laser_offset)
+        # log.info(f"I disabled this function in normal use (for safety).\n"
+        #          f"Go to hi_signaller.py -> def calibrate_laser_camera_position_delegate() and activate it "
+        #          f"when required")
+        laser_offset: LaserOffset = self.backend.run_laser_xy_calibration()
+        self.laser_coord_calibration_ready.emit(laser_offset)
 
 
     @pyqtSlot(int)
