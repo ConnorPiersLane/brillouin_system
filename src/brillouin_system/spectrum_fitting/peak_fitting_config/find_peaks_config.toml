@@ -23,8 +23,12 @@ min_peak_width = 1
 min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
-fitting_model = "asym_lorentzian_window"
-beta = 4
+fitting_model = "na_gauss_lorentzian_window"
+beta = 3.0
+na_collection = 0.14
+na_beam_diameter_mm = 7.5
+na_focal_length_mm = 40.0
+na_n_sample = 1.33
 
 [reference]
 prominence_fraction = 0.05
@@ -33,4 +37,8 @@ min_peak_height = 800
 rel_height = 0.5
 wlen_pixels = 40
 fitting_model = "lorentzian_window"
-beta = 4
+beta = 3.0
+na_collection = 0.0
+na_beam_diameter_mm = 0.0
+na_focal_length_mm = 0.0
+na_n_sample = 1.33

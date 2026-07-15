@@ -2,6 +2,8 @@
 # eye_tracker_proxy.py
 import multiprocessing as mp
 import queue
+import time
+import uuid
 from typing import Tuple, Optional, Dict
 
 import numpy as np
@@ -32,8 +34,10 @@ class EyeTrackerProxy:
 
         self.use_dummy = use_dummy
 
-        # base name used by the worker to construct shared memory names
-        self._base_name = f"eye_{mp.current_process().name}"
+        # base name used by the worker to construct shared memory names.
+        # Unique suffix per proxy instance so a restart never collides with
+        # shared-memory blocks the previous worker hasn't released yet.
+        self._base_name = f"eye_{mp.current_process().name}_{uuid.uuid4().hex[:8]}"
 
     def _make_process(self) -> mp.Process:
         # NOTE: adjust this import path to wherever your worker actually lives.
@@ -102,26 +106,32 @@ class EyeTrackerProxy:
         self.right_ring = ShmRing(ShmFrameSpec(**evt["right_spec"]), create=False)
 
 
-    def _wait_for(self, typ: str) -> dict:
+    def _wait_for(self, typ: str, timeout: float = 30.0) -> dict:
         """
         Block until an event of the given type is seen or an error is reported.
+        Never blocks forever: gives up if the worker dies or `timeout` passes.
         """
-        while True:
-            msg = self.evt_q.get()
-            if msg.get("type") == typ:
-                return msg
-            if msg.get("type") == "error":
-                raise RuntimeError(
-                    f"Eye tracker worker error: {msg['msg']}\n{msg.get('tb', '')}"
-                )
+        return self._wait_for_any({typ}, timeout=timeout)
 
-    def _wait_for_any(self, types) -> dict:
+    def _wait_for_any(self, types, timeout: float = 30.0) -> dict:
         """
-        Block until an event whose type is in `types` is seen, or an error is reported.
+        Block until an event whose type is in `types` is seen, or an error is
+        reported. Never blocks forever: gives up if the worker process dies or
+        `timeout` seconds pass without an answer.
         """
         types = set(types)
+        deadline = time.monotonic() + timeout
         while True:
-            msg = self.evt_q.get()
+            try:
+                msg = self.evt_q.get(timeout=0.5)
+            except queue.Empty:
+                if self.proc is not None and not self.proc.is_alive():
+                    raise RuntimeError(
+                        f"Eye tracker worker process died while waiting for {types}")
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        f"Timed out after {timeout:.0f}s waiting for {types} from eye tracker worker")
+                continue
             t = msg.get("type")
             if t in types:
                 return msg

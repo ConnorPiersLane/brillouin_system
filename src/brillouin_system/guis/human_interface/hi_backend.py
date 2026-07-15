@@ -38,7 +38,8 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors
 
 
 log = get_logger(__name__)
@@ -457,10 +458,26 @@ class HiBackend:
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
         try:
-            return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode)
+            anchors = self._elastic_anchors_if_required()
+            return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode,
+                                            anchors=anchors)
         except Exception as e:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
+
+    def _elastic_anchors_if_required(self) -> ElasticAnchors | None:
+        """Anchors for fitting models that need them (na_lorentzian*); None otherwise.
+        Raises if such a model is selected without a calibration (no fallback)."""
+        if self.is_reference_mode:
+            return None
+        if not model_requires_anchors(self.spectrum_fitter.sample_config.fitting_model):
+            return None
+        if self.calibration_calculator is None:
+            raise ValueError(
+                f"Sample model '{self.spectrum_fitter.sample_config.fitting_model}' requires "
+                f"elastic anchors, but no calibration is loaded."
+            )
+        return self.calibration_calculator.elastic_anchors()
 
     def update_calibration_calculator(self):
         if self.calibration_data is None:

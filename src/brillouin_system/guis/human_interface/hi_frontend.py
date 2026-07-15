@@ -1968,7 +1968,8 @@ class HiFrontend(QWidget):
         self.request_eye_shutdown.emit()
         time.sleep(5)
         self.eye_thread.quit()
-        self.eye_thread.wait()
+        if not self.eye_thread.wait(10000):
+            log.error("Eye tracker thread did not stop within 10 s — continuing anyway.")
 
     def on_restart_eye_clicked(self):
         # Close old eye tracker

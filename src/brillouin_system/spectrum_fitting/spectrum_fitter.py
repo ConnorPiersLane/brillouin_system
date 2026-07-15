@@ -22,6 +22,24 @@ from brillouin_system.spectrum_fitting.voigt_model import (
     _2voigt_binned,
 )
 
+from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
+from brillouin_system.spectrum_fitting.na_correction5 import gaussian_angle_width
+from brillouin_system.spectrum_fitting.na_lineshape import make_2na_lorentzian_binned
+
+# Models that fit the NA-integrated lineshape: each Brillouin peak is anchored
+# at its own Rayleigh-order elastic line, so they need ElasticAnchors from the
+# calibration (see model_requires_anchors below).
+# na_gauss_* additionally weight the collection cone by the Gaussian fiber-
+# coupling apodization (na_beam_diameter_mm / na_focal_length_mm config)
+# instead of a uniform pupil.
+NA_GAUSS_MODELS = ("na_gauss_lorentzian", "na_gauss_lorentzian_window")
+NA_MODELS = ("na_lorentzian", "na_lorentzian_window") + NA_GAUSS_MODELS
+
+
+def model_requires_anchors(model: str) -> bool:
+    """True if the fitting model needs ElasticAnchors from a calibration."""
+    return model in NA_MODELS
+
 
 # -----------------------------
 # Symmetric Lorentzian models
@@ -177,7 +195,13 @@ class SpectrumFitter:
             return 0.0
         return float(np.sum(sline))
 
-    def fit(self, px: np.ndarray, sline: np.ndarray, is_reference_mode: bool) -> FittedSpectrum:
+    def fit(
+        self,
+        px: np.ndarray,
+        sline: np.ndarray,
+        is_reference_mode: bool,
+        anchors: ElasticAnchors | None = None,
+    ) -> FittedSpectrum:
         config = self.reference_config if is_reference_mode else self.sample_config
         requested_model = config.fitting_model
 
@@ -188,13 +212,49 @@ class SpectrumFitter:
             "asym_lorentzian_window",
             "voigt",
             "voigt_window",
+            "na_lorentzian",
+            "na_lorentzian_window",
+            "na_gauss_lorentzian",
+            "na_gauss_lorentzian_window",
         ):
             raise ValueError(
                 f"Unknown model: '{requested_model}'. "
                 f"Supported models are 'lorentzian', 'lorentzian_window', "
                 f"'asym_lorentzian', 'asym_lorentzian_window', "
-                f"'voigt', and 'voigt_window'."
+                f"'voigt', 'voigt_window', "
+                f"'na_lorentzian', 'na_lorentzian_window', "
+                f"'na_gauss_lorentzian', and 'na_gauss_lorentzian_window'."
             )
+
+        alpha = None
+        na_v0 = None
+        if requested_model in NA_MODELS:
+            if anchors is None:
+                raise ValueError(
+                    f"Model '{requested_model}' requires elastic anchors from a "
+                    f"calibration (CalibrationCalculator.elastic_anchors()); none were "
+                    f"provided — is a calibration loaded?"
+                )
+            na = float(config.na_collection)
+            n_sample = float(config.na_n_sample)
+            if not 0.0 < na < n_sample:
+                raise ValueError(
+                    f"Model '{requested_model}' requires the collection NA (aperture "
+                    f"clip): set na_collection (0 < NA < n_sample) in the find-peaks "
+                    f"sample config (got na_collection={na}, na_n_sample={n_sample})."
+                )
+            alpha = float(np.arcsin(na / n_sample))
+            if requested_model in NA_GAUSS_MODELS:
+                beam_d = float(config.na_beam_diameter_mm)
+                focal = float(config.na_focal_length_mm)
+                if beam_d <= 0.0 or focal <= 0.0:
+                    raise ValueError(
+                        f"Model '{requested_model}' requires the Gaussian coupling "
+                        f"geometry: set na_beam_diameter_mm (collection-fiber mode at "
+                        f"the pupil) and na_focal_length_mm (objective) in the "
+                        f"find-peaks sample config (got beam={beam_d}, focal={focal})."
+                    )
+                na_v0 = float(gaussian_angle_width(beam_d, focal, n_sample))
 
         px = np.asarray(px, dtype=np.float64)
         sline = np.asarray(sline, dtype=np.float64)
@@ -221,6 +281,16 @@ class SpectrumFitter:
 
         n_peaks = len(cen)
         if n_peaks < 1:
+            return FittedSpectrum(
+                is_success=False,
+                sline=sline,
+                x_pixels=px,
+                model=requested_model,
+            )
+
+        if requested_model in NA_MODELS and n_peaks < 2:
+            # The NA model pairs each peak with its own Rayleigh order; with a
+            # single detected peak the pairing is ambiguous.
             return FittedSpectrum(
                 is_success=False,
                 sline=sline,
@@ -271,6 +341,25 @@ class SpectrumFitter:
                 )
                 model_func = _2lorentzian_binned
 
+            elif requested_model in NA_MODELS:
+                fit_kind = f"2{requested_model}"
+                # Peak roles are fixed by their anchors (peak 1 <-> left Rayleigh
+                # order, peak 2 <-> right), so the initial guesses must be in
+                # left-to-right order (select_top_two_peaks orders by height).
+                if cen[1] < cen[0]:
+                    amp, cen, wid = amp[::-1], cen[::-1], wid[::-1]
+                p0 = [amp[0], cen[0], wid[0], amp[1], cen[1], wid[1], offset]
+                bounds = (
+                    [0, x_min, 1e-12, 0, x_min, 1e-12, 0],
+                    [np.inf, x_max, x_span / 2, np.inf, x_max, x_span / 2, np.inf],
+                )
+                model_func = make_2na_lorentzian_binned(
+                    anchors.rayleigh_left_px,
+                    anchors.rayleigh_right_px,
+                    alpha,
+                    v0=na_v0,
+                )
+
             elif requested_model in ("asym_lorentzian", "asym_lorentzian_window"):
                 fit_kind = "2asym_lorentzian_window" if requested_model == "asym_lorentzian_window" else "2asym_lorentzian"
                 p0 = [
@@ -313,7 +402,7 @@ class SpectrumFitter:
                 )
                 model_func = _2voigt_binned
 
-        if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window"):
+        if requested_model in ("lorentzian_window", "asym_lorentzian_window", "voigt_window", "na_lorentzian_window", "na_gauss_lorentzian_window"):
             beta = self.reference_config.beta if is_reference_mode else self.sample_config.beta
 
             mask = self._build_window_mask(px, cen, wid, beta=beta)
@@ -345,7 +434,7 @@ class SpectrumFitter:
             else:
                 lo[1], hi[1] = center_ranges[0]
 
-                if requested_model == "lorentzian_window":
+                if requested_model in ("lorentzian_window", "na_lorentzian_window", "na_gauss_lorentzian_window"):
                     lo[4], hi[4] = center_ranges[1]
 
                     lo[2] = max(1e-6, 0.25 * float(wid[0]))
@@ -402,6 +491,19 @@ class SpectrumFitter:
             if n_peaks == 2:
                 if requested_model in ("lorentzian", "lorentzian_window"):
                     popt[:7] = sort_peaks(popt[:7])
+
+                elif requested_model in NA_MODELS:
+                    # Peak 1/2 are tied to the left/right Rayleigh anchors, so
+                    # they cannot be reordered; crossed centers mean the fit
+                    # wandered off its anchor pairing.
+                    if popt[4] < popt[1]:
+                        print("[SpectrumFitter] NA fit failed: peaks crossed their anchor ordering.")
+                        return FittedSpectrum(
+                            is_success=False,
+                            sline=sline,
+                            x_pixels=px,
+                            model=fit_kind,
+                        )
 
                 elif requested_model in ("asym_lorentzian", "asym_lorentzian_window"):
                     popt = _sort_2asym_lorentzian_params(popt)

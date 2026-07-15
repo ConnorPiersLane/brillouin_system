@@ -25,8 +25,7 @@ class EyeTrackerController(QObject):
             self._timer.start(15)  # ~60–70 Hz polling
             log.info("EyeTracker started.")
         except Exception as e:
-            log.warning(f"Failed to start EyeTracker: {e}")
-            raise e
+            log.error(f"Failed to start EyeTracker: {e} — use the ReStart button to try again.")
 
     @QtCore.pyqtSlot()
     def stop(self):
@@ -62,5 +61,7 @@ class EyeTrackerController(QObject):
             left, right, meta = result
             self.frames_ready.emit(left, right, meta)
         except Exception as e:
-            log.warning(f"EyeTracker polling error: {e}")
-            raise e
+            self._timer.stop()
+            self._running = False
+            log.error(f"EyeTracker camera crashed — live view stopped: {e} "
+                      f"Use the ReStart button to reconnect the cameras.")

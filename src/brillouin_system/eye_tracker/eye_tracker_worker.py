@@ -10,6 +10,22 @@ from brillouin_system.helpers.frame_ipc_shared import ShmRing, ShmFrameSpec
 SLOTS = 16
 DTYPE = "uint8"  # Must comply with eyetracker
 
+
+def _put_evt(evt_q, evt):
+    """Best-effort put that never blocks; drops the oldest event if the queue is full."""
+    try:
+        evt_q.put_nowait(evt)
+    except queue.Full:
+        try:
+            evt_q.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            evt_q.put_nowait(evt)
+        except queue.Full:
+            pass
+
+
 def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
     img_shape = (IMG_SIZE[0], IMG_SIZE[1], 3) # All images are made to rgb
@@ -22,7 +38,11 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
     try:
         while True:
             try:
-                cmd = req_q.get_nowait()
+                if running:
+                    cmd = req_q.get_nowait()
+                else:
+                    # Idle: block briefly instead of busy-spinning at 100% CPU.
+                    cmd = req_q.get(timeout=0.05)
             except queue.Empty:
                 cmd = None
 
@@ -97,44 +117,55 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
             # ---- streaming loop ----
             if running and eye_tracker and left_ring and right_ring:
-                results_for_gui: EyeTrackerResultsForGui = eye_tracker.get_results_for_gui()
-                left_frame = results_for_gui.cam_left_img
-                right_frame = results_for_gui.cam_right_img
+                try:
+                    results_for_gui: EyeTrackerResultsForGui = eye_tracker.get_results_for_gui()
+                    left_frame = results_for_gui.cam_left_img
+                    right_frame = results_for_gui.cam_right_img
 
-                p3d = results_for_gui.pupil3D
-                if p3d is not None:
-                    p3d_dict = {
-                        "center_left": p3d.center_left.tolist() if p3d.center_left is not None else None,
-                        "center_ref": p3d.center_ref.tolist() if p3d.center_ref is not None else None,
-                        "normal_left": p3d.normal_left.tolist() if p3d.normal_left is not None else None,
-                        "normal_ref": p3d.normal_ref.tolist() if p3d.normal_ref is not None else None,
-                        "radius": p3d.radius,
-                    }
-                else:
-                    p3d_dict = None
+                    p3d = results_for_gui.pupil3D
+                    if p3d is not None:
+                        p3d_dict = {
+                            "center_left": p3d.center_left.tolist() if p3d.center_left is not None else None,
+                            "center_ref": p3d.center_ref.tolist() if p3d.center_ref is not None else None,
+                            "normal_left": p3d.normal_left.tolist() if p3d.normal_left is not None else None,
+                            "normal_ref": p3d.normal_ref.tolist() if p3d.normal_ref is not None else None,
+                            "radius": p3d.radius,
+                        }
+                    else:
+                        p3d_dict = None
 
-                # Guard against mismatches (avoid assert in write_slot)
-                if (tuple(getattr(left_frame,  "shape", ()))  != tuple(left_ring.spec.shape) or
-                    tuple(getattr(right_frame, "shape", ())) != tuple(right_ring.spec.shape)
-                    ):
-                    # Optionally emit a diagnostic; skip this pair
+                    # Guard against mismatches (avoid assert in write_slot)
+                    if (tuple(getattr(left_frame,  "shape", ()))  != tuple(left_ring.spec.shape) or
+                        tuple(getattr(right_frame, "shape", ())) != tuple(right_ring.spec.shape)
+                        ):
+                        # Optionally emit a diagnostic; skip this pair
+                        _put_evt(evt_q, {
+                            "type": "warn",
+                            "msg": f"Frame/Spec mismatch: Left {getattr(left_frame,'shape',None)} vs {left_ring.spec.shape}, "
+                                   f"Right {getattr(right_frame,'shape',None)} vs {right_ring.spec.shape}, "
+                        })
+                        continue
+
+                    left_ring.write_slot(idx, left_frame)
+                    right_ring.write_slot(idx, right_frame)
+
                     evt_q.put({
-                        "type": "warn",
-                        "msg": f"Frame/Spec mismatch: Left {getattr(left_frame,'shape',None)} vs {left_ring.spec.shape}, "
-                               f"Right {getattr(right_frame,'shape',None)} vs {right_ring.spec.shape}, "
+                        "type": "frame",
+                        "idx": idx,
+                        "ts": time.time(),
+                        "pupil3D": p3d_dict,
                     })
-                    continue
+                    idx = (idx + 1) % SLOTS
 
-                left_ring.write_slot(idx, left_frame)
-                right_ring.write_slot(idx, right_frame)
-
-                evt_q.put({
-                    "type": "frame",
-                    "idx": idx,
-                    "ts": time.time(),
-                    "pupil3D": p3d_dict,
-                })
-                idx = (idx + 1) % SLOTS
+                except Exception as e:
+                    # Camera (or tracker) crashed mid-stream. Stop streaming and
+                    # report upstream, but KEEP this process alive so the GUI's
+                    # shutdown/ReStart handshake still works.
+                    running = False
+                    tb = traceback.format_exc()
+                    print("[eye_tracker_worker] CAMERA/TRACKER ERROR — streaming stopped:")
+                    print(tb, flush=True)
+                    _put_evt(evt_q, {"type": "error", "msg": str(e), "tb": tb})
 
     except Exception as e:
         evt_q.put({"type": "error", "msg": str(e), "tb": traceback.format_exc()})

@@ -12,7 +12,7 @@ from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import Ph
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_analyzer import AnalyzedFreqShifts, TheoreticalPeakStdError, \
     SpectrumAnalyzer
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors
 
 
 # -------------- Request for Scan --------------
@@ -65,12 +65,18 @@ class AnalyzedSpectrum:
 # -------------- Functions --------------
 def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()
-    spectrum_analyzer = SpectrumAnalyzer(
-        calibration_calculator=CalibrationCalculator(parameters=scan.calibration_params))
+    calibration_calculator = CalibrationCalculator(parameters=scan.calibration_params)
+    spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
     do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
 
     is_reference_mode = scan.system_state.is_reference_mode
+
+    # Models that anchor peaks at the Rayleigh orders (na_lorentzian*) need the
+    # anchors from this scan's calibration; raises if it cannot provide them.
+    anchors = None
+    if not is_reference_mode and model_requires_anchors(spectrum_fitter.sample_config.fitting_model):
+        anchors = calibration_calculator.elastic_anchors()
 
     list_analyzed_spectras: list[AnalyzedSpectrum] = []
 
@@ -86,7 +92,8 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
         px, sline = spectrum_fitter.get_px_sline_from_image(frame)
 
         # Fit spectrum
-        fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode)
+        fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode,
+                                      anchors=anchors)
 
         analyzed_shift = spectrum_analyzer.analyze_spectrum(fitting=fitting)
 

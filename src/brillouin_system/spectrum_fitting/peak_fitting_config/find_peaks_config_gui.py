@@ -35,21 +35,29 @@ class FindPeaksConfigDialog(QDialog):
             "rel_height", "wlen_pixels", "beta"  # added beta
         ]
 
+    def na_field_names(self):
+        # NA-integrated models (na_lorentzian* / na_gauss_lorentzian*), sample
+        # only: aperture-clip NA; Gaussian coupling geometry (gauss models:
+        # fiber-mode beam diameter at pupil [session-calibrated on water] +
+        # objective focal length); sample refractive index.
+        return ["na_collection", "na_beam_diameter_mm", "na_focal_length_mm", "na_n_sample"]
+
     def create_dual_form(self):
         layout = QHBoxLayout()
-        layout.addWidget(self.create_config_group("Sample", self.sample_inputs, FITTING_MODELS_SAMPLE))
+        layout.addWidget(self.create_config_group(
+            "Sample", self.sample_inputs, FITTING_MODELS_SAMPLE, extra_fields=self.na_field_names()))
         layout.addWidget(self.create_config_group("Reference", self.reference_inputs, FITTING_MODELS_REFERENCE))
         return layout
 
-    def create_config_group(self, label, inputs, models):
+    def create_config_group(self, label, inputs, models, extra_fields=()):
         group = QGroupBox(label)
         vlayout = QVBoxLayout()
-        for field in self.field_names():
+        for field in list(self.field_names()) + list(extra_fields):
             row = QHBoxLayout()
             row.addWidget(QLabel(field.replace("_", " ").capitalize()))
             edit = QLineEdit()
-            if "fraction" in field or "rel" in field or field == "beta":
-                # beta is a float (>=0), allow up to 100.0 with 5 decimal precision
+            if self._is_float_field(field):
+                # floats (>=0), allow up to 100.0 with 5 decimal precision
                 edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
             else:
                 edit.setValidator(QIntValidator(0, 9999))
@@ -102,6 +110,9 @@ class FindPeaksConfigDialog(QDialog):
             self.sample_inputs[field].setText(str(getattr(sample, field)))
             self.reference_inputs[field].setText(str(getattr(reference, field)))
 
+        for field in self.na_field_names():
+            self.sample_inputs[field].setText(str(getattr(sample, field)))
+
         self.sample_inputs["fitting_model"].setCurrentText(sample.fitting_model)
         self.reference_inputs["fitting_model"].setCurrentText(reference.fitting_model)
 
@@ -134,7 +145,8 @@ class FindPeaksConfigDialog(QDialog):
             }
 
             # Sample
-            sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f) for f in self.field_names()}
+            sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f)
+                             for f in list(self.field_names()) + list(self.na_field_names())}
             sample_kwargs["fitting_model"] = self.sample_inputs["fitting_model"].currentText()
 
             # Reference
@@ -169,10 +181,17 @@ class FindPeaksConfigDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save config:\n{e}")
 
+    @staticmethod
+    def _is_float_field(field):
+        return (
+            "fraction" in field or "rel" in field
+            or field == "beta" or field.startswith("na_")
+        )
+
     def _parse(self, value, field):
         value = value.strip()
         try:
-            return float(value) if "fraction" in field or "rel" in field else int(value)
+            return float(value) if self._is_float_field(field) else int(value)
         except ValueError:
             return 0
 

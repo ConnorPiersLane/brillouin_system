@@ -5,6 +5,7 @@ import numpy as np
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
+from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -135,6 +136,67 @@ class CalibrationCalculator:
             )
 
         return None if result is None else float(result)
+
+    def elastic_anchors(self) -> ElasticAnchors:
+        """
+        Pixel positions of the left/right Rayleigh (elastic) lines: the roots of
+        the per-peak calibration polynomials at frequency = 0.
+
+        The calibration sweep covers ~4-8 GHz, so 0 GHz is an extrapolation —
+        the root is found by Newton iteration seeded from the calibration point
+        with the smallest frequency, and validated. Raises ValueError if the
+        calibration cannot provide the anchors (no silent fallback).
+        """
+        if self.p is None:
+            raise ValueError(
+                "Cannot extract elastic anchors: no calibration parameters available."
+            )
+        left = self._poly_zero_crossing(
+            self.p.freq_left_peak, self.p.left_px_points, self.p.left_freq_points, "left",
+        )
+        right = self._poly_zero_crossing(
+            self.p.freq_right_peak, self.p.right_px_points, self.p.right_freq_points, "right",
+        )
+        return ElasticAnchors(rayleigh_left_px=left, rayleigh_right_px=right)
+
+    @staticmethod
+    def _poly_zero_crossing(coeffs, px_points, freq_points, label: str) -> float:
+        if coeffs is None or not np.all(np.isfinite(coeffs)):
+            raise ValueError(
+                f"Cannot extract {label} elastic anchor: calibration polynomial is missing/invalid."
+            )
+        coeffs = np.asarray(coeffs, dtype=float)
+
+        if px_points is not None and freq_points is not None and len(px_points) > 0:
+            x = float(np.asarray(px_points)[np.argmin(np.abs(np.asarray(freq_points)))])
+        elif len(coeffs) == 2:
+            # Linear calibration: the root is unique, no seed needed.
+            x = -coeffs[1] / coeffs[0]
+        else:
+            raise ValueError(
+                f"Cannot extract {label} elastic anchor: calibration has no sideband "
+                f"pixel points to seed the root search for a degree-{len(coeffs) - 1} polynomial."
+            )
+
+        deriv = np.polyder(coeffs)
+        for _ in range(100):
+            f = np.polyval(coeffs, x)
+            fp = np.polyval(deriv, x)
+            if fp == 0 or not np.isfinite(fp):
+                raise ValueError(
+                    f"Cannot extract {label} elastic anchor: zero/invalid slope during Newton iteration."
+                )
+            step = f / fp
+            x = x - step
+            if abs(step) < 1e-10:
+                break
+
+        if not np.isfinite(x) or abs(np.polyval(coeffs, x)) > 1e-6:
+            raise ValueError(
+                f"Cannot extract {label} elastic anchor: Newton iteration did not converge "
+                f"(px={x}, residual={np.polyval(coeffs, x)} GHz)."
+            )
+        return float(x)
 
     def freq_left_peak(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""

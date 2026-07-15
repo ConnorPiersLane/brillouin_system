@@ -43,8 +43,10 @@ def na_angular_grid(alpha: float, n_quad: int = 41, v0: float | None = None):
     This has a single geometric input (alpha), no soft coupling parameter.
 
     Optionally pass v0 to add the Gaussian fiber-coupling apodization
-    exp(-2 (v/v0)^2) (na_correction5 form) — NOT recommended for the fit model
-    because v0 is an empirical, session-drifting quantity.
+    exp(-2 (v/v0)^2) (na_correction5 form, validated on water) — used by the
+    na_gauss_lorentzian* fitting models; v0 is an empirical, session-drifting
+    quantity (the effective fiber-mode diameter), so it must be re-calibrated
+    on water per session (na_beam_diameter_mm).
 
     frac_downshift = 1 - cos(v/2): the fractional shortfall of each sub-peak's
     frequency below the exact-backscattering (180-degree) value.
@@ -88,6 +90,52 @@ def make_na_lorentzian(rayleigh_px, alpha, n_quad: int = 41, v0: float | None = 
         return amp * integ + offset
 
     return _na_lorentzian
+
+
+def make_2na_lorentzian_binned(
+    rayleigh_left_px,
+    rayleigh_right_px,
+    alpha,
+    n_quad: int = 41,
+    v0: float | None = None,
+):
+    """
+    Joint two-peak NA-integrated Lorentzian model for SpectrumFitter, each peak
+    anchored at its own Rayleigh-order elastic line (VIPA: Stokes of order n +
+    anti-Stokes of order n+1). Sub-peak cores are pixel-integrated (same arctan
+    form as SpectrumFitter's plain Lorentzian), so amplitudes and widths are
+    directly comparable.
+
+    Free parameters: [amp1, cen1, gamma1, amp2, cen2, gamma2, offset]
+    (same layout as _2lorentzian_binned); cen1/cen2 are the true 180-degree
+    peak positions in px.
+    """
+    r_left = float(rayleigh_left_px)
+    r_right = float(rayleigh_right_px)
+    if not (np.isfinite(r_left) and np.isfinite(r_right)):
+        raise ValueError("Elastic anchors (rayleigh_left/right_px) must be finite.")
+    v, weight, frac = na_angular_grid(alpha, n_quad, v0=v0)
+    wsum = float(np.trapezoid(weight, v))
+    if wsum <= 0:
+        raise ValueError("NA collection weight integrates to <= 0.")
+
+    def _na_peak_pixel_integrated(x, amp, cen, gamma, rayleigh):
+        gamma = max(float(gamma), 1e-12)
+        sub_centers = cen - (cen - rayleigh) * frac            # (n_quad,)
+        dl = x[:, None] - 0.5 - sub_centers[None, :]           # (nx, n_quad)
+        dr = x[:, None] + 0.5 - sub_centers[None, :]
+        prof = amp * gamma * (np.arctan(dr / gamma) - np.arctan(dl / gamma))
+        return np.trapezoid(weight[None, :] * prof, v, axis=1) / wsum
+
+    def _2na_lorentzian_binned(x, amp1, cen1, gamma1, amp2, cen2, gamma2, offset):
+        x = np.asarray(x, dtype=float)
+        return (
+            _na_peak_pixel_integrated(x, amp1, cen1, gamma1, r_left)
+            + _na_peak_pixel_integrated(x, amp2, cen2, gamma2, r_right)
+            + offset
+        )
+
+    return _2na_lorentzian_binned
 
 
 def make_na_lorentzian_from_geometry(

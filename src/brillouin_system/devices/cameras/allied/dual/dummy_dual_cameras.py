@@ -42,6 +42,10 @@ class DummyDualCameras(BaseDualCameras):
         print("[DummyCamera] Start stream (flag only).")
         self._is_streaming = True
 
+    def start_dual_cam_stream(self):
+        # API mirror of DualAlliedVisionCameras (used by dual_camera_worker)
+        self.start_stream()
+
     def stop_stream(self):
         print("[DummyCamera] Stop stream (flag only).")
         self._is_streaming = False

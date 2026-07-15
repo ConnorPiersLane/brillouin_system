@@ -7,6 +7,22 @@ import time, traceback
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import allied_config
 from brillouin_system.helpers.frame_ipc_shared import ShmRing, ShmFrameSpec
 
+
+def _put_evt(evt_q, evt):
+    """Best-effort put that never blocks; drops the oldest event if the queue is full."""
+    try:
+        evt_q.put_nowait(evt)
+    except queue.Full:
+        try:
+            evt_q.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            evt_q.put_nowait(evt)
+        except queue.Full:
+            pass
+
+
 def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
     left_ring = right_ring = None
     li = ri = 0
@@ -30,7 +46,11 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
     try:
         while True:
             try:
-                cmd = req_q.get_nowait()
+                if running:
+                    cmd = req_q.get_nowait()
+                else:
+                    # Idle: block briefly instead of busy-spinning at 100% CPU.
+                    cmd = req_q.get(timeout=0.05)
             except queue.Empty:
                 cmd = None
 
@@ -180,34 +200,52 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
             # ---- streaming loop ----
             if running and cams and left_ring and right_ring:
+                try:
+                    f0, f1 = cams.snap_once(timeout=5.0)
 
-                f0, f1 = cams.snap_once(timeout=5.0)
+                    # accept frames as returned (no dtype/shape normalization here)
+                    if hasattr(f0, "as_numpy_ndarray"):
+                        left_frame  = f0.as_numpy_ndarray()
+                        right_frame = f1.as_numpy_ndarray()
+                    else:
+                        left_frame, right_frame = f0, f1
 
-                # accept frames as returned (no dtype/shape normalization here)
-                if hasattr(f0, "as_numpy_ndarray"):
-                    left_frame  = f0.as_numpy_ndarray()
-                    right_frame = f1.as_numpy_ndarray()
-                else:
-                    left_frame, right_frame = f0, f1
+                    # Guard against mismatches (avoid assert in write_slot)
+                    if (tuple(getattr(left_frame,  "shape", ()))  != tuple(left_ring.spec.shape) or
+                        tuple(getattr(right_frame, "shape", ())) != tuple(right_ring.spec.shape)):
+                        # Optionally emit a diagnostic; skip this pair
+                        _put_evt(evt_q, {
+                            "type": "warn",
+                            "msg": f"Frame/Spec mismatch: L {getattr(left_frame,'shape',None)} vs {left_ring.spec.shape}, "
+                                   f"R {getattr(right_frame,'shape',None)} vs {right_ring.spec.shape}"
+                        })
+                        continue
 
-                # Guard against mismatches (avoid assert in write_slot)
-                if (tuple(getattr(left_frame,  "shape", ()))  != tuple(left_ring.spec.shape) or
-                    tuple(getattr(right_frame, "shape", ())) != tuple(right_ring.spec.shape)):
-                    # Optionally emit a diagnostic; skip this pair
-                    evt_q.put({
-                        "type": "warn",
-                        "msg": f"Frame/Spec mismatch: L {getattr(left_frame,'shape',None)} vs {left_ring.spec.shape}, "
-                               f"R {getattr(right_frame,'shape',None)} vs {right_ring.spec.shape}"
-                    })
-                    continue
+                    left_ring.write_slot(li, left_frame)
+                    right_ring.write_slot(ri, right_frame)
+                    evt_q.put({"type": "frame",
+                               "left_idx": li, "right_idx": ri,
+                               "ts": time.time()})
+                    li = (li + 1) % left_ring.spec.slots
+                    ri = (ri + 1) % right_ring.spec.slots
 
-                left_ring.write_slot(li, left_frame)
-                right_ring.write_slot(ri, right_frame)
-                evt_q.put({"type": "frame",
-                           "left_idx": li, "right_idx": ri,
-                           "ts": time.time()})
-                li = (li + 1) % left_ring.spec.slots
-                ri = (ri + 1) % right_ring.spec.slots
+                except Exception as e:
+                    # Camera crashed mid-stream (e.g. Vimba Timeout/InvalidAccess).
+                    # Stop streaming, release the cameras, report upstream, but KEEP
+                    # this process alive so the shutdown/restart handshake still works.
+                    running = False
+                    tb = traceback.format_exc()
+                    print("[dual_camera_worker] CAMERA ERROR — streaming stopped:")
+                    print(tb, flush=True)
+                    _put_evt(evt_q, {"type": "error",
+                                     "msg": f"Allied Vision camera crashed: {e}",
+                                     "tb": tb})
+                    try:
+                        cams.close()
+                    except Exception:
+                        print("[dual_camera_worker] cleanup after camera error failed:")
+                        print(traceback.format_exc(), flush=True)
+                    cams = None
 
     except Exception as e:
         tb = traceback.format_exc()
