@@ -4,6 +4,5 @@ coarse_step_um = 600.0
 max_steps = 100
 tolerance_um = 5.0
 max_binary_iters = 20
-include_endpoint_360 = false
 continue_on_error = true
 backstep_um = 1500.0

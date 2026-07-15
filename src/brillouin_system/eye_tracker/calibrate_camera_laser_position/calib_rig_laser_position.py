@@ -151,12 +151,27 @@ class CalibRigLaserPosition:
         # Load scanning settings:
         settings = load_calibration_settings()
         cfg = settings["calibration"]
-        self._dphi_deg = cfg.get("dphi_deg")
-        self._coarse_step_um = cfg.get("coarse_step_um")
-        self._max_steps = cfg.get("max_steps")
-        self._tolerance_um = cfg.get("tolerance_um")
-        self._max_binary_iters = cfg.get("max_binary_iters")
-        self._backstep_um = cfg.get("backstep_um")
+        required_keys = (
+            "dphi_deg",
+            "coarse_step_um",
+            "max_steps",
+            "tolerance_um",
+            "max_binary_iters",
+            "backstep_um",
+            "continue_on_error",
+        )
+        missing = [key for key in required_keys if key not in cfg]
+        if missing:
+            raise ValueError(
+                f"Missing keys in [calibration] section of {SETTINGS_FILE_TOML_PATH}: {missing}"
+            )
+        self._dphi_deg = cfg["dphi_deg"]
+        self._coarse_step_um = cfg["coarse_step_um"]
+        self._max_steps = cfg["max_steps"]
+        self._tolerance_um = cfg["tolerance_um"]
+        self._max_binary_iters = cfg["max_binary_iters"]
+        self._backstep_um = cfg["backstep_um"]
+        self._continue_on_error = cfg["continue_on_error"]
 
         # Assign
         self.ni = ni
@@ -338,18 +353,36 @@ class CalibRigLaserPosition:
     def scan_boundary_over_angles(self) -> None:
         """
         Recenter from cameras and scan one boundary point for each angle:
-        0, dphi, 2*dphi, ... up to < 360 (or <= 360 if include_endpoint_360=True)
+        0, dphi, 2*dphi, ... up to < 360
+
+        If continue_on_error is set, a failed angle is logged and skipped
+        instead of aborting the whole calibration.
         """
         dphi_deg = self._dphi_deg
         self._reflection_boundary_points_xxyyzz = []
 
-
+        failed_angles: list[float] = []
         n_steps = int(math.floor(360.0 / dphi_deg))
         for i in range(n_steps):
             angle_deg = i * dphi_deg
 
-            boundary = self.scan_boundary_point_at_angle(angle_deg=angle_deg)
+            try:
+                boundary = self.scan_boundary_point_at_angle(angle_deg=angle_deg)
+            except OperationCancelled:
+                raise
+            except (RuntimeError, ValueError) as e:
+                if not self._continue_on_error:
+                    raise
+                log.warning(f"Skipping angle {angle_deg} deg: {e}")
+                failed_angles.append(angle_deg)
+                continue
+
             self._reflection_boundary_points_xxyyzz.append(boundary)
+
+        if failed_angles:
+            log.warning(
+                f"Boundary scan skipped {len(failed_angles)}/{n_steps} angles: {failed_angles}"
+            )
 
 
     def fit_circle_3d(self) -> tuple[float, float, float, float]:
