@@ -179,6 +179,22 @@ def main() -> None:
         if np.unique(directions).size > 1:
             _stats(est[directions == d], d)
 
+    # Zaber z-estimator comparison: 2-point interpolation vs constant-velocity
+    # line fit (both are stored per trial; event_z_um uses the fit when valid).
+    both = [t for t in ok
+            if t.get("event_z_um_interp") is not None and t.get("event_z_um_fit") is not None]
+    if len(both) > 1:
+        z_int = np.array([t["event_z_um_interp"] for t in both], dtype=float)
+        z_fit = np.array([t["event_z_um_fit"] for t in both], dtype=float)
+        dirs_b = np.array([t.get("direction", "forward") for t in both])
+        print("\n=== Zaber z-estimator comparison (same trials) ===")
+        for d in np.unique(dirs_b):
+            m = dirs_b == d
+            if np.sum(m) > 1:
+                print(f"  {d:9s}: interp std = {np.std(z_int[m], ddof=1):6.2f} um   "
+                      f"line-fit std = {np.std(z_fit[m], ddof=1):6.2f} um   (n={np.sum(m)})")
+        print(f"  mean |interp - fit| per trial: {np.mean(np.abs(z_int - z_fit)):.2f} um")
+
     # --- 3) error decomposition ---
     bias = float(np.mean(est)) - true_center
     precision = float(np.std(est, ddof=1)) if est.size > 1 else 0.0

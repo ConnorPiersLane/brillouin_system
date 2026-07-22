@@ -114,6 +114,8 @@ def _reflection_result_to_dict(res: ReflectionResult) -> dict:
     d = {
         "found": bool(res.found),
         "event_z_um": _f(res.event_z_um),
+        "event_z_um_interp": _f(res.event_z_um_interp),
+        "event_z_um_fit": _f(res.event_z_um_fit),
         "peak_value": _f(res.peak_value),
         "background_mean": _f(res.background_mean),
         "background_std": _f(res.background_std),

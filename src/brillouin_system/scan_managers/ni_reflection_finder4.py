@@ -22,7 +22,9 @@ class ReflectionResult:
     found: bool
     event_index: Optional[float] = None        # fractional acquisition-buffer index (centroid)
     event_time_perf: Optional[float] = None    # perf_counter time_of(event_index)
-    event_z_um: Optional[float] = None         # interpolated z at event time
+    event_z_um: Optional[float] = None         # z at event time (line fit; falls back to interp)
+    event_z_um_interp: Optional[float] = None  # z via 2-point interpolation of the Zaber log
+    event_z_um_fit: Optional[float] = None     # z via constant-velocity line fit (NaN-> None if fit failed)
     z_offset_um: Optional[float] = None
     peak_value: Optional[float] = None
     background_mean: Optional[float] = None
@@ -40,6 +42,58 @@ def print_reflection_result(result):
     for f in fields(result):
         value = getattr(result, f.name)
         print(f"{f.name}: {value}")
+
+
+def fit_z_at_time(
+    t_query: float,
+    t_z: np.ndarray,
+    z_um: np.ndarray,
+    *,
+    slope_tol: float = 0.2,
+    min_points: int = 8,
+) -> float:
+    """
+    Least-squares line fit z(t) over the constant-velocity portion of the
+    Zaber position log, evaluated at t_query.
+
+    During the search the stage slews at constant velocity, so z(t) is a
+    straight line; fitting all log samples averages out the per-sample
+    timestamp jitter (~ms serial latency placement), which 2-point
+    interpolation inherits in full. The acceleration ramp at the start and
+    the deceleration after the early stop are excluded by keeping only
+    segments whose local slope is within slope_tol of the median slope.
+
+    Returns NaN if fewer than min_points samples remain — caller should fall
+    back to interp_z_positions().
+    """
+    t = np.asarray(t_z, dtype=np.float64)
+    z = np.asarray(z_um, dtype=np.float64)
+    if t.size < min_points:
+        return float("nan")
+
+    keep = np.concatenate(([True], np.diff(t) > 0))
+    t = t[keep]
+    z = z[keep]
+    if t.size < min_points:
+        return float("nan")
+
+    v = np.diff(z) / np.diff(t)
+    v_ref = float(np.median(v))
+    if v_ref == 0.0 or not np.isfinite(v_ref):
+        return float("nan")
+
+    good_seg = np.abs(v - v_ref) <= slope_tol * abs(v_ref)
+    # a sample belongs to the constant-velocity window if an adjacent segment is good
+    good_pt = np.zeros(t.size, dtype=bool)
+    good_pt[:-1] |= good_seg
+    good_pt[1:] |= good_seg
+    if int(np.sum(good_pt)) < min_points:
+        return float("nan")
+
+    # center t for numerical conditioning (perf_counter values are large)
+    t0 = float(np.mean(t[good_pt]))
+    coef = np.polyfit(t[good_pt] - t0, z[good_pt], 1)
+    return float(np.polyval(coef, float(t_query) - t0))
 
 
 def find_reflection_realtime(
@@ -224,7 +278,12 @@ def find_reflection_realtime(
     peak_val = best_v
     t_event = daq.time_of(event_i)
 
-    z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
+    # z at event time: constant-velocity line fit over the whole Zaber log
+    # (averages per-sample timestamp jitter), 2-point interpolation as
+    # fallback and for comparison.
+    z_interp = interp_z_positions(t_event, zaber_lens_ts, zaber_lens_z_um)
+    z_fit = fit_z_at_time(t_event, zaber_lens_ts, zaber_lens_z_um)
+    z_event = z_fit if np.isfinite(z_fit) else z_interp
 
 
 
@@ -234,6 +293,8 @@ def find_reflection_realtime(
         event_index=event_i,
         event_time_perf=t_event,
         event_z_um=z_event,
+        event_z_um_interp=float(z_interp) if np.isfinite(z_interp) else None,
+        event_z_um_fit=float(z_fit) if np.isfinite(z_fit) else None,
         z_offset_um=z_offset_um,
         peak_value=peak_val,
         background_mean=av,
