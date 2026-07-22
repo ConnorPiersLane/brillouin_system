@@ -11,3 +11,4 @@ alpha = 0.25
 chunk_size = 256
 idle_sleep_s = 0.002
 z_offset_um = 200.0
+min_samples_above = 3

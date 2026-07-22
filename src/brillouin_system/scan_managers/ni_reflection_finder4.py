@@ -33,6 +33,8 @@ class ReflectionResult:
     threshold_low: Optional[float] = None
     idx_first: Optional[int] = None            # first sample above threshold_high
     idx_last: Optional[int] = None             # last sample above threshold_high (within the interval)
+    n_samples_above: Optional[int] = None      # samples above threshold_high in the accepted interval
+    n_rejected_intervals: int = 0              # intervals rejected as noise spikes (< min_samples_above)
     daq_ts: Optional[np.ndarray] = None
     daq_values: Optional[np.ndarray] = None
     zaber_lens_ts: Optional[np.ndarray] = None
@@ -113,6 +115,7 @@ def find_reflection_realtime(
     idle_sleep_s: float = 0.001,   # sleep when DAQ has no new samples
     z_offset_um: float = 0.0,      # optional manual offset
     centroid_fraction: float = 0.8,  # centroid weights: samples above this fraction of peak amplitude
+    min_samples_above: int = 3,    # interval acceptance: reject noise spikes with fewer samples above threshold_high
 ) -> ReflectionResult:
     """
     Early-stop reflection finder using:
@@ -123,6 +126,14 @@ def find_reflection_realtime(
     Interval definition (hysteresis + debounce):
       - start when v > threshold_high
       - end when v <= threshold_low for debounce_s continuously
+
+    Interval acceptance (false-trigger rejection, power-independent):
+      An ended interval is only accepted as the reflection if it contains at
+      least min_samples_above samples above threshold_high. Single-sample
+      noise spikes (observed when the background window catches a quiet noise
+      state and the n-sigma threshold lands near the spike amplitude) are
+      rejected and the search continues slewing; rejected intervals are
+      counted in n_rejected_intervals.
 
     Event choice (centroid estimator, sub-sample resolution):
       event_index = signal-weighted center of mass of the samples between
@@ -155,6 +166,8 @@ def find_reflection_realtime(
         idx_first: Optional[int] = None
         idx_last_above: Optional[int] = None
         low_run = 0
+        n_above = 0
+        n_rejected = 0
         daq: NIReadResult | None = None
         zlog: ZaberPositionLog | None = None
 
@@ -209,6 +222,7 @@ def find_reflection_realtime(
                             idx_first = i_abs
                             idx_last_above = i_abs
                             low_run = 0
+                            n_above = 1
                             best_v = v
                             best_idx = i_abs
                     else:
@@ -216,6 +230,7 @@ def find_reflection_realtime(
                         if v > th_hi:
                             idx_last_above = i_abs
                             low_run = 0
+                            n_above += 1
 
                         # track max anywhere in interval if requested
                         if v > best_v:
@@ -226,7 +241,18 @@ def find_reflection_realtime(
                         if v <= th_lo:
                             low_run += 1
                             if low_run >= debounce_samples:
-                                raise StopIteration
+                                if n_above >= min_samples_above:
+                                    raise StopIteration
+                                # too few samples above threshold: noise spike,
+                                # reject interval and keep searching
+                                n_rejected += 1
+                                in_interval = False
+                                idx_first = None
+                                idx_last_above = None
+                                low_run = 0
+                                n_above = 0
+                                best_v = float("-inf")
+                                best_idx = None
                         else:
                             low_run = 0
 
@@ -249,15 +275,23 @@ def find_reflection_realtime(
                 daq: None = None
 
 
-    if (not in_interval) or idx_first is None or idx_last_above is None or daq is None or best_idx is None:
+    if (
+        (not in_interval)
+        or idx_first is None
+        or idx_last_above is None
+        or daq is None
+        or best_idx is None
+        or n_above < min_samples_above  # timeout inside a spurious interval
+    ):
         # Validate detection + acquisition
         return ReflectionResult(
             found=False,
+            n_rejected_intervals=n_rejected,
         )
 
     # Interpolate Z from full Zaber log
     if zlog is None or zlog.t_perf.size < 2:
-        return ReflectionResult(found=False)
+        return ReflectionResult(found=False, n_rejected_intervals=n_rejected)
 
     daq_ts = np.asarray(daq.timestamps_perf())
     daq_values = np.asarray(daq.values)
@@ -303,6 +337,8 @@ def find_reflection_realtime(
         threshold_low=th_lo,
         idx_first=int(idx_first),
         idx_last=int(idx_last_above),
+        n_samples_above=int(n_above),
+        n_rejected_intervals=int(n_rejected),
         daq_ts = daq_ts,
         daq_values = daq_values,
         zaber_lens_ts = zaber_lens_ts,

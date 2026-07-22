@@ -27,6 +27,7 @@ class ScanningConfig:
     chunk_size: int = 1024
     idle_sleep_s: float = 0.001
     z_offset_um: float = 0.0
+    min_samples_above: int = 3
 
 
 AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
@@ -77,6 +78,7 @@ def _dataclass_to_toml_dict(cfg: ScanningConfig) -> dict[str, Any]:
         "chunk_size": int(cfg.chunk_size),
         "idle_sleep_s": float(cfg.idle_sleep_s),
         "z_offset_um": float(cfg.z_offset_um),
+        "min_samples_above": int(cfg.min_samples_above),
     }
 
 

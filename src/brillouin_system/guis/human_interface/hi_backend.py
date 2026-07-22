@@ -786,6 +786,7 @@ class HiBackend:
         chunk_size = self._axial_scan_config.chunk_size
         idle_sleep_s = self._axial_scan_config.idle_sleep_s
         offset_z_um = self._axial_scan_config.z_offset_um
+        min_samples_above = self._axial_scan_config.min_samples_above
         result: ReflectionResult = find_reflection_realtime(
             ni=self.ni,
             zaber=self.zaber_eye_lens,
@@ -800,6 +801,7 @@ class HiBackend:
             chunk_size=chunk_size,
             idle_sleep_s=idle_sleep_s,
             z_offset_um=offset_z_um,
+            min_samples_above=min_samples_above,
         )
         return result
 

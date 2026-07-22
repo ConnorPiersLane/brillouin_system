@@ -117,6 +117,8 @@ def _reflection_result_to_dict(res: ReflectionResult) -> dict:
         "event_z_um_interp": _f(res.event_z_um_interp),
         "event_z_um_fit": _f(res.event_z_um_fit),
         "peak_value": _f(res.peak_value),
+        "n_samples_above": res.n_samples_above,
+        "n_rejected_intervals": res.n_rejected_intervals,
         "background_mean": _f(res.background_mean),
         "background_std": _f(res.background_std),
         "threshold_high": _f(res.threshold_high),
@@ -180,6 +182,7 @@ def run_rough_find(ni: NI6008, zaber: ZaberEyeLens, cfg: ScanningConfig) -> Refl
         chunk_size=cfg.chunk_size,
         idle_sleep_s=cfg.idle_sleep_s,
         z_offset_um=cfg.z_offset_um,
+        min_samples_above=cfg.min_samples_above,
     )
     if not res.found or res.event_z_um is None or not np.isfinite(res.event_z_um):
         raise RuntimeError(
@@ -289,6 +292,7 @@ def run_finder_trials(
             chunk_size=cfg.chunk_size,
             idle_sleep_s=cfg.idle_sleep_s,
             z_offset_um=cfg.z_offset_um,
+            min_samples_above=cfg.min_samples_above,
         )
 
         d = _reflection_result_to_dict(res)
