@@ -17,9 +17,10 @@ class ReflectionResult:
     Indices (event_index / idx_first / idx_last) are acquisition-buffer indices:
       - i == 0 refers to the first sample stored by NI6008 background acquisition
       - the corresponding time is ni_result.time_of(i) (perf_counter timeline model)
+      - event_index is FRACTIONAL (centroid estimator, sub-sample resolution)
     """
     found: bool
-    event_index: Optional[int] = None          # acquisition-buffer index
+    event_index: Optional[float] = None        # fractional acquisition-buffer index (centroid)
     event_time_perf: Optional[float] = None    # perf_counter time_of(event_index)
     event_z_um: Optional[float] = None         # interpolated z at event time
     z_offset_um: Optional[float] = None
@@ -57,6 +58,7 @@ def find_reflection_realtime(
     chunk_size: int = 1024,
     idle_sleep_s: float = 0.001,   # sleep when DAQ has no new samples
     z_offset_um: float = 0.0,      # optional manual offset
+    centroid_fraction: float = 0.8,  # centroid weights: samples above this fraction of peak amplitude
 ) -> ReflectionResult:
     """
     Early-stop reflection finder using:
@@ -68,9 +70,14 @@ def find_reflection_realtime(
       - start when v > threshold_high
       - end when v <= threshold_low for debounce_s continuously
 
-    Event choice:
-      - mode="midpoint": event_index = midpoint(idx_first, idx_last_above_high)
-      - mode="max":      event_index = argmax(v) within the interval (tracks max while in interval)
+    Event choice (centroid estimator, sub-sample resolution):
+      event_index = signal-weighted center of mass of the samples between
+      idx_first and idx_last, using weights max(0, v - level) with
+      level = background + centroid_fraction * (peak - background).
+      This averages the noise of all samples near the peak top (argmax jitters
+      across a flat/noisy plateau and is undefined on a clipped peak) and
+      yields a FRACTIONAL buffer index, i.e. finer than the 1-sample z spacing
+      (speed_um_s / ni_sample_rate_hz). peak_value still reports the argmax value.
     """
 
     ni.set_sample_rate_hz(ni_sample_rate_hz)
@@ -188,27 +195,36 @@ def find_reflection_realtime(
                 daq: None = None
 
 
-    daq_ts = np.asarray(daq.timestamps_perf())
-    daq_values = np.asarray(daq.values)
-    zaber_lens_ts = np.asarray(zlog.t_perf)
-    zaber_lens_z_um = np.asarray(zlog.z_um)
-
-
     if (not in_interval) or idx_first is None or idx_last_above is None or daq is None or best_idx is None:
         # Validate detection + acquisition
         return ReflectionResult(
             found=False,
         )
 
-    event_i = best_idx
-    peak_val = best_v
-    t_event = daq.time_of(event_i)
-
     # Interpolate Z from full Zaber log
     if zlog is None or zlog.t_perf.size < 2:
         return ReflectionResult(found=False)
+
+    daq_ts = np.asarray(daq.timestamps_perf())
+    daq_values = np.asarray(daq.values)
+    zaber_lens_ts = np.asarray(zlog.t_perf)
+    zaber_lens_z_um = np.asarray(zlog.z_um)
+
+    # Centroid event estimator: center of mass of the samples near the peak
+    # top -> fractional buffer index (sub-sample resolution, robust against
+    # plateau noise and clipping; see docstring).
+    seg = daq_values[int(idx_first): int(idx_last_above) + 1]
+    level = av + centroid_fraction * (best_v - av)
+    w = np.clip(seg - level, 0.0, None)
+    w_sum = float(np.sum(w))
+    if w_sum > 0.0:
+        event_i = float(idx_first) + float(np.sum(w * np.arange(seg.size))) / w_sum
     else:
-        z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
+        event_i = float(best_idx)  # degenerate interval: fall back to argmax
+    peak_val = best_v
+    t_event = daq.time_of(event_i)
+
+    z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
 
 
 
