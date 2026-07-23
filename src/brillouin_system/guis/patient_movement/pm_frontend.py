@@ -536,6 +536,11 @@ class PmFrontend(QWidget):
         def _work():
             try:
                 res = self.backend.find_reflection_plane(is_go_forwards=True)
+                if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
+                    # Same semantics as the main GUI: park the lens at
+                    # plane + manual z offset (z_pos = event_z + z_offset).
+                    z_park = float(res.event_z_um) + float(res.z_offset_um or 0.0)
+                    self.backend.zaber_eye_lens.move_abs(z_park)
                 self.bridge.reflection_done.emit(res)
             except Exception as e:
                 self.bridge.op_failed.emit(f"Reflection find failed: {e}")
@@ -546,8 +551,11 @@ class PmFrontend(QWidget):
         self.btn_find.setEnabled(True)
         self._reflection_result = res
         if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
+            offset = float(res.z_offset_um or 0.0)
+            z_park = float(res.event_z_um) + offset
             self.lbl_reflection.setText(
-                f"Plane: z = {res.event_z_um:.1f} µm   "
+                f"Plane: z = {res.event_z_um:.1f} µm — lens parked at "
+                f"{z_park:.1f} µm (offset {offset:+.0f})   "
                 f"(peak {res.peak_value:.2f} V, {res.n_samples_above} samples)")
             self.btn_track_start.setEnabled(True)
             self.btn_daq_record.setEnabled(True)
