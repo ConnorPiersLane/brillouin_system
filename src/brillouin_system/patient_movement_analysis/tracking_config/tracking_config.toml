@@ -1,0 +1,7 @@
+[tracking]
+sweep_amplitude_um = 100.0
+sweep_speed_um_s = 2000.0
+bg_acqui_s = 0.3
+recenter = true
+recenter_avg_points = 5
+max_track_time_s = 300.0
