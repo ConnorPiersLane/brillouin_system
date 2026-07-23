@@ -36,6 +36,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from brillouin_system.devices.cameras.allied.allied_config.allied_config_dialog import AlliedConfigDialog
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import (
     LaserOffset, load_laser_coord_system_from_toml)
 from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord
@@ -69,6 +70,7 @@ class PmFrontend(QWidget):
 
     # eye tracker control (cross-thread via queued signals)
     set_et_config = pyqtSignal(object)
+    set_et_allied_configs = pyqtSignal(object, object)  # left_cfg, right_cfg
     request_et_start = pyqtSignal()
     request_et_stop = pyqtSignal()
     request_eye_shutdown = pyqtSignal()
@@ -76,6 +78,17 @@ class PmFrontend(QWidget):
     def __init__(self, use_backend_dummy: bool = True, use_eye_tracker_dummy: bool = True):
         super().__init__()
         self.setWindowTitle("Patient Movement Tracker")
+
+        # Same pyqtgraph config as the main GUI. imageAxisOrder='row-major'
+        # is essential: numpy camera frames are (H, W[, 3]); the pyqtgraph
+        # default (column-major) transposes them -> rotated images.
+        pg.setConfigOptions(
+            useOpenGL=False,
+            antialias=True,
+            imageAxisOrder="row-major",
+            background="w",
+            foreground="k",
+        )
 
         # --- logging into the GUI (same pattern as the main GUI) ---
         self.log_view = QtWidgets.QTextEdit()
@@ -141,6 +154,7 @@ class PmFrontend(QWidget):
         self.eye_thread.started.connect(self.eye_ctrl.start)
         self.eye_ctrl.frames_ready.connect(self._on_eye_frames_ready)
         self.set_et_config.connect(self.eye_ctrl.send_config)
+        self.set_et_allied_configs.connect(self.eye_ctrl.proxy.set_allied_configs)
         self.request_et_start.connect(self.eye_ctrl.start)
         self.request_et_stop.connect(self.eye_ctrl.stop)
         self.request_eye_shutdown.connect(self.eye_ctrl.shutdown)
@@ -397,7 +411,7 @@ class PmFrontend(QWidget):
         self.laser_point = pg.ScatterPlotItem([0.0], [0.0], size=12,
                                               brush=pg.mkBrush("r"), pen=pg.mkPen("r"))
         map_vb.addItem(self.laser_point)
-        self.laser_pos_text = pg.TextItem(text="x=\ny=\nz=\nΔc=", anchor=(1, 0))
+        self.laser_pos_text = pg.TextItem(text="x=\ny=\nz=\nΔc=", color=(0, 0, 0), anchor=(1, 0))
         map_vb.addItem(self.laser_pos_text)
         self.laser_pos_text.setPos(4, 4)
         self.eye_glw.ci.addItem(map_vb, row=1, col=0)
@@ -411,10 +425,16 @@ class PmFrontend(QWidget):
         self.lbl_pupil = QLabel("Pupil: —")
         row.addWidget(self.lbl_pupil)
         row.addStretch()
+        self.btn_allied_left = QPushButton("AV Left…")
+        self.btn_allied_left.clicked.connect(self._open_allied_left_dialog)
+        self.btn_allied_right = QPushButton("AV Right…")
+        self.btn_allied_right.clicked.connect(self._open_allied_right_dialog)
         self.btn_et_config = QPushButton("ET Config…")
         self.btn_et_config.clicked.connect(self._open_et_config_dialog)
         self.btn_et_restart = QPushButton("ReStart Cameras")
         self.btn_et_restart.clicked.connect(self._restart_eye_tracker)
+        row.addWidget(self.btn_allied_left)
+        row.addWidget(self.btn_allied_right)
         row.addWidget(self.btn_et_config)
         row.addWidget(self.btn_et_restart)
         v.addLayout(row)
@@ -439,8 +459,8 @@ class PmFrontend(QWidget):
             [], [], pen=None, symbol="t", symbolSize=6,
             symbolBrush=(255, 170, 60, 150), name="down crossings")
         self.curve_est = self.track_plot.plot(
-            [], [], pen=pg.mkPen((120, 255, 120), width=2),
-            symbol="o", symbolSize=5, symbolBrush=(120, 255, 120),
+            [], [], pen=pg.mkPen((0, 150, 0), width=2),
+            symbol="o", symbolSize=5, symbolBrush=(0, 150, 0),
             name="pair estimate (bias-free)")
         v.addWidget(self.track_plot)
         g.setLayout(v)
@@ -749,6 +769,24 @@ class PmFrontend(QWidget):
         if (time.monotonic() - self._latest_pupil_t) > max_age_s:
             return None
         return res
+
+    def _open_allied_left_dialog(self):
+        dlg = AlliedConfigDialog("left", self._apply_allied_left, parent=self)
+        dlg.exec_()
+
+    def _open_allied_right_dialog(self):
+        dlg = AlliedConfigDialog("right", self._apply_allied_right, parent=self)
+        dlg.exec_()
+
+    def _apply_allied_left(self, cfg_obj):
+        """Called by AlliedConfigDialog on Apply for LEFT (same as main GUI)."""
+        self.set_et_allied_configs.emit(cfg_obj, None)
+        log.info("[Frontend] Sent new LEFT Allied Vision config.")
+
+    def _apply_allied_right(self, cfg_obj):
+        """Called by AlliedConfigDialog on Apply for RIGHT (same as main GUI)."""
+        self.set_et_allied_configs.emit(None, cfg_obj)
+        log.info("[Frontend] Sent new RIGHT Allied Vision config.")
 
     def _open_et_config_dialog(self):
         def _on_apply(cfg: EyeTrackerConfig):
