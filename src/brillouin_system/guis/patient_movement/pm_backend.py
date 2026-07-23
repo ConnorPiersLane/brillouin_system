@@ -107,12 +107,28 @@ class PmBackend:
     # reflection plane
     # ------------------------------------------------------------------ #
 
-    def find_reflection_plane(self, is_go_forwards: bool = True) -> ReflectionResult:
-        """Same parameter mapping as HiBackend.find_reflection_plane."""
+    def find_reflection_plane(self, is_go_forwards: bool = True,
+                              auto_backup: bool = True) -> ReflectionResult:
+        """
+        Same parameter mapping as HiBackend.find_reflection_plane.
+
+        auto_backup (forward searches only): first back the lens up so the
+        search starts behind the plane. Without this, a repeated find fails
+        after the previous find parked the lens at plane + z_offset (past
+        the surface).
+        """
         if self._tracker is not None and self._tracker.is_running():
             raise RuntimeError("Cannot find reflection plane while tracking is running")
 
         cfg = self._axial_scan_config
+        if auto_backup and is_go_forwards:
+            backup_um = min(1000.0, 0.5 * float(cfg.max_distance_um))
+            current = float(self.zaber_eye_lens.get_position())
+            z_start = max(100.0, current - backup_um)
+            log.info(f"[PmBackend] Find: backing up {current - z_start:.0f} um "
+                     f"to {z_start:.1f} um before searching forward.")
+            self.zaber_eye_lens.move_abs(z_start)
+
         speed = cfg.speed_um_s if is_go_forwards else -cfg.speed_um_s
         result = find_reflection_realtime(
             ni=self.ni,
