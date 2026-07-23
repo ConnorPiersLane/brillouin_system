@@ -1,0 +1,71 @@
+C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\Scripts\python.exe C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\hi_frontend.py
+[DummyCamera] initialized
+[ShutterDummy] Initialized dummy shutter (USB code: 314)
+[Shutter] Connected to shutter 384
+[Shutter] Connected to shutter 338
+[Microwave] Microwave source found: DS Instruments,SG12000PRO,456,V4.09
+[Microwave] RF power set to +1.00dBm
+[Microwave] RF frequency set to 9000000000HZ
+[Microwave] RF output is ON
+[DummyCamera] Applying settings from config...
+[DummyCamera] set to self.verbose=True
+[DummyCamera] Flip image horizontally set to True
+[DummyCamera] Preamp mode set to index 18
+[DummyCamera] VSS index set to 4
+Temperature is -20.0
+[IxonUltra] Configuration applied.
+[ShutterDummy] Shutter 314 opened.
+[DummyCamera] Preamp mode set to index 18
+[DummyCamera] VSS index set to 4
+[DummyCamera] Flip image horizontally set to True
+[ShutterDummy] Shutter 314 opened.
+[CoordTransform] Loaded left_to_zaber (t = [ 62.0674151    0.78351639 -37.86443804], norm = 72.71 mm)
+[CoordTransform] Loaded left_to_zaber (t = [ 62.0674151    0.78351639 -37.86443804], norm = 72.71 mm)
+[DualCamera] Initializing two Allied Vision cameras.
+[AVCamera] Connecting to Allied Vision Camera...
+[AVCamera] Camera with ID 'DEV_000F315BC084' not found.
+[AVCamera] Available cameras:
+  - DEV_000F315BDC0C
+  - DEV_000F315BC084
+[dual_camera_worker] ORIGINAL EXCEPTION:
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\camera.py", line 907, in _open
+    call_vimba_c('VmbCameraOpen', self.__info.cameraIdString, self.__access_mode,
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\util\tracer.py", line 134, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\c_binding\vimba_c.py", line 757, in call_vimba_c
+    getattr(_lib_instance, func_name)(*args)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\c_binding\vimba_c.py", line 675, in _eval_vmberror
+    raise VimbaCError(result)
+vimba.c_binding.vimba_common.VimbaCError: VimbaCError(<VmbError.BadParameter: -7>)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\single\allied_vision_camera.py", line 62, in __init__
+    self.camera = self.stack.enter_context(self.vimba.get_camera_by_id(id))
+  File "C:\Users\Mandelstam\AppData\Local\Programs\Python\Python310\lib\contextlib.py", line 492, in enter_context
+    result = _cm_type.__enter__(cm)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\util\tracer.py", line 134, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\camera.py", line 362, in __enter__
+    self._open()
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\util\tracer.py", line 134, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\util\context_decorator.py", line 44, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\vimba\camera.py", line 924, in _open
+    raise exc from e
+vimba.error.VimbaCameraError: <VmbError.BadParameter: -7>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_worker.py", line 67, in dual_camera_worker
+    cams = DualAlliedVisionCameras()
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\dual\dual_allied_vision_cameras.py", line 118, in __init__
+    self.left = AlliedVisionCamera(id=id0, pixel_format='Mono8')
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\single\allied_vision_camera.py", line 68, in __init__
+    raise RuntimeError("[AVCamera] Cannot continue without valid camera.")
+RuntimeError: [AVCamera] Cannot continue without valid camera.
+

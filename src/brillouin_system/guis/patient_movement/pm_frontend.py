@@ -75,7 +75,7 @@ class PmFrontend(QWidget):
     request_et_stop = pyqtSignal()
     request_eye_shutdown = pyqtSignal()
 
-    def __init__(self, use_backend_dummy: bool = True, use_eye_tracker_dummy: bool = True):
+    def __init__(self, use_backend_dummy: bool = False, use_eye_tracker_dummy: bool = False):
         super().__init__()
         self.setWindowTitle("Patient Movement Tracker")
 
