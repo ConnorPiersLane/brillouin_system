@@ -45,6 +45,14 @@ def dual_camera_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
     try:
         while True:
+            # Parent-death watchdog: if the eye-tracker worker (our parent)
+            # died or was terminated, exit so the finally block releases the
+            # Vimba cameras instead of holding them as an orphan process.
+            parent = mp.parent_process()
+            if parent is not None and not parent.is_alive():
+                print("[dual_camera_worker] Parent process died — shutting down.")
+                break
+
             try:
                 if running:
                     cmd = req_q.get_nowait()

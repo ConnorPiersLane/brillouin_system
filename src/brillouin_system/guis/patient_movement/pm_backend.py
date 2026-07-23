@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import datetime
 import json
+import threading
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Optional
@@ -175,6 +177,120 @@ class PmBackend:
 
     def get_tracking_error(self) -> Optional[str]:
         return self._tracker.get_error() if self._tracker is not None else None
+
+    # ------------------------------------------------------------------ #
+    # hold-still test: static DAQ record at the reflection plane
+    # ------------------------------------------------------------------ #
+
+    def record_daq_signal(
+        self,
+        *,
+        duration_s: float,
+        z_um: Optional[float] = None,
+        on_chunk: Optional[Callable[[np.ndarray, np.ndarray], None]] = None,
+        stop_event: Optional[threading.Event] = None,
+    ) -> dict:
+        """
+        Park the lens at z_um (the found reflection plane) and record the raw
+        DAQ signal for duration_s. Blocking — run from a worker thread.
+
+        With the beam at the peak (FWHM ~9 um), the voltage staying high
+        means the patient holds still to within microns; dips/dropouts are
+        motion. on_chunk(t_rel_s, values) is called with incremental data
+        for live plotting.
+        """
+        if self.is_tracking():
+            raise RuntimeError("Cannot record DAQ signal while tracking is running")
+
+        cfg = self._axial_scan_config
+        self.ni.set_sample_rate_hz(cfg.ni_sample_rate_hz)
+        fs = self.ni.get_sample_rate_hz()
+
+        z_parked = None
+        with self.ni.streaming():
+            if z_um is not None:
+                # The finder's event z carries the single-direction latency
+                # bias (~5 um at 2000 um/s) — significant against the ~9 um
+                # FWHM peak. A quick static peak-seek parks the beam at the
+                # actual maximum before recording.
+                z_parked = self._seek_peak_static(float(z_um), fs)
+
+            log.info(f"[DAQ Record] {duration_s:.1f} s at z = "
+                     f"{z_parked if z_parked is not None else 'current'} um, "
+                     f"fs = {fs:.0f} Hz")
+            self.ni.flush()
+            self.ni.start_acquiring(
+                max_sampling_time_s=duration_s + 0.5,
+                chunk_size=cfg.chunk_size,
+                idle_sleep_s=cfg.idle_sleep_s,
+            )
+            last = 0
+            t0 = time.perf_counter()
+            try:
+                while (time.perf_counter() - t0) < duration_s:
+                    if stop_event is not None and stop_event.is_set():
+                        break
+                    rr = self.ni.get_new_block_result(last, copy=True)
+                    n = int(rr.values.size)
+                    if n > 0:
+                        t_rel = (rr.ind0 + np.arange(n, dtype=np.float64)) / fs
+                        last = rr.ind0 + n
+                        if on_chunk is not None:
+                            try:
+                                on_chunk(t_rel, np.asarray(rr.values))
+                            except Exception:
+                                pass
+                    time.sleep(0.03)
+            finally:
+                daq = self.ni.stop_acquiring()
+
+        v = np.asarray(daq.values, dtype=np.float64)
+        t = np.arange(v.size, dtype=np.float64) / fs
+        log.info(f"[DAQ Record] Done: {v.size} samples, mean {v.mean():.3f} V, "
+                 f"std {v.std():.3f} V")
+        return {
+            "t_s": t,
+            "values": v,
+            "sample_rate_hz": float(fs),
+            "z_um": None if z_um is None else float(z_um),
+            "z_parked_um": z_parked,
+            "duration_s": float(duration_s),
+        }
+
+    def _seek_peak_static(self, center_um: float, fs: float,
+                          *, half_range_um: float = 14.0, step_um: float = 2.0) -> float:
+        """
+        Fine static scan around center_um; park the lens at the reflection
+        peak (half-max centroid of the measured profile). Requires an open
+        NI streaming session. Returns the parked z.
+        """
+        targets = np.arange(center_um - half_range_um,
+                            center_um + half_range_um + 0.5 * step_um, step_um)
+        # backlash preload: approach the scan start from below
+        self.zaber_eye_lens.move_abs(float(targets[0]) - 50.0)
+        n_per_step = max(5, int(round(0.03 * fs)))
+
+        levels = []
+        for z_t in targets:
+            self.zaber_eye_lens.move_abs(float(z_t))
+            time.sleep(0.02)
+            self.ni.flush()
+            block = self.ni.read_block(n_per_step, timeout_s=1.0)
+            levels.append(float(np.mean(block)))
+        v = np.asarray(levels)
+
+        base = float(np.min(v))
+        peak = float(np.max(v))
+        w = np.clip(v - (base + 0.5 * (peak - base)), 0.0, None)
+        if np.sum(w) > 0:
+            z_peak = float(np.sum(w * targets) / np.sum(w))
+        else:
+            z_peak = float(targets[int(np.argmax(v))])
+
+        self.zaber_eye_lens.move_abs(z_peak)
+        log.info(f"[DAQ Record] Peak seek: parked at {z_peak:.1f} um "
+                 f"({z_peak - center_um:+.1f} vs finder z), peak {peak:.2f} V")
+        return z_peak
 
     # ------------------------------------------------------------------ #
     # laser XY calibration (identical workflow as HiBackend)

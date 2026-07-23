@@ -64,6 +64,8 @@ class _Bridge(QtCore.QObject):
     tracking_stopped = pyqtSignal(object, object)  # points, estimates
     op_failed = pyqtSignal(str)
     positions_changed = pyqtSignal()               # zaber positions need re-reading
+    daq_chunk = pyqtSignal(object, object)         # t_rel_s, values (live record)
+    daq_record_done = pyqtSignal(object)           # record dict
 
 
 class PmFrontend(QWidget):
@@ -143,6 +145,13 @@ class PmFrontend(QWidget):
         self.bridge.tracking_stopped.connect(self._on_tracking_stopped)
         self.bridge.op_failed.connect(self._on_op_failed)
         self.bridge.positions_changed.connect(self._refresh_positions)
+        self.bridge.daq_chunk.connect(self._on_daq_chunk)
+        self.bridge.daq_record_done.connect(self._on_daq_record_done)
+        self._daq_t: list = []
+        self._daq_v: list = []
+        self._daq_stop_evt: threading.Event | None = None
+        self._daq_recording = False
+        self._last_daq_record: dict | None = None
 
         self._init_ui()
         self._refresh_positions()
@@ -177,6 +186,7 @@ class PmFrontend(QWidget):
         left = QVBoxLayout()
         left.addWidget(self._group_reflection())
         left.addWidget(self._group_tracking())
+        left.addWidget(self._group_hold_still())
         left.addWidget(self._group_laser_calibration())
         left.addWidget(self._group_manual_zabers())
         left.addWidget(self._group_log())
@@ -253,6 +263,39 @@ class PmFrontend(QWidget):
 
         self.lbl_track_status = QLabel("Tracking: idle")
         v.addWidget(self.lbl_track_status)
+        g.setLayout(v)
+        return g
+
+    def _group_hold_still(self) -> QGroupBox:
+        """Idea 1: park the beam AT the reflection peak and record the raw
+        DAQ voltage — signal high = patient within microns of still."""
+        g = QGroupBox("Hold-Still Test (DAQ at plane)")
+        v = QVBoxLayout()
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Duration [s]"))
+        self.spin_daq_duration = QDoubleSpinBox()
+        self.spin_daq_duration.setRange(0.5, 300.0)
+        self.spin_daq_duration.setValue(3.0)
+        self.spin_daq_duration.setDecimals(1)
+        row.addWidget(self.spin_daq_duration)
+        self.btn_daq_record = QPushButton("Record @ Plane")
+        self.btn_daq_record.setEnabled(False)
+        self.btn_daq_record.clicked.connect(self._on_daq_record_clicked)
+        self.btn_daq_stop = QPushButton("Stop")
+        self.btn_daq_stop.setEnabled(False)
+        self.btn_daq_stop.clicked.connect(self._on_daq_stop_clicked)
+        self.btn_daq_save = QPushButton("Save Signal…")
+        self.btn_daq_save.setEnabled(False)
+        self.btn_daq_save.clicked.connect(self._on_daq_save_clicked)
+        row.addWidget(self.btn_daq_record)
+        row.addWidget(self.btn_daq_stop)
+        row.addWidget(self.btn_daq_save)
+        row.addStretch()
+        v.addLayout(row)
+
+        self.lbl_daq_status = QLabel("DAQ record: idle")
+        v.addWidget(self.lbl_daq_status)
         g.setLayout(v)
         return g
 
@@ -462,9 +505,24 @@ class PmFrontend(QWidget):
             [], [], pen=pg.mkPen((0, 150, 0), width=2),
             symbol="o", symbolSize=5, symbolBrush=(0, 150, 0),
             name="pair estimate (bias-free)")
+        self.curve_daq = self.track_plot.plot(
+            [], [], pen=pg.mkPen((200, 80, 0), width=1),
+            name="DAQ @ plane (V)")
         v.addWidget(self.track_plot)
         g.setLayout(v)
         return g
+
+    def _set_plot_mode(self, mode: str):
+        """The time plot is shared: 'track' shows cornea z [µm], 'daq' shows
+        the raw hold-still voltage [V]."""
+        if mode == "daq":
+            self.track_plot.setLabel("left", "DAQ signal (V)")
+            self.scatter_up.setData([], [])
+            self.scatter_down.setData([], [])
+            self.curve_est.setData([], [])
+        else:
+            self.track_plot.setLabel("left", "surface z (µm)")
+            self.curve_daq.setData([], [])
 
     # ------------------------------------------------------------------ #
     # reflection plane
@@ -492,6 +550,7 @@ class PmFrontend(QWidget):
                 f"Plane: z = {res.event_z_um:.1f} µm   "
                 f"(peak {res.peak_value:.2f} V, {res.n_samples_above} samples)")
             self.btn_track_start.setEnabled(True)
+            self.btn_daq_record.setEnabled(True)
             self._refresh_positions()
         else:
             self.lbl_reflection.setText(
@@ -523,6 +582,10 @@ class PmFrontend(QWidget):
         if self._reflection_result is None or not self._reflection_result.found:
             QMessageBox.warning(self, "Tracking", "Find the reflection plane first.")
             return
+        if self._daq_recording:
+            QMessageBox.warning(self, "Tracking", "Wait for the DAQ record to finish.")
+            return
+        self._set_plot_mode("track")
         self._apply_tracking_settings()
 
         # reset live plot + session buffers
@@ -646,6 +709,112 @@ class PmFrontend(QWidget):
             self.lbl_track_status.setText(
                 f"Tracking: running — z = {z_txt}   {rate:.1f} est/s   "
                 f"{self._n_passes} passes, {self._n_misses} misses")
+
+    # ------------------------------------------------------------------ #
+    # hold-still test (static DAQ record at the plane)
+    # ------------------------------------------------------------------ #
+
+    def _on_daq_record_clicked(self):
+        if self._reflection_result is None or not self._reflection_result.found:
+            QMessageBox.warning(self, "DAQ Record", "Find the reflection plane first.")
+            return
+        if self.backend.is_tracking():
+            QMessageBox.warning(self, "DAQ Record", "Stop tracking first.")
+            return
+
+        self._daq_t = []
+        self._daq_v = []
+        self._last_daq_record = None
+        self._daq_recording = True
+        self._daq_stop_evt = threading.Event()
+        self._set_plot_mode("daq")
+
+        duration = float(self.spin_daq_duration.value())
+        z = float(self._reflection_result.event_z_um)
+        self.btn_daq_record.setEnabled(False)
+        self.btn_daq_stop.setEnabled(True)
+        self.btn_daq_save.setEnabled(False)
+        self.btn_find.setEnabled(False)
+        self.btn_track_start.setEnabled(False)
+        self.lbl_daq_status.setText(f"DAQ record: running ({duration:.1f} s at z = {z:.1f} µm)…")
+
+        def _work():
+            try:
+                rec = self.backend.record_daq_signal(
+                    duration_s=duration, z_um=z,
+                    on_chunk=lambda t, v: self.bridge.daq_chunk.emit(t, v),
+                    stop_event=self._daq_stop_evt,
+                )
+                self.bridge.daq_record_done.emit(rec)
+            except Exception as e:
+                self.bridge.op_failed.emit(f"DAQ record failed: {e}")
+                self.bridge.daq_record_done.emit(None)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_daq_stop_clicked(self):
+        if self._daq_stop_evt is not None:
+            self._daq_stop_evt.set()
+
+    def _on_daq_chunk(self, t_rel, values):
+        self._daq_t.extend(float(x) for x in t_rel)
+        self._daq_v.extend(float(x) for x in values)
+        self.curve_daq.setData(self._daq_t, self._daq_v)
+
+    def _on_daq_record_done(self, rec):
+        self._daq_recording = False
+        self.btn_daq_record.setEnabled(True)
+        self.btn_daq_stop.setEnabled(False)
+        self.btn_find.setEnabled(True)
+        self.btn_track_start.setEnabled(
+            self._reflection_result is not None and self._reflection_result.found)
+        if rec is None:
+            self.lbl_daq_status.setText("DAQ record: FAILED (see log)")
+            return
+
+        self._last_daq_record = rec
+        self.btn_daq_save.setEnabled(True)
+        v = np.asarray(rec["values"])
+        fs = rec["sample_rate_hz"]
+        if v.size:
+            self.curve_daq.setData(np.asarray(rec["t_s"]), v)
+            # hold-still metric: fraction of time above half the initial level
+            v0 = float(np.median(v[: max(1, int(0.2 * fs))]))
+            frac = float(np.mean(v > 0.5 * v0)) if v0 > 0 else 0.0
+            self.lbl_daq_status.setText(
+                f"DAQ record: done — start {v0:.2f} V, mean {v.mean():.2f} V, "
+                f"σ {v.std():.3f} V, {100 * frac:.0f}% of time above half-peak")
+        else:
+            self.lbl_daq_status.setText("DAQ record: done (no samples?)")
+
+    def _on_daq_save_clicked(self):
+        if self._last_daq_record is None:
+            return
+        default = str(Path.home() / f"hold_still_{time.strftime('%Y%m%d_%H%M%S')}.json")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save DAQ signal", default, "JSON files (*.json)")
+        if not path:
+            return
+        rec = self._last_daq_record
+        data = {
+            "meta": {
+                "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "z_um": rec["z_um"],
+                "z_parked_um": rec.get("z_parked_um"),
+                "sample_rate_hz": rec["sample_rate_hz"],
+                "duration_s": rec["duration_s"],
+                "description": "Hold-still test: raw DAQ signal with beam parked "
+                               "at the corneal reflection peak (FWHM ~9 um).",
+            },
+            "values_v": [float(x) for x in rec["values"]],
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                import json
+                json.dump(data, f, indent=2)
+            log.info(f"[Frontend] Hold-still signal saved to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save", str(e))
 
     # ------------------------------------------------------------------ #
     # laser calibration (same two-stage workflow as the main GUI)
@@ -808,8 +977,9 @@ class PmFrontend(QWidget):
     # ------------------------------------------------------------------ #
 
     def _move_lens_rel(self, delta_um: float):
-        if self.backend.is_tracking():
-            QMessageBox.warning(self, "Lens", "Stop tracking before moving the lens manually.")
+        if self.backend.is_tracking() or self._daq_recording:
+            QMessageBox.warning(self, "Lens", "Stop tracking / DAQ recording before "
+                                              "moving the lens manually.")
             return
 
         def _work():
@@ -936,7 +1106,9 @@ class PmFrontend(QWidget):
         try:
             self.request_eye_shutdown.emit()
             self.eye_thread.quit()
-            self.eye_thread.wait(3000)
+            # generous: the shutdown cascades through two worker processes
+            # (eye tracker -> camera worker -> Vimba close)
+            self.eye_thread.wait(8000)
         except Exception:
             pass
         # Last resort: the worker process is non-daemon and would keep the

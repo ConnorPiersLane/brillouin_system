@@ -37,6 +37,15 @@ def eye_tracker_worker(req_q: mp.Queue, evt_q: mp.Queue):
 
     try:
         while True:
+            # Parent-death watchdog: if the GUI process died (crash, PyCharm
+            # stop button, terminate fallback) we would otherwise stay alive
+            # as an orphan and keep the cameras claimed. Exit instead — the
+            # finally block below shuts the camera chain down cleanly.
+            parent = mp.parent_process()
+            if parent is not None and not parent.is_alive():
+                print("[eye_tracker_worker] Parent process died — shutting down.")
+                break
+
             try:
                 if running:
                     cmd = req_q.get_nowait()
