@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -28,13 +29,19 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtGui import QDoubleValidator
 from PyQt5.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
-    QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
+from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import (
+    LaserOffset, load_laser_coord_system_from_toml)
+from brillouin_system.eye_tracker.eye_position.coordinates import RigCoord
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config_gui import EyeTrackerConfigDialog
+from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults, get_eye_tracker_results
 from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrackerController
 from brillouin_system.guis.patient_movement.pm_backend import PmBackend
 from brillouin_system.logging_utils.logging_setup import get_logger, logging_fmt_gui
@@ -55,6 +62,7 @@ class _Bridge(QtCore.QObject):
     laser_calib_failed = pyqtSignal(str)
     tracking_stopped = pyqtSignal(object, object)  # points, estimates
     op_failed = pyqtSignal(str)
+    positions_changed = pyqtSignal()               # zaber positions need re-reading
 
 
 class PmFrontend(QWidget):
@@ -89,6 +97,16 @@ class PmFrontend(QWidget):
         self._reflection_result: ReflectionResult | None = None
         self._latest_pupil3d = None
         self._latest_pupil_t = 0.0
+        self._latest_et_results: EyeTrackerResults | None = None
+        self._move_lock = threading.Lock()   # serializes manual zaber moves
+        self._zaber_lens_um: float | None = None
+        try:
+            self._laser_offset: LaserOffset = load_laser_coord_system_from_toml()
+        except Exception:
+            self._laser_offset = LaserOffset(0.0, 0.0, 0.0)
+            log.warning("[Frontend] No laser offset.toml found — laser map uses (0,0,0). "
+                        "Run the laser XY calibration.")
+        self.laser_focus_position: RigCoord | None = None
         self._point_q: queue.Queue = queue.Queue()
         self._est_q: queue.Queue = queue.Queue()
         self._track_t0: float | None = None
@@ -111,8 +129,10 @@ class PmFrontend(QWidget):
         self.bridge.laser_calib_failed.connect(self._on_laser_calib_failed)
         self.bridge.tracking_stopped.connect(self._on_tracking_stopped)
         self.bridge.op_failed.connect(self._on_op_failed)
+        self.bridge.positions_changed.connect(self._refresh_positions)
 
         self._init_ui()
+        self._refresh_positions()
 
         # --- eye tracker (same controller/worker as the main GUI) ---
         self.eye_thread = QThread(self)
@@ -144,7 +164,7 @@ class PmFrontend(QWidget):
         left.addWidget(self._group_reflection())
         left.addWidget(self._group_tracking())
         left.addWidget(self._group_laser_calibration())
-        left.addWidget(self._group_manual_lens())
+        left.addWidget(self._group_manual_zabers())
         left.addWidget(self._group_log())
         left.addStretch()
         outer.addLayout(left, 0)
@@ -239,26 +259,101 @@ class PmFrontend(QWidget):
         g.setLayout(v)
         return g
 
-    def _group_manual_lens(self) -> QGroupBox:
-        g = QGroupBox("Eye Lens (manual)")
-        v = QVBoxLayout()
-        row = QHBoxLayout()
-        for delta in (-1000, -100, -10, +10, +100, +1000):
-            btn = QPushButton(f"{delta:+d}")
-            btn.setFixedWidth(50)
-            btn.clicked.connect(lambda _, d=delta: self._move_lens_rel(d))
-            row.addWidget(btn)
-        v.addLayout(row)
-        row2 = QHBoxLayout()
-        self.lbl_lens_pos = QLabel("z = ? µm")
-        btn_read = QPushButton("Read")
-        btn_read.setFixedWidth(60)
-        btn_read.clicked.connect(self._refresh_lens_position)
-        row2.addWidget(self.lbl_lens_pos)
-        row2.addWidget(btn_read)
-        row2.addStretch()
-        v.addLayout(row2)
-        g.setLayout(v)
+    def _group_manual_zabers(self) -> QGroupBox:
+        """All four axes (eye lens + rig stage x/y/z), same directions and
+        sign conventions as the main GUI's 'Manually Move Zabers' group."""
+        g = QGroupBox("Manually Move Zabers")
+        layout = QFormLayout()
+
+        def make_row(label: QLabel, step_input: QLineEdit, *buttons):
+            row = QHBoxLayout()
+            row.addWidget(step_input)
+            for btn in buttons:
+                row.addWidget(btn)
+            row.addStretch()
+            return label, row
+
+        # LENS AXIS
+        self.lens_step_input = QLineEdit("100")
+        self.lens_step_input.setFixedWidth(60)
+        lens_back = QPushButton("← Back")
+        lens_fwd = QPushButton("→ Forward")
+        self.lbl_lens_pos = QLabel("Lens ? µm")
+        layout.addRow(*make_row(self.lbl_lens_pos, self.lens_step_input, lens_back, lens_fwd))
+        lens_back.clicked.connect(lambda: self._move_lens_rel(-float(self.lens_step_input.text())))
+        lens_fwd.clicked.connect(lambda: self._move_lens_rel(+float(self.lens_step_input.text())))
+
+        # STAGE Z
+        self.z_step_input = QLineEdit("100")
+        self.z_step_input.setFixedWidth(60)
+        z_back = QPushButton("← Back")
+        z_fwd = QPushButton("→ Forward")
+        self.lbl_stage_z = QLabel("Stage Z ? µm")
+        layout.addRow(*make_row(self.lbl_stage_z, self.z_step_input, z_back, z_fwd))
+        z_back.clicked.connect(lambda: self._move_stage_rel(dz=-float(self.z_step_input.text())))
+        z_fwd.clicked.connect(lambda: self._move_stage_rel(dz=+float(self.z_step_input.text())))
+
+        # STAGE X
+        self.x_step_input = QLineEdit("100")
+        self.x_step_input.setFixedWidth(60)
+        x_left = QPushButton("← Left")
+        x_right = QPushButton("→ Right")
+        self.lbl_stage_x = QLabel("Stage X ? µm")
+        layout.addRow(*make_row(self.lbl_stage_x, self.x_step_input, x_left, x_right))
+        x_left.clicked.connect(lambda: self._move_stage_rel(dx=+float(self.x_step_input.text())))
+        x_right.clicked.connect(lambda: self._move_stage_rel(dx=-float(self.x_step_input.text())))
+
+        # STAGE Y
+        self.y_step_input = QLineEdit("100")
+        self.y_step_input.setFixedWidth(60)
+        y_up = QPushButton("↑ Up")
+        y_down = QPushButton("↓ Down")
+        self.lbl_stage_y = QLabel("Stage Y ? µm")
+        layout.addRow(*make_row(self.lbl_stage_y, self.y_step_input, y_up, y_down))
+        y_up.clicked.connect(lambda: self._move_stage_rel(dy=+float(self.y_step_input.text())))
+        y_down.clicked.connect(lambda: self._move_stage_rel(dy=-float(self.y_step_input.text())))
+
+        # Move laser to (R, phi) using eye tracking (ABSOLUTE target)
+        self.xy_r_input = QLineEdit("0.0")
+        self.xy_r_input.setFixedWidth(60)
+        self.xy_r_input.setValidator(QDoubleValidator(-1000.0, 1000.0, 4))   # mm
+        self.xy_phi_input = QLineEdit("0.0")
+        self.xy_phi_input.setFixedWidth(60)
+        self.xy_phi_input.setValidator(QDoubleValidator(-3600.0, 3600.0, 3))  # deg
+        xy_move = QPushButton("Move XY")
+        xy_move.setFixedWidth(70)
+        xy_move.clicked.connect(self._on_move_xy_polar_clicked)
+        xy_row = QHBoxLayout()
+        xy_row.addWidget(QLabel("R [mm]:"))
+        xy_row.addWidget(self.xy_r_input)
+        xy_row.addSpacing(6)
+        xy_row.addWidget(QLabel("phi [deg]:"))
+        xy_row.addWidget(self.xy_phi_input)
+        xy_row.addSpacing(6)
+        xy_row.addWidget(xy_move)
+        xy_row.addStretch()
+        layout.addRow(xy_row)
+
+        # Move lens Z to reach a target Δc (uses current Δc from eye tracking)
+        self.dc_input = QLineEdit("2.0")
+        self.dc_input.setFixedWidth(60)
+        self.dc_input.setValidator(QDoubleValidator(-1000.0, 1000.0, 4))     # mm
+        dc_move = QPushButton("Move Z")
+        dc_move.setFixedWidth(70)
+        dc_move.clicked.connect(self._on_move_z_by_dc_clicked)
+        dc_row = QHBoxLayout()
+        dc_row.addWidget(QLabel("Δc [mm]:"))
+        dc_row.addWidget(self.dc_input)
+        dc_row.addSpacing(6)
+        dc_row.addWidget(dc_move)
+        dc_row.addStretch()
+        layout.addRow(dc_row)
+
+        btn_read = QPushButton("Read Positions")
+        btn_read.clicked.connect(self._refresh_positions)
+        layout.addRow(btn_read)
+
+        g.setLayout(layout)
         return g
 
     def _group_log(self) -> QGroupBox:
@@ -284,6 +379,32 @@ class PmFrontend(QWidget):
             vb.setBorder((80, 80, 80))
             self.eye_glw.ci.addItem(vb, row=0, col=col)
             self.eye_img.append(img)
+
+        # Laser position map (same as the main GUI): polar grid in pupil
+        # coordinates [mm], moving laser dot, x/y/z/Δc text readout.
+        map_vb = pg.ViewBox(lockAspect=True, enableMenu=False)
+        map_vb.setRange(xRange=(-4, 4), yRange=(-4, 4))
+        map_vb.setBorder((80, 80, 80))
+        angles = np.linspace(0, 2 * np.pi, 720)
+        for r in range(1, 5):
+            map_vb.addItem(pg.PlotDataItem(r * np.cos(angles), r * np.sin(angles),
+                                           pen=pg.mkPen(150, 150, 150)))
+        for angle_deg in (0, 45, 90, 135, 180, 225, 270, 315):
+            theta = np.deg2rad(angle_deg)
+            map_vb.addItem(pg.PlotDataItem(
+                [np.cos(theta), 4 * np.cos(theta)], [np.sin(theta), 4 * np.sin(theta)],
+                pen=pg.mkPen(150, 150, 150, style=QtCore.Qt.DashLine)))
+        self.laser_point = pg.ScatterPlotItem([0.0], [0.0], size=12,
+                                              brush=pg.mkBrush("r"), pen=pg.mkPen("r"))
+        map_vb.addItem(self.laser_point)
+        self.laser_pos_text = pg.TextItem(text="x=\ny=\nz=\nΔc=", anchor=(1, 0))
+        map_vb.addItem(self.laser_pos_text)
+        self.laser_pos_text.setPos(4, 4)
+        self.eye_glw.ci.addItem(map_vb, row=1, col=0)
+        grid = self.eye_glw.ci.layout
+        grid.setRowStretchFactor(0, 2)
+        grid.setRowStretchFactor(1, 1)
+
         v.addWidget(self.eye_glw)
 
         row = QHBoxLayout()
@@ -341,7 +462,6 @@ class PmFrontend(QWidget):
             except Exception as e:
                 self.bridge.op_failed.emit(f"Reflection find failed: {e}")
 
-        import threading
         threading.Thread(target=_work, daemon=True).start()
 
     def _on_reflection_done(self, res: ReflectionResult):
@@ -352,7 +472,7 @@ class PmFrontend(QWidget):
                 f"Plane: z = {res.event_z_um:.1f} µm   "
                 f"(peak {res.peak_value:.2f} V, {res.n_samples_above} samples)")
             self.btn_track_start.setEnabled(True)
-            self._refresh_lens_position()
+            self._refresh_positions()
         else:
             self.lbl_reflection.setText(
                 f"Plane: NOT FOUND ({res.n_rejected_intervals} noise intervals rejected)")
@@ -422,7 +542,6 @@ class PmFrontend(QWidget):
             except Exception as e:
                 self.bridge.op_failed.emit(f"Stop tracking failed: {e}")
 
-        import threading
         threading.Thread(target=_work, daemon=True).start()
 
     def _on_tracking_stopped(self, points, estimates):
@@ -550,12 +669,14 @@ class PmFrontend(QWidget):
             except Exception as e:
                 self.bridge.laser_calib_failed.emit(str(e))
 
-        import threading
         threading.Thread(target=_work, daemon=True).start()
 
     def _on_laser_calib_done(self, offset):
         self.lbl_laser_offset.setText(
             f"Offset: dx={offset.dx:.3f}, dy={offset.dy:.3f}, dz={offset.dz:.3f}")
+        # use the fresh offset for the laser map immediately
+        self._laser_offset = offset
+        self._refresh_positions()
         self._laser_calib_buttons_reset()
 
     def _on_laser_calib_failed(self, msg: str):
@@ -578,6 +699,15 @@ class PmFrontend(QWidget):
         self.eye_img[0].setImage(left, autoLevels=True)
         self.eye_img[1].setImage(right, autoLevels=True)
 
+        # Full eye-tracker result incl. laser position in pupil coordinates
+        # (needs laser_focus_position from the lens z + calibrated offset).
+        if self.laser_focus_position is not None:
+            self._latest_et_results = get_eye_tracker_results(
+                left=left, right=right, meta=meta,
+                laser_focus_position=self.laser_focus_position)
+        else:
+            self._latest_et_results = None
+
         pupil3d = meta.get("pupil3D")
         if pupil3d is not None and pupil3d.center_ref is not None:
             self._latest_pupil3d = pupil3d
@@ -593,6 +723,32 @@ class PmFrontend(QWidget):
                 })
         else:
             self.lbl_pupil.setText("Pupil: —")
+
+        # Laser map dot + text
+        res = self._latest_et_results
+        if res is not None and res.laser_position is not None:
+            x, y, z = res.laser_position
+            if np.isfinite(x) and np.isfinite(y):
+                self.laser_point.setData([float(x)], [float(y)])
+                self.laser_point.setVisible(True)
+            dc = res.delta_laser_corner
+
+            def fmt(v):
+                return f"{v:6.3f}" if v is not None else " " * 6
+
+            self.laser_pos_text.setText(f"x={fmt(x)}\ny={fmt(y)}\nz={fmt(z)}\nΔc={fmt(dc)}")
+        else:
+            self.laser_point.setVisible(False)
+            self.laser_pos_text.setText("x=\ny=\nz=\nΔc=")
+
+    def _recent_et_result(self, max_age_s: float = 0.5) -> EyeTrackerResults | None:
+        """Latest eye-tracker result with a valid laser position, if fresh."""
+        res = self._latest_et_results
+        if res is None or res.laser_position is None:
+            return None
+        if (time.monotonic() - self._latest_pupil_t) > max_age_s:
+            return None
+        return res
 
     def _open_et_config_dialog(self):
         def _on_apply(cfg: EyeTrackerConfig):
@@ -610,7 +766,7 @@ class PmFrontend(QWidget):
         self.request_et_start.emit()
 
     # ------------------------------------------------------------------ #
-    # manual lens
+    # manual zabers + laser positioning
     # ------------------------------------------------------------------ #
 
     def _move_lens_rel(self, delta_um: float):
@@ -619,23 +775,107 @@ class PmFrontend(QWidget):
             return
 
         def _work():
-            try:
-                self.backend.zaber_eye_lens.move_rel(float(delta_um))
-            except Exception as e:
-                self.bridge.op_failed.emit(f"Lens move failed: {e}")
+            with self._move_lock:
+                try:
+                    self.backend.zaber_eye_lens.move_rel(float(delta_um))
+                except Exception as e:
+                    self.bridge.op_failed.emit(f"Lens move failed: {e}")
+            self.bridge.positions_changed.emit()
 
-        import threading
-        th = threading.Thread(target=_work, daemon=True)
-        th.start()
-        th.join(timeout=5.0)
-        self._refresh_lens_position()
+        threading.Thread(target=_work, daemon=True).start()
 
-    def _refresh_lens_position(self):
+    def _move_stage_rel(self, dx: float | None = None, dy: float | None = None,
+                        dz: float | None = None):
+        def _work():
+            with self._move_lock:
+                try:
+                    self.backend.zaber_hi.move_rel(dx=dx, dy=dy, dz=dz)
+                except Exception as e:
+                    self.bridge.op_failed.emit(f"Stage move failed: {e}")
+            self.bridge.positions_changed.emit()
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_move_xy_polar_clicked(self):
+        """Move the rig stage so the laser lands at the ABSOLUTE (R, phi)
+        position in laser/pupil coordinates. Same math and sign convention as
+        the main GUI (stage +X moves the laser -X)."""
+        res = self._recent_et_result()
+        if res is None:
+            QMessageBox.warning(self, "Move XY",
+                                "No recent eye-tracker result with a laser position — "
+                                "check cameras / pupil detection / laser offset.")
+            return
+        try:
+            x_laser = float(res.laser_position[0])
+            y_laser = float(res.laser_position[1])
+            r_mm = float(self.xy_r_input.text())
+            phi = np.deg2rad(float(self.xy_phi_input.text()))
+
+            dx_um = (r_mm * np.cos(phi) - x_laser) * 1000.0
+            dy_um = (r_mm * np.sin(phi) - y_laser) * 1000.0
+
+            max_move_um = 3500.0
+            move_mag_um = float(np.hypot(dx_um, dy_um))
+            if move_mag_um > max_move_um:
+                scale = max_move_um / move_mag_um
+                dx_um *= scale
+                dy_um *= scale
+                log.warning(f"[Move XY] Requested {move_mag_um / 1000:.3f} mm exceeds "
+                            f"3.5 mm limit — clamped (scale {scale:.3f}).")
+
+            log.info(f"[Move XY] laser ({x_laser:.3f}, {y_laser:.3f}) mm -> "
+                     f"R={r_mm:.3f} mm phi={np.rad2deg(phi):.1f} deg "
+                     f"(stage dx={-dx_um:.0f}, dy={dy_um:.0f} µm)")
+            self._move_stage_rel(dx=-dx_um, dy=dy_um)
+        except Exception as e:
+            log.exception(f"[Move XY] Failed: {e}")
+
+    def _on_move_z_by_dc_clicked(self):
+        """Move the eye lens so Δc (laser-to-cornea distance) reaches the
+        target value. Same convention as the main GUI (lens moves -dz)."""
+        if self.backend.is_tracking():
+            QMessageBox.warning(self, "Move Z", "Stop tracking before moving the lens.")
+            return
+        res = self._recent_et_result()
+        if res is None or res.delta_laser_corner is None:
+            QMessageBox.warning(self, "Move Z",
+                                "No recent eye-tracker result with Δc — "
+                                "check cameras / pupil detection.")
+            return
+        try:
+            dc_current = float(res.delta_laser_corner)
+            dc_target = float(self.dc_input.text())
+            dz_um = float(np.clip((dc_target - dc_current) * 1000.0, -2000.0, 2000.0))
+            log.info(f"[Move Z Δc] current={dc_current:.3f} target={dc_target:.3f} mm "
+                     f"-> lens {-dz_um:.0f} µm")
+            self._move_lens_rel(-dz_um)
+        except Exception as e:
+            log.exception(f"[Move Z Δc] Failed: {e}")
+
+    def _refresh_positions(self):
+        """Read all four zaber positions, update labels and the laser focus
+        position (rig coords) used by the eye-tracker laser display."""
         try:
             pos = float(self.backend.zaber_eye_lens.get_position())
-            self.lbl_lens_pos.setText(f"z = {pos:.1f} µm")
+            self._zaber_lens_um = pos
+            self.lbl_lens_pos.setText(f"Lens {pos:.2f} µm")
+            self.laser_focus_position = RigCoord(
+                x=self._laser_offset.dx / 1000.0,
+                y=self._laser_offset.dy / 1000.0,
+                z=pos / 1000.0 + self._laser_offset.dz / 1000.0,
+            )
         except Exception:
-            self.lbl_lens_pos.setText("z = ? µm")
+            self.lbl_lens_pos.setText("Lens ? µm")
+        try:
+            x, y, z = self.backend.zaber_hi.get_position()
+            self.lbl_stage_x.setText(f"Stage X {x:.2f} µm")
+            self.lbl_stage_y.setText(f"Stage Y {y:.2f} µm")
+            self.lbl_stage_z.setText(f"Stage Z {z:.2f} µm")
+        except Exception:
+            self.lbl_stage_x.setText("Stage X ? µm")
+            self.lbl_stage_y.setText("Stage Y ? µm")
+            self.lbl_stage_z.setText("Stage Z ? µm")
 
     # ------------------------------------------------------------------ #
     # misc
