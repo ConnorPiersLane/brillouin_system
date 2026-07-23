@@ -531,26 +531,14 @@ class PmFrontend(QWidget):
     def _on_find_reflection_clicked(self):
         self.btn_find.setEnabled(False)
         self.btn_track_start.setEnabled(False)
-        self.btn_daq_record.setEnabled(False)
         self.lbl_reflection.setText("Plane: searching…")
 
         def _work():
             try:
                 res = self.backend.find_reflection_plane(is_go_forwards=True)
+                self.bridge.reflection_done.emit(res)
             except Exception as e:
                 self.bridge.op_failed.emit(f"Reflection find failed: {e}")
-                return
-            if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
-                # Same semantics as the main GUI: park the lens at
-                # plane + manual z offset (z_pos = event_z + z_offset).
-                # A failed park must NOT lose the found result.
-                try:
-                    z_park = float(res.event_z_um) + float(res.z_offset_um or 0.0)
-                    self.backend.zaber_eye_lens.move_abs(z_park)
-                except Exception as e:
-                    self.bridge.op_failed.emit(
-                        f"Parking at plane+offset failed (plane result kept): {e}")
-            self.bridge.reflection_done.emit(res)
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -561,12 +549,21 @@ class PmFrontend(QWidget):
             offset = float(res.z_offset_um or 0.0)
             z_park = float(res.event_z_um) + offset
             self.lbl_reflection.setText(
-                f"Plane: z = {res.event_z_um:.1f} µm — lens parked at "
-                f"{z_park:.1f} µm (offset {offset:+.0f})   "
+                f"Plane: z = {res.event_z_um:.1f} µm → lens to {z_park:.1f} µm "
+                f"(offset {offset:+.0f})   "
                 f"(peak {res.peak_value:.2f} V, {res.n_samples_above} samples)")
+            # Buttons enable FIRST — the offset move below can never block them.
             self.btn_track_start.setEnabled(True)
             self.btn_daq_record.setEnabled(True)
-            self._refresh_positions()
+
+            def _park():
+                try:
+                    self.backend.zaber_eye_lens.move_abs(z_park)
+                except Exception as e:
+                    log.error(f"[Frontend] Move to plane+offset failed: {e}")
+                self.bridge.positions_changed.emit()
+
+            threading.Thread(target=_park, daemon=True).start()
         else:
             self.lbl_reflection.setText(
                 f"Plane: NOT FOUND ({res.n_rejected_intervals} noise intervals rejected)")
