@@ -107,7 +107,7 @@ def load_laser_coord_system_from_toml() -> LaserOffset:
 
 def save_offset_to_toml(dx: float, dy: float, dz: float, filename: str = "offset.toml"):
     """
-    Save dx, dy, dz (dz=0) to a TOML file in the same directory as this file.
+    Save dx, dy, dz to a TOML file in the same directory as this file.
     """
 
     data = {
@@ -273,7 +273,7 @@ class CalibRigLaserPosition:
 
         for _ in range(self._max_steps):
             if self.cancel_callback():
-                log.info(f"Cancelled.")
+                log.info("Cancelled.")
                 raise OperationCancelled()
             self.move_dr_at_constant_angle_phi(phi_deg=angle_deg, dr=self._coarse_step_um)
             current_pos = self.zaber_hi.get_position()
@@ -311,7 +311,7 @@ class CalibRigLaserPosition:
 
         for _ in range(self._max_binary_iters):
             if self.cancel_callback():
-                log.info(f"Cancelled.")
+                log.info("Cancelled.")
                 raise OperationCancelled()
             if self._xy_distance(lo, hi) <= self._tolerance_um:
                 break
@@ -467,7 +467,7 @@ class CalibRigLaserPosition:
         save_measured_circle_to_json(measured)
 
         print(f"Saved calibration to {FILENAME}")
-        print(f"Saved measured circle to measured_circle.json")
+        print("Saved measured circle to measured_circle.json")
         print(f"Center: ({cx:.3f}, {cy:.3f}, {cz:.3f}), Radius: {r:.3f}")
 
         return LaserOffset(dx=dx, dy=dy, dz=dz)

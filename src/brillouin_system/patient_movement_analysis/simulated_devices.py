@@ -355,11 +355,6 @@ class SimNI:
         self._cursor = end_idx
         return [float(x) for x in vals]
 
-    def read_latest(self, *, timeout_s: float = 0.05) -> float:
-        self._ensure_streaming()
-        i = max(0, self._n_available() - 1)
-        return float(self._gen(i, i + 1)[0])
-
     # ---------------- background acquisition API ----------------
 
     def start_acquiring(self, *, max_sampling_time_s: float,

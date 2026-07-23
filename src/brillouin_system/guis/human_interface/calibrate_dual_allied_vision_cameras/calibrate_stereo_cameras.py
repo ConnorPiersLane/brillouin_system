@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict
 
 from brillouin_system.eye_tracker.stereo_imaging.calibrate_single import (

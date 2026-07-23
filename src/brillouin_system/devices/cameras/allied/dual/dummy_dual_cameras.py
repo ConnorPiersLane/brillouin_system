@@ -1,5 +1,4 @@
 import numpy as np
-from dataclasses import asdict
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig, allied_config
 from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras

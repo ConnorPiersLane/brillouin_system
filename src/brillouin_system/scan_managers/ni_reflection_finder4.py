@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -40,19 +40,13 @@ class ReflectionResult:
     zaber_lens_ts: Optional[np.ndarray] = None
     zaber_lens_z_um: Optional[np.ndarray] = None
 
-def print_reflection_result(result):
-    for f in fields(result):
-        value = getattr(result, f.name)
-        print(f"{f.name}: {value}")
-
-
 def fit_z_at_time(
     t_query: float,
     t_z: np.ndarray,
     z_um: np.ndarray,
     *,
     slope_tol: float = 0.2,
-    min_points: int = 8,
+    min_points: int = 4,
 ) -> float:
     """
     Least-squares line fit z(t) over the constant-velocity portion of the
@@ -61,16 +55,23 @@ def fit_z_at_time(
     During the search the stage slews at constant velocity, so z(t) is a
     straight line; fitting all log samples averages out the per-sample
     timestamp jitter (~ms serial latency placement), which 2-point
-    interpolation inherits in full. The acceleration ramp at the start and
-    the deceleration after the early stop are excluded by keeping only
-    segments whose local slope is within slope_tol of the median slope.
+    interpolation inherits in full. Acceleration ramps and stationary
+    portions of the log are excluded by keeping only segments whose local
+    slope is within slope_tol of the slope AT t_query (the event always
+    happens mid-motion; a global median slope can be dominated by a long
+    stationary tail — e.g. the tracker's per-pass logs — and would then fit
+    the parking plateau instead of the motion).
 
-    Returns NaN if fewer than min_points samples remain — caller should fall
-    back to interp_z_positions().
+    Returns NaN if fewer than min_points samples remain, or if t_query lies
+    outside the log's time span (extrapolating the fitted line can produce
+    arbitrarily wrong positions) — caller should fall back to
+    interp_z_positions(), which clamps to the log endpoints.
     """
     t = np.asarray(t_z, dtype=np.float64)
     z = np.asarray(z_um, dtype=np.float64)
     if t.size < min_points:
+        return float("nan")
+    if not (t[0] <= float(t_query) <= t[-1]):
         return float("nan")
 
     keep = np.concatenate(([True], np.diff(t) > 0))
@@ -80,7 +81,10 @@ def fit_z_at_time(
         return float("nan")
 
     v = np.diff(z) / np.diff(t)
-    v_ref = float(np.median(v))
+    # reference slope: the segment bracketing t_query
+    k = int(np.searchsorted(t, float(t_query), side="right")) - 1
+    k = min(max(k, 0), v.size - 1)
+    v_ref = float(v[k])
     if v_ref == 0.0 or not np.isfinite(v_ref):
         return float("nan")
 
@@ -168,13 +172,12 @@ def find_reflection_realtime(
         low_run = 0
         n_above = 0
         n_rejected = 0
-        daq: NIReadResult | None = None
+        daq = None
         zlog: ZaberPositionLog | None = None
 
-        # Track max within interval (for mode="max")
+        # Track max within interval
         best_v = float("-inf")
         best_idx: Optional[int] = None
-        rr: NIReadResult | None = None
 
         # Cursor into NI acquisition-buffer indices for incremental reads
         last_idx = 0
@@ -200,7 +203,7 @@ def find_reflection_realtime(
                 if (time.perf_counter() - t_start) > max_time_s:
                     break
 
-                rr: NIReadResult = ni.get_new_block_result(last_idx, copy=False)
+                rr = ni.get_new_block_result(last_idx, copy=False)
                 xs = rr.values
                 n = xs.size
                 if n <= 0:
@@ -266,13 +269,10 @@ def find_reflection_realtime(
             except Exception:
                 zlog = None
 
-            try: err = ni.get_acquiring_error()
-            except Exception: err = None
-
             try:
-                daq: NIReadResult = ni.stop_acquiring()
+                daq = ni.stop_acquiring()
             except Exception:
-                daq: None = None
+                daq = None
 
 
     if (
@@ -350,7 +350,7 @@ def find_reflection_realtime(
 # Example usage
 # --------------------
 if __name__ == "__main__":
-    from brillouin_system.devices.ni.ni6008 import NI6008, NIReadResult
+    from brillouin_system.devices.ni.ni6008 import NI6008
     from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 
     ni = NI6008()
@@ -370,16 +370,6 @@ if __name__ == "__main__":
         idle_sleep_s=0.001,
     )
 
-    # print_reflection_result(res)
-
     if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
         z.move_abs(res.event_z_um)
         print(res.event_z_um)
-    # plt.figure()
-    # # plt.plot(r[:500], marker='o')
-    # plt.plot(res.zaber_lens_ts, res.zaber_lens_z_um, marker='o')
-    # plt.axvline(x=res.event_time_perf)  # vertical line at xe
-    #
-    # plt.grid(True)
-    #
-    # plt.show()

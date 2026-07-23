@@ -185,7 +185,6 @@ class AxialScanViewer(QWidget):
         self.canvas.draw()
 
 
-        fitted_spectrum = self.list_analyzed_spectras[self.current_index].fitted_spectrum
 
 
     def plot_frame(self, frame: np.ndarray):
@@ -319,12 +318,12 @@ class AxialScanViewer(QWidget):
             if scan.reflection_result_forwards.event_z_um is not None:
                 print(f'Plane (forwards): {round(scan.reflection_result_forwards.event_z_um)}')
             else:
-                print(f'Plane (forwards): None')
+                print('Plane (forwards): None')
         if scan.reflection_result_backwards is not None:
             if scan.reflection_result_backwards.event_z_um is not None:
                 print(f'Plane (backwards): {round(scan.reflection_result_backwards.event_z_um)}')
             else:
-                print(f'Plane (backwards): None')
+                print('Plane (backwards): None')
 
         if scan.eye_tracker_results is not None:
             if scan.eye_tracker_results.laser_position is not None:
@@ -334,7 +333,7 @@ class AxialScanViewer(QWidget):
                 print(f"Y: {fmt(er.laser_position[1], precision=2)}")
                 print(f"Z: {fmt(er.laser_position[2], precision=2)}")
             else:
-                print(f"Eye Tracker Position is None")
+                print("Eye Tracker Position is None")
         print("=============================")
 
     def print_measurement_info(self):

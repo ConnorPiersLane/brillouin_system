@@ -1,7 +1,7 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QMessageBox, QSlider
+    QPushButton, QMessageBox, QSlider
 )
 from PyQt5.QtGui import QIntValidator
 

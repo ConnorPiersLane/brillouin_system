@@ -1,5 +1,5 @@
 
-from ctypes import *
+from ctypes import WinDLL, byref, c_int, c_longlong
 
 
 ERROR_CODE = {

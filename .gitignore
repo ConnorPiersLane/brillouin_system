@@ -29,3 +29,9 @@ Thumbs.db
 
 # Ignore the Virtual environment
 .venv/
+# Measurement data does not belong in the repo (keep it in Dropbox/output dirs)
+src/**/*.xlsx
+src/**/*.h5
+tests/**/*.h5
+src/brillouin_system/scan_managers/reflection_error_data/
+src/brillouin_system/eye_tracker/stereo_imaging/images/

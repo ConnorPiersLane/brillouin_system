@@ -161,7 +161,6 @@ class PupilDetector:
         # 4) (Tiny) recenter so linear term ~ 0: u^T A u + 2 b^T u + c = 0
         A = Qp[:2, :2]
         b = Qp[:2, 2]
-        c = Qp[2, 2]
         # If A is ill-conditioned, bail out gracefully
         try:
             u0 = -np.linalg.solve(A, b)  # conic center in (u,v)

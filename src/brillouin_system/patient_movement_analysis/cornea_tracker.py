@@ -367,6 +367,18 @@ class CorneaTracker:
             return TrackPoint(pass_index=pass_index, t_perf=t_end,
                               direction=direction, found=False)
 
+        # Plausibility gate: the lens only travelled current -> target (plus
+        # guard-stop overshoot), so a measured event z outside that range is
+        # a corrupted estimate (e.g. bad log segment) — count it as a miss
+        # rather than poisoning the track and the re-centering average.
+        z_lo = min(current, target_um) - 100.0
+        z_hi = max(current, target_um) + 100.0
+        if not (z_lo <= z_event <= z_hi):
+            log.warning(f"[Tracker] pass {pass_index}: event z {z_event:.1f} um "
+                        f"outside travel range [{z_lo:.0f}, {z_hi:.0f}] — discarded.")
+            return TrackPoint(pass_index=pass_index, t_perf=t_end,
+                              direction=direction, found=False)
+
         return TrackPoint(
             pass_index=pass_index,
             t_perf=float(t_event),

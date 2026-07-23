@@ -92,9 +92,7 @@ def _writer_main(queue: Queue, log_path: str):
 
 
 # ------------------------- Public API -------------------------
-import logging
 from logging import Formatter
-from logging.handlers import RotatingFileHandler
 
 # assume these already exist in your file:
 # LOGGER_NAME = "brillouin"

@@ -10,7 +10,7 @@ from typing import Optional, List, Tuple
 import numpy as np
 import cv2
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QLineEdit, QShortcut, QTextEdit, QCheckBox

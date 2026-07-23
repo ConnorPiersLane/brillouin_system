@@ -43,7 +43,6 @@ from brillouin_system.logging_utils.qt_log_handler import QtTextEditHandler
 from brillouin_system.patient_movement_analysis.tracking_config.tracking_config import (
     save_tracking_config, tracking_config)
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
-from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config_gui import AxialScanningConfigDialog
 
 log = get_logger(__name__)

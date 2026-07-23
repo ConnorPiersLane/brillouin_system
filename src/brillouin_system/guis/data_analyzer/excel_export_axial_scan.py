@@ -93,14 +93,10 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
     pb_um = None
     ts_pb = None
     reflection_signal_pb_v = None
-    pb_background_mean = None
-    pb_background_std = None
     if axial_scan.reflection_result_backwards is not None:
         ts_pb = axial_scan.reflection_result_backwards.event_time_perf
         pb_um = axial_scan.reflection_result_backwards.event_z_um
         reflection_signal_pb_v = axial_scan.reflection_result_backwards.peak_value
-        pb_background_mean = axial_scan.reflection_result_backwards.background_mean
-        pb_background_std = axial_scan.reflection_result_backwards.background_std
 
     measurement_um = axial_scan.measurements[idx].lens_zaber_position
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorExposure, AndorCameraInfo
+from brillouin_system.devices.cameras.andor.andor_dataclasses import AndorCameraInfo
 from brillouin_system.my_dataclasses.background_image import ImageStatistics
 
 

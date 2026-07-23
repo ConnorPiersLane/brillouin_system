@@ -237,7 +237,6 @@ def mean_shift_ratio_exact(
     alpha_in = internal_half_angle(na_in, n_sample)
     alpha_out = internal_half_angle(na_out, n_sample)
     u0 = effective_u0(alpha_in, fill_factor)
-    v0 = effective_u0(alpha_out, fill_factor)
 
     # Integration grids
     u = np.linspace(0.0, alpha_in, n_u)

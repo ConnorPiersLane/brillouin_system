@@ -1,7 +1,6 @@
 
 import time
 from contextlib import contextmanager
-from enum import Enum
 from typing import Callable
 
 import numpy as np
@@ -15,7 +14,6 @@ from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 
 from brillouin_system.devices.shutter_device import ShutterManager, ShutterManagerDummy
-from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens_dummy import ZaberEyeLensDummy
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_human_interface import ZaberHumanInterface, \
     ZaberHumanInterfaceDummy
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset, \
@@ -45,19 +43,6 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, mo
 log = get_logger(__name__)
 
 
-class SystemType(Enum):
-    HUMAN_INTERFACE = 0
-    MICROSCOPE = 1
-
-def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
-    """Normalize image to uint8 using contrast stretching."""
-    img = np.copy(image)
-    img = np.clip(img, 0, np.percentile(img, 99))  # contrast stretch
-    img = 255 * (img / img.max()) if img.max() > 0 else img
-    return img.astype(np.uint8)
-
-
-
 class HiBackend:
 
 
@@ -74,12 +59,15 @@ class HiBackend:
             camera=DummyCamera()
             shutter_manager=ShutterManagerDummy('human_interface')
             microwave=MicrowaveDummy()
-            zaber_eye_lens=ZaberEyeLensDummy()
+            # Simulated NI + eye lens with a moving simulated cornea: the DAQ
+            # signal is coupled to the lens-cornea distance, so reflection
+            # finding actually works in dummy mode.
+            from brillouin_system.patient_movement_analysis.simulated_devices import (
+                SimNI, SimZaberLens, SimulatedCornea)
+            sim_cornea = SimulatedCornea()
+            zaber_eye_lens = SimZaberLens(start_um=9000.0)
+            ni = SimNI(zaber_eye_lens, sim_cornea)
             zaber_hi=ZaberHumanInterfaceDummy()
-            # zaber_eye_lens=ZaberEyeLens()
-            # zaber_hi=ZaberHumanInterface()
-            from brillouin_system.devices.ni.ni_dummy import NIDummy
-            ni = NIDummy()
 
         else:
             try:
@@ -94,20 +82,17 @@ class HiBackend:
                 #     advanced_gain_option=False
                 # )
                 camera = DummyCamera()
-            except:
-                raise print("Camera not connected")
+            except Exception as e:
+                raise RuntimeError("Camera not connected") from e
 
             shutter_manager=ShutterManager('human_interface')
-            # shutter_manager = ShutterManager('microscope')
             try:
                 microwave=Microwave()
                 # microwave = MicrowaveDummy()
-            except:
-                raise print("Microwave not connected")
+            except Exception as e:
+                raise RuntimeError("Microwave not connected") from e
             zaber_eye_lens=ZaberEyeLens()
-            # zaber_eye_lens = ZaberEyeLensDummy()
             zaber_hi=ZaberHumanInterface()
-            # zaber_hi = ZaberHumanInterfaceDummy()
             from brillouin_system.devices.ni.ni6008 import NI6008
             ni = NI6008()
 
@@ -769,7 +754,7 @@ class HiBackend:
 
         """
         if self.is_reference_mode:
-            log.info(f"System is in Reference (Calibration Mode) - Change to Sample Mode")
+            log.info("System is in Reference (Calibration Mode) - Change to Sample Mode")
             return ReflectionResult(found=False)
 
         ni_sample_rate_hz = self._axial_scan_config.ni_sample_rate_hz

@@ -39,7 +39,7 @@ from PyQt5 import QtCore
 
 from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
 from brillouin_system.logging_utils.logging_setup import start_logging, install_crash_hooks, get_logger, \
-    shutdown_logging, logging_fmt_gui, enable_console_fallback
+    logging_fmt_gui
 
 log = get_logger(__name__)
 
@@ -1515,7 +1515,7 @@ class HiFrontend(QWidget):
     def calibration_finished(self):
         self.show_calib_btn.setEnabled(True)
         self.save_calib_btn.setEnabled(True)
-        log.info(f"[Brillouin Viewer] Calibration available")
+        log.info("[Brillouin Viewer] Calibration available")
 
 
     def handle_requested_calibration(self,
@@ -1787,15 +1787,19 @@ class HiFrontend(QWidget):
         x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
         if self._zaber_lens_um is None:
             return
-        print(f"Pupil Center before moving: {round(float(x)), round(float(y)), round(float(z))}")
-        # Assumint Rig COS and zaber_lens share same origin
+        log.info(f"Pupil Center before moving: {round(float(x)), round(float(y)), round(float(z))}")
+        # Assuming Rig COS and zaber_lens share same origin
         # Moving the Rig here (not the lens)
         self.move_zaber_stage_x_requested.emit(x)
         self.move_zaber_stage_y_requested.emit(y)
         self.move_zaber_stage_z_requested.emit(z-self._zaber_lens_um)
 
-        # remov ethie
-        time.sleep(2)
+        # Wait for the stage moves + a fresh eye result WITHOUT freezing the
+        # GUI thread (processEvents keeps the event loop alive).
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.02)
         et_result = self._wait_for_eye_result()
         if et_result is None or et_result.pupil3d is None:
             return
@@ -1805,7 +1809,7 @@ class HiFrontend(QWidget):
         x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
         if self._zaber_lens_um is None:
             return
-        print(f"Pupil Center after moving: {round(float(x)), round(float(y)), round(float(z))}")
+        log.info(f"Pupil Center after moving: {round(float(x)), round(float(y)), round(float(z))}")
 
         self.calibrate_laser_camera_position_requested.emit()
 

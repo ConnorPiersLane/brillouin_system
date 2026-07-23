@@ -1,6 +1,5 @@
 # dual_camera_demo.py
 import sys
-import os
 import csv
 import threading
 import queue
@@ -14,7 +13,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt
 import cv2
-from PyQt5.QtWidgets import QCheckBox, QSpinBox, QLabel
+from PyQt5.QtWidgets import QCheckBox, QSpinBox
 
 
 # ⬇️ import your config dialog

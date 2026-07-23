@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
+from PyQt5.QtCore import QObject
 from PyQt5 import QtCore
 
 from brillouin_system.eye_tracker.eye_tracker_config.eye_tracker_config import EyeTrackerConfig
