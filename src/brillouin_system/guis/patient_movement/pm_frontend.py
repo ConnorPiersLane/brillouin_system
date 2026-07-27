@@ -66,6 +66,7 @@ class _Bridge(QtCore.QObject):
     positions_changed = pyqtSignal()               # zaber positions need re-reading
     daq_chunk = pyqtSignal(object, object)         # t_rel_s, values (live record)
     daq_record_done = pyqtSignal(object)           # record dict
+    daq_found_plane = pyqtSignal(object)           # fresh ReflectionResult (no park)
 
 
 class PmFrontend(QWidget):
@@ -147,6 +148,7 @@ class PmFrontend(QWidget):
         self.bridge.positions_changed.connect(self._refresh_positions)
         self.bridge.daq_chunk.connect(self._on_daq_chunk)
         self.bridge.daq_record_done.connect(self._on_daq_record_done)
+        self.bridge.daq_found_plane.connect(self._on_daq_found_plane)
         self._daq_t: list = []
         self._daq_v: list = []
         self._daq_stop_evt: threading.Event | None = None
@@ -279,8 +281,7 @@ class PmFrontend(QWidget):
         self.spin_daq_duration.setValue(3.0)
         self.spin_daq_duration.setDecimals(1)
         row.addWidget(self.spin_daq_duration)
-        self.btn_daq_record = QPushButton("Record @ Plane")
-        self.btn_daq_record.setEnabled(False)
+        self.btn_daq_record = QPushButton("Find Plane + Record")
         self.btn_daq_record.clicked.connect(self._on_daq_record_clicked)
         self.btn_daq_stop = QPushButton("Stop")
         self.btn_daq_stop.setEnabled(False)
@@ -727,9 +728,9 @@ class PmFrontend(QWidget):
     # ------------------------------------------------------------------ #
 
     def _on_daq_record_clicked(self):
-        if self._reflection_result is None or not self._reflection_result.found:
-            QMessageBox.warning(self, "DAQ Record", "Find the reflection plane first.")
-            return
+        """Self-contained hold-still test: find the reflection plane FRESH
+        (the cornea may have moved since any earlier find), then record the
+        DAQ signal right there. The lens is never sent to a stored plane."""
         if self.backend.is_tracking():
             QMessageBox.warning(self, "DAQ Record", "Stop tracking first.")
             return
@@ -742,18 +743,29 @@ class PmFrontend(QWidget):
         self._set_plot_mode("daq")
 
         duration = float(self.spin_daq_duration.value())
-        z = float(self._reflection_result.event_z_um)
         self.btn_daq_record.setEnabled(False)
         self.btn_daq_stop.setEnabled(True)
         self.btn_daq_save.setEnabled(False)
         self.btn_find.setEnabled(False)
         self.btn_track_start.setEnabled(False)
-        self.lbl_daq_status.setText(f"DAQ record: running ({duration:.1f} s at z = {z:.1f} µm)…")
+        self.lbl_daq_status.setText("DAQ record: finding reflection plane…")
 
         def _work():
             try:
+                res = self.backend.find_reflection_plane(is_go_forwards=True)
+            except Exception as e:
+                self.bridge.op_failed.emit(f"DAQ record: reflection find failed: {e}")
+                self.bridge.daq_record_done.emit(None)
+                return
+            self.bridge.daq_found_plane.emit(res)
+            if not (res.found and res.event_z_um is not None
+                    and np.isfinite(res.event_z_um)):
+                self.bridge.op_failed.emit("DAQ record: reflection plane not found.")
+                self.bridge.daq_record_done.emit(None)
+                return
+            try:
                 rec = self.backend.record_daq_signal(
-                    duration_s=duration, z_um=z,
+                    duration_s=duration, z_um=float(res.event_z_um),
                     on_chunk=lambda t, v: self.bridge.daq_chunk.emit(t, v),
                     stop_event=self._daq_stop_evt,
                 )
@@ -763,6 +775,20 @@ class PmFrontend(QWidget):
                 self.bridge.daq_record_done.emit(None)
 
         threading.Thread(target=_work, daemon=True).start()
+
+    def _on_daq_found_plane(self, res: ReflectionResult):
+        """Fresh find from the record workflow: update plane state/label but
+        do NOT park at plane+offset — the record continues at the peak."""
+        self._reflection_result = res
+        if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
+            self.lbl_reflection.setText(
+                f"Plane: z = {res.event_z_um:.1f} µm (fresh, from record)   "
+                f"(peak {res.peak_value:.2f} V, {res.n_samples_above} samples)")
+            self.lbl_daq_status.setText(
+                f"DAQ record: recording at z = {res.event_z_um:.1f} µm…")
+        else:
+            self.lbl_reflection.setText(
+                f"Plane: NOT FOUND ({res.n_rejected_intervals} noise intervals rejected)")
 
     def _on_daq_stop_clicked(self):
         if self._daq_stop_evt is not None:
@@ -1110,7 +1136,7 @@ class PmFrontend(QWidget):
                          and self._reflection_result.found)
             self.btn_track_start.setEnabled(has_plane)
             if not self._daq_recording:
-                self.btn_daq_record.setEnabled(has_plane)
+                self.btn_daq_record.setEnabled(True)   # self-contained: needs no prior plane
 
     def closeEvent(self, event):
         try:
