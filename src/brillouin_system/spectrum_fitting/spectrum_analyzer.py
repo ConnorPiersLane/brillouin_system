@@ -7,6 +7,15 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.analyze_util import get_b_values
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, count_to_electrons
 
+# Thompson's photon term s^2/N is derived for a GAUSSIAN profile. Our peaks are
+# Lorentzian and we pass the HWHM in place of s. A Lorentzian's tails carry less
+# information about the centre, so its bound is g*sqrt(2/N) -- a factor 2 in
+# variance. Verified by Monte-Carlo (2000 fits at matched width and photons) and
+# against measured scatter: without this factor the formula reads 0.55-0.77x of
+# the real per-frame scatter across water, glycerol and cornea; with it,
+# 0.78-1.08x.
+LORENTZIAN_CRLB_FACTOR = 2.0
+
 
 @dataclass
 class TheoreticalPeakStdError:
@@ -117,12 +126,12 @@ class SpectrumAnalyzer:
         b_l = count_to_electrons(b_counts_l, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
         b_r = count_to_electrons(b_counts_r, preamp_gain=preamp_gain, emccd_gain=emccd_gain)
 
-        dx_l_photons = math.sqrt(            s_l ** 2 / n_l        )
+        dx_l_photons = math.sqrt(  LORENTZIAN_CRLB_FACTOR * s_l ** 2 / n_l        )
         dx_l_pixelation = math.sqrt(  (a_l**2/12) / n_l)
         dx_l_bg =math.sqrt(  4*math.sqrt(math.pi) * s_l**3*b_l**2 / (a_l * n_l**2) )
         dx_l_total =math.sqrt( dx_l_photons**2 + dx_l_pixelation**2 + dx_l_bg**2 )
 
-        dx_r_photons = math.sqrt(            s_r ** 2 / n_r        )
+        dx_r_photons = math.sqrt(  LORENTZIAN_CRLB_FACTOR * s_r ** 2 / n_r        )
         dx_r_pixelation = math.sqrt(  (a_r**2/12) / n_r)
         dx_r_bg =math.sqrt(  4*math.sqrt(math.pi) * s_r**3*b_r**2 / (a_r * n_r**2) )
         dx_r_total =math.sqrt( dx_r_photons**2 + dx_r_pixelation**2 + dx_r_bg**2)
