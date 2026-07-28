@@ -53,6 +53,7 @@ class BrillouinExport:
     rp_theo_std_bg_mhz: Optional[float] = None
     rp_theo_std_total_mhz: Optional[float] = None
     distance_ghz: Optional[float] = None
+    distance_theo_std_total_mhz: Optional[float] = None
     # distance_ghz_interp: Optional[float] = None
     distance_theo_std_mhz: Optional[float] = None
     ts_frame: Optional[float] = None
@@ -154,6 +155,7 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
 
         # Distance between peaks
         distance_ghz=shifts.freq_shift_peak_distance_ghz,
+        distance_theo_std_total_mhz=theo.distance_total_mhz,
         # distance_ghz_interp=shifts.freq_shift_peak_distance_ghz_interp,
         ts_frame = axial_scan.measurements[idx].time_stamp,
         ts_pf = ts_pf,

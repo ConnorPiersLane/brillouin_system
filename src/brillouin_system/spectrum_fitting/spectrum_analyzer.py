@@ -28,6 +28,8 @@ class TheoreticalPeakStdError:
     right_peak_pixelation_mhz: float | None =  None
     right_peak_bg_mhz: float | None =  None
     right_peak_total_mhz: float | None =  None
+    # Precision of the peak-distance observable (the one normally reported).
+    distance_total_mhz: float | None =  None
 
 @dataclass
 class AnalyzedFreqShifts:
@@ -101,8 +103,16 @@ class SpectrumAnalyzer:
                               bg_frame_std: np.ndarray | None,
                               preamp_gain: int | float,
                               emccd_gain: int | float,
+                              corr_left_right: float = 0.0,
                               ) -> TheoreticalPeakStdError:
-        """ See paper: Precise nanometer Localization Analysis for Individual Fluorescent Probes """
+        """ See paper: Precise nanometer Localization Analysis for Individual Fluorescent Probes
+
+        corr_left_right is the correlation between the two peak-centre errors,
+        used only for the distance. Shot noise in the two peaks comes from
+        different photons on different pixels, so the default of 0 is the right
+        choice for a shot-noise bound. (The ~-0.1 correlation seen in repeated
+        measurements is common-mode drift, not photon noise.)
+        """
         if not fs.is_success:
             return TheoreticalPeakStdError()
 
@@ -136,6 +146,17 @@ class SpectrumAnalyzer:
         dx_r_bg =math.sqrt(  4*math.sqrt(math.pi) * s_r**3*b_r**2 / (a_r * n_r**2) )
         dx_r_total =math.sqrt( dx_r_photons**2 + dx_r_pixelation**2 + dx_r_bg**2)
 
+        # Distance observable: d_px = c_right - c_left, so
+        #   var(d_px) = var(c_right) + var(c_left) - 2*cov(c_left, c_right).
+        # dx_*_total are frequency errors read through each order's own
+        # polynomial, so divide by that order's slope to get back to pixels,
+        # then apply the distance polynomial's slope.
+        a_d = abs(self.calibration_calculator.df_peak_distance(px=fs.inter_peak_distance, dpx=1))
+        sigma_c_l_px = dx_l_total / a_l
+        sigma_c_r_px = dx_r_total / a_r
+        var_d_px = (sigma_c_l_px**2 + sigma_c_r_px**2
+                    - 2 * corr_left_right * sigma_c_l_px * sigma_c_r_px)
+        dx_d_total = a_d * math.sqrt(max(var_d_px, 0.0))
 
         return TheoreticalPeakStdError(
             left_peak_photons_mhz=dx_l_photons * 1000,
@@ -146,6 +167,7 @@ class SpectrumAnalyzer:
             right_peak_pixelation_mhz=dx_r_pixelation * 1000,
             right_peak_bg_mhz=dx_r_bg * 1000,
             right_peak_total_mhz=dx_r_total * 1000,
+            distance_total_mhz=dx_d_total * 1000,
         )
 
 
