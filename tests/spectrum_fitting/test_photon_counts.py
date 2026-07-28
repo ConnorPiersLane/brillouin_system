@@ -32,8 +32,11 @@ def test_higher_preamp_multiplier_lowers_electrons_per_count():
 
 
 def test_em_gain_divides_electrons_per_count():
-    no_em = electrons_per_count(preamp_gain=1.0, emccd_gain=0)
-    with_em = electrons_per_count(preamp_gain=1.0, emccd_gain=100)
+    """EM sensitivity must be supplied explicitly (see the EM guard tests)."""
+    no_em = electrons_per_count(preamp_gain=1.0, emccd_gain=0,
+                                sensitivity_e_per_count=5.0)
+    with_em = electrons_per_count(preamp_gain=1.0, emccd_gain=100,
+                                  sensitivity_e_per_count=5.0)
     assert with_em == pytest.approx(no_em / 100.0)
 
 
@@ -168,3 +171,28 @@ def test_failed_fit_has_no_distance_precision():
     photons = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
     t = an.theoretical_precision(fs, photons, None, preamp_gain=1.0, emccd_gain=0)
     assert t.distance_total_mhz is None
+
+
+def test_em_mode_raises_because_its_sensitivity_is_not_calibrated():
+    """EM mode reads out through a different amplifier, so the Conventional
+    sensitivity does not apply. Better to fail loudly than return a wrong N."""
+    with pytest.raises(ValueError, match="Electron-Multiplying"):
+        electrons_per_count(preamp_gain=1.0, emccd_gain=100)
+
+
+def test_em_guard_is_not_bypassed_by_the_public_helpers():
+    with pytest.raises(ValueError, match="Electron-Multiplying"):
+        count_to_electrons(1000, preamp_gain=1.0, emccd_gain=100)
+    with pytest.raises(ValueError, match="Electron-Multiplying"):
+        calculate_photon_counts_from_fitted_spectrum(_fs(), preamp_gain=1.0, emccd_gain=100)
+
+
+def test_em_mode_works_when_a_sensitivity_is_supplied():
+    got = electrons_per_count(preamp_gain=1.0, emccd_gain=100,
+                              sensitivity_e_per_count=5.0)
+    assert got == pytest.approx(5.0 / 100)
+
+
+def test_invalid_preamp_multiplier_raises():
+    with pytest.raises(ValueError, match="preamp multiplier"):
+        electrons_per_count(preamp_gain=0, emccd_gain=0)
