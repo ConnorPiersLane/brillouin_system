@@ -30,6 +30,12 @@ class RequestAxialContScan:
     speed_um_s: float
     find_reflection_plane: bool | None = None
     eye_tracker_results: EyeTrackerResults | None = None
+
+
+@dataclass
+class RequestSweepScan:
+    id: str
+    eye_tracker_results: EyeTrackerResults | None = None
 # -------------- Scan Result --------------
 
 @dataclass
@@ -43,6 +49,24 @@ class MeasurementPoint:
 
 
 @dataclass
+class SweepCycle:
+    """One in-out cycle of a sweep scan.
+
+    reflection_in / reflection_out are the raw finder results of the inward and
+    outward crossing (biases NOT corrected — keep corrections in analysis; the
+    per-direction bias is not a settled constant, see 2026-07-30 alternate-mode
+    characterization). measurement_index points into AxialScan.measurements for
+    the frame taken during this cycle, or is None if the cycle took no frame
+    (missed in-crossing). A found=False / gated-out crossing is stored as-is so
+    single-crossing fallback cycles stay identifiable in the saved data.
+    """
+    cycle_index: int
+    reflection_in: ReflectionResult | None = None
+    reflection_out: ReflectionResult | None = None
+    measurement_index: int | None = None
+
+
+@dataclass
 class AxialScan:
     i: int  # internal tracker
     id: str
@@ -52,6 +76,8 @@ class AxialScan:
     eye_tracker_results: EyeTrackerResults | None = None
     reflection_result_forwards: ReflectionResult | None = None
     reflection_result_backwards: ReflectionResult | None = None
+    # Set only by the in-out sweep scan: one entry per cycle, in order.
+    sweep_cycles: list[SweepCycle] | None = None
 
 # -------------- Scan Fitting --------------
 @dataclass

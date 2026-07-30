@@ -23,12 +23,14 @@ from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult, find_reflection_realtime
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig, \
     axial_scanning_config
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig, \
+    sweep_scan_config
 from brillouin_system.logging_utils.logging_setup import get_logger
 
 from brillouin_system.my_dataclasses.background_image import ImageStatistics, generate_image_statistics_dataclass
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, MeasurementPoint, \
-    AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestSweepScan, \
+    MeasurementPoint, AxialScan, SweepCycle
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.calibration.calibration import CalibrationData, \
     CalibrationMeasurementPoint, MeasurementsPerFreq, CalibrationCalculator, CalibrationPolyfitParameters, calibrate
@@ -101,6 +103,7 @@ class HiBackend:
         self.update_andor_config_settings(andor_config=self._andor_config)
 
         self._axial_scan_config: ScanningConfig = axial_scanning_config.get()
+        self._sweep_scan_config: SweepScanConfig = sweep_scan_config.get()
 
         self.shutter_manager: ShutterManager | ShutterManagerDummy = shutter_manager
 
@@ -567,6 +570,143 @@ class HiBackend:
 
         return True
 
+
+    def take_sweep_scan(self, request: RequestSweepScan) -> bool:
+        """
+        In-out sweep scan: repeated find-measure-find cycles.
+
+        One cycle: search inward through the corneal reflection, park at the
+        in-crossing + target_depth_um, snap a frame, continue inward
+        approach_um past the plane, search outward (recording the
+        out-crossing), park approach_um outside the freshest plane estimate,
+        turn around. The two crossings of a cycle bracket the frame in time;
+        depth labels ((in+out)/2 vs single-crossing) are computed in analysis,
+        NOT here — both crossings are stored raw per cycle in sweep_cycles.
+
+        Search speed/detection parameters come from the shared axial
+        ScanningConfig; cycle geometry from SweepScanConfig. z_offset_um of
+        the plain finder is intentionally NOT applied — the sweep scan's
+        target_depth_um replaces it.
+        """
+        if self.is_reference_mode:
+            log.info("[Sweep Scan] System is in Reference Mode - Change to Sample Mode.")
+            return False
+
+        sw = self._sweep_scan_config
+        lens_x0 = self.zaber_eye_lens.get_position()
+
+        log.info(f"[Sweep Scan] Starting: {sw.n_repeats} cycles, "
+                 f"target depth {sw.target_depth_um} µm, "
+                 f"approach {sw.approach_um} µm, ID: {request.id}")
+
+        # Initial full-distance find (normal finder settings) to bootstrap.
+        r0: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
+        if not r0.found:
+            log.info("[Sweep Scan] Initial reflection find failed - aborting.")
+            self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+            return False
+        plane_est = r0.event_z_um
+
+        measurements: list[MeasurementPoint] = []
+        cycles: list[SweepCycle] = []
+
+        for k in range(sw.n_repeats):
+            if self.f2b_cancel_callback():
+                log.info(f"[Sweep Scan] Cancelled during cycle {k + 1}. "
+                         f"Returning lens to starting position.")
+                self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+                return False
+
+            log.info(f"[Sweep Scan] Cycle {k + 1}/{sw.n_repeats}")
+
+            # Park outside the current plane estimate and search inward.
+            self.zaber_eye_lens.move_abs(plane_est - sw.approach_um)
+            r_in: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
+            in_ok = r_in.found and abs(r_in.event_z_um - plane_est) <= sw.plausibility_gate_um
+            if r_in.found and not in_ok:
+                log.warning(f"[Sweep Scan] Cycle {k + 1}: in-crossing at "
+                            f"{r_in.event_z_um:.1f} µm is {r_in.event_z_um - plane_est:+.1f} µm "
+                            f"from the last plane estimate - discarded (gate "
+                            f"{sw.plausibility_gate_um:.0f} µm).")
+
+            measurement_index = None
+            r_out: ReflectionResult | None = None
+
+            if in_ok:
+                plane_est = r_in.event_z_um
+
+                # Park at the target depth and take the frame (lens stopped).
+                self.zaber_eye_lens.move_abs(plane_est + sw.target_depth_um)
+                time.sleep(sw.settle_s)
+                zaber_pos = self.zaber_eye_lens.get_position()
+                self.b2f_emit_update_zaber_lens_position(zaber_pos)
+
+                frame = self._get_andor_camera_snap()
+                self.display_spectrum(frame=frame)
+                measurements.append(
+                    MeasurementPoint(
+                        frame_andor=frame,
+                        lens_zaber_position=zaber_pos,
+                        time_stamp=time.perf_counter())
+                )
+                measurement_index = len(measurements) - 1
+
+                # Continue inward past the plane, then search outward.
+                self.zaber_eye_lens.move_abs(plane_est + sw.approach_um)
+                r_out = self.find_reflection_plane(is_go_forwards=False)
+                out_ok = r_out.found and abs(r_out.event_z_um - plane_est) <= sw.plausibility_gate_um
+                if r_out.found and not out_ok:
+                    log.warning(f"[Sweep Scan] Cycle {k + 1}: out-crossing at "
+                                f"{r_out.event_z_um:.1f} µm is {r_out.event_z_um - plane_est:+.1f} µm "
+                                f"from the plane estimate - discarded (gate "
+                                f"{sw.plausibility_gate_um:.0f} µm).")
+                if out_ok:
+                    # Freshest estimate for aiming the next cycle. The
+                    # bias-free (in+out)/2 label is computed in analysis.
+                    plane_est = r_out.event_z_um
+                else:
+                    log.info(f"[Sweep Scan] Cycle {k + 1}: no valid out-crossing - "
+                             f"frame keeps its single-crossing (in) reference.")
+            else:
+                log.info(f"[Sweep Scan] Cycle {k + 1}: no valid in-crossing - "
+                         f"skipping the frame this cycle.")
+
+            cycles.append(SweepCycle(
+                cycle_index=k,
+                reflection_in=r_in,
+                reflection_out=r_out,
+                measurement_index=measurement_index,
+            ))
+
+        # Park outside the plane, then return the lens to its start position.
+        self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+
+        n_frames = len(measurements)
+        n_pairs = sum(1 for c in cycles
+                      if c.measurement_index is not None
+                      and c.reflection_out is not None and c.reflection_out.found)
+        log.info(f"[Sweep Scan] Done: {n_frames}/{sw.n_repeats} frames taken, "
+                 f"{n_pairs} with a full in/out pair.")
+
+        self._i_axial_scans += 1
+        axial_scan = AxialScan(
+            i=self._i_axial_scans,
+            id=request.id,
+            measurements=measurements,
+            system_state=self.get_current_system_state(),
+            calibration_params=self.calibration_poly_fit_params,
+            eye_tracker_results=request.eye_tracker_results,
+            reflection_result_forwards=r0,
+            reflection_result_backwards=None,
+            sweep_cycles=cycles,
+        )
+        self.axial_scan_dict[axial_scan.i] = axial_scan
+
+        return n_frames > 0
+
+    def update_sweep_scan_config(self, sweep_config: SweepScanConfig):
+        self._sweep_scan_config = sweep_config
+        log.info(f"[Sweep Scan] Config updated: {sweep_config}")
 
     def display_spectrum(self, frame):
         if self.do_background_subtraction:

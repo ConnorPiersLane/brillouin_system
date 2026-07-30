@@ -12,6 +12,9 @@ from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrac
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config_gui import \
     AxialScanningConfigDialog
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config_gui import \
+    SweepScanConfigDialog
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt
@@ -52,7 +55,8 @@ from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan
+from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestSweepScan, \
+    AxialScan
 from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
 from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 ###
@@ -103,6 +107,8 @@ class HiFrontend(QWidget):
     run_calibration_requested = pyqtSignal()
     update_calibration_config_requested = pyqtSignal(object)
     take_axial_step_scan_requested = pyqtSignal(object)
+    take_sweep_scan_requested = pyqtSignal(object)
+    update_sweep_scan_config_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
@@ -188,6 +194,8 @@ class HiFrontend(QWidget):
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
         self.update_calibration_config_requested.connect(self.brillouin_signaller.update_calibration_config_backend)
         self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
+        self.take_sweep_scan_requested.connect(self.brillouin_signaller.take_sweep_scan)
+        self.update_sweep_scan_config_requested.connect(self.brillouin_signaller.update_sweep_scan_config)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
@@ -647,6 +655,20 @@ class HiFrontend(QWidget):
         btn_row.addStretch()
 
         layout.addRow(btn_row)
+
+        # --- In-out sweep scan (repeated find-measure-find cycles) ---
+        self.sweep_scan_btn = QPushButton("Sweep Scan")
+        self.sweep_scan_btn.clicked.connect(self.take_sweep_scan)
+
+        self.sweep_scan_settings_btn = QPushButton("Sweep Settings")
+        self.sweep_scan_settings_btn.clicked.connect(self.open_sweep_scan_settings_dialog)
+
+        sweep_row = QHBoxLayout()
+        sweep_row.addWidget(self.sweep_scan_btn)
+        sweep_row.addWidget(self.sweep_scan_settings_btn)
+        sweep_row.addStretch()
+
+        layout.addRow(sweep_row)
 
         group.setLayout(layout)
         return group
@@ -1595,6 +1617,23 @@ class HiFrontend(QWidget):
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
 
 
+    def take_sweep_scan(self):
+        try:
+            id_str = self.axial_id_input.text().strip()
+
+            log.info(f"[Brillouin Viewer] Sweep Scan Request | ID: {id_str}")
+
+            request = RequestSweepScan(
+                id=id_str,
+                eye_tracker_results=self.lastest_eye_tracker_results,
+            )
+
+            self.take_sweep_scan_requested.emit(request)
+
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to initiate sweep scan: {e}")
+
+
     def clear_measurements(self):
         self._stored_measurements.clear()
         self.measurement_series_label.setText("Stored Series: 0")
@@ -1665,6 +1704,21 @@ class HiFrontend(QWidget):
                 log.exception(f"[EyeTracker] Failed to send new axial scan settings: {e}")
 
         dlg = AxialScanningConfigDialog(
+            on_apply=_on_apply,
+            parent=self,
+        )
+        dlg.exec_()
+
+    def open_sweep_scan_settings_dialog(self):
+
+        def _on_apply(cfg: SweepScanConfig):
+            try:
+                self.update_sweep_scan_config_requested.emit(cfg)
+                log.info("[Frontend] Sent new sweep scan settings.")
+            except Exception as e:
+                log.exception(f"[Frontend] Failed to send new sweep scan settings: {e}")
+
+        dlg = SweepScanConfigDialog(
             on_apply=_on_apply,
             parent=self,
         )

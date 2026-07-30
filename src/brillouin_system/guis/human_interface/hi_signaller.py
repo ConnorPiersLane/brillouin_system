@@ -248,6 +248,10 @@ class HiSignaller(QObject):
     def update_scanning_config(self, scanning_config: ScanningConfig):
         self.backend.update_scanning_config_file(scanning_config)
 
+    @pyqtSlot(object)
+    def update_sweep_scan_config(self, sweep_config):
+        self.backend.update_sweep_scan_config(sweep_config)
+
     @pyqtSlot(FittingConfigs)
     def update_fitting_configs(self, fitting_configs: FittingConfigs):
         self.backend.spectrum_fitter.update_configs(fitting_configs)
@@ -472,6 +476,28 @@ class HiSignaller(QObject):
 
         try:
             self.backend.take_axial_step_scan(request_axial_scan)
+            self.update_stored_axial_scans()
+        finally:
+            self.update_system_state(new_state=old_state)
+            self.restart_live_view_when_ready()
+
+    @pyqtSlot(object)
+    def take_sweep_scan(self, request):
+        """
+        Run the in-out sweep scan (repeated find-measure-find cycles) and
+        register the result in the stored axial scans.
+        """
+        if self.backend.calibration_poly_fit_params is None:
+            self.send_message_to_user('Warning', "No Calibration available. Run Calibration first.")
+            return
+
+        old_state = self.system_state
+        self.stop_live_view()
+        self.update_system_state(new_state=SystemState.BUSY)
+        QCoreApplication.processEvents()
+
+        try:
+            self.backend.take_sweep_scan(request)
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)

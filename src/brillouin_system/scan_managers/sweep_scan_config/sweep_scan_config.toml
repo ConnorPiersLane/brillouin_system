@@ -1,0 +1,6 @@
+[sweep_scan]
+n_repeats = 12
+approach_um = 300.0
+target_depth_um = 50.0
+settle_s = 0.05
+plausibility_gate_um = 750.0
