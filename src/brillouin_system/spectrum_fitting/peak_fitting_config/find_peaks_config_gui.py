@@ -1,12 +1,12 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox
+    QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
-    FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, FittingConfigs
+    FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS, FittingConfigs
 )
 
 
@@ -35,6 +35,12 @@ class FindPeaksConfigDialog(QDialog):
             "rel_height", "wlen_pixels", "beta"  # added beta
         ]
 
+    def pr_field_names(self):
+        # 'pixel_response' model only (reference peaks): frozen camera
+        # pixel-response constants — Gaussian charge diffusion and the
+        # one-sided readout tail per peak. Not fitted per frame.
+        return ["pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px"]
+
     def na_field_names(self):
         # NA-integrated models (na_lorentzian* / na_gauss_lorentzian*), sample
         # only: aperture-clip NA; Gaussian coupling geometry (gauss models:
@@ -46,7 +52,9 @@ class FindPeaksConfigDialog(QDialog):
         layout = QHBoxLayout()
         layout.addWidget(self.create_config_group(
             "Sample", self.sample_inputs, FITTING_MODELS_SAMPLE, extra_fields=self.na_field_names()))
-        layout.addWidget(self.create_config_group("Reference", self.reference_inputs, FITTING_MODELS_REFERENCE))
+        layout.addWidget(self.create_config_group(
+            "Reference", self.reference_inputs, FITTING_MODELS_REFERENCE,
+            extra_fields=self.pr_field_names()))
         return layout
 
     def create_config_group(self, label, inputs, models, extra_fields=()):
@@ -72,6 +80,19 @@ class FindPeaksConfigDialog(QDialog):
         inputs["fitting_model"] = combo
         row.addWidget(combo)
         vlayout.addLayout(row)
+
+        # Windowing and baseline apply to any lineshape.
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Background"))
+        bg_combo = QComboBox()
+        bg_combo.addItems(BACKGROUNDS)
+        inputs["background"] = bg_combo
+        row.addWidget(bg_combo)
+        vlayout.addLayout(row)
+
+        check = QCheckBox("Fit only within +-beta*width of each peak")
+        inputs["use_window"] = check
+        vlayout.addWidget(check)
 
         group.setLayout(vlayout)
         return group
@@ -113,8 +134,14 @@ class FindPeaksConfigDialog(QDialog):
         for field in self.na_field_names():
             self.sample_inputs[field].setText(str(getattr(sample, field)))
 
-        self.sample_inputs["fitting_model"].setCurrentText(sample.fitting_model)
-        self.reference_inputs["fitting_model"].setCurrentText(reference.fitting_model)
+        for field in self.pr_field_names():
+            self.reference_inputs[field].setText(str(getattr(reference, field)))
+
+        for inputs, cfg in ((self.sample_inputs, sample),
+                            (self.reference_inputs, reference)):
+            inputs["fitting_model"].setCurrentText(cfg.fitting_model)
+            inputs["background"].setCurrentText(cfg.background)
+            inputs["use_window"].setChecked(bool(cfg.use_window))
 
         # Global settings
         self.global_inputs["pixel_offset_left"].setText(str(global_cfg.pixel_offset_left))
@@ -147,11 +174,12 @@ class FindPeaksConfigDialog(QDialog):
             # Sample
             sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f)
                              for f in list(self.field_names()) + list(self.na_field_names())}
-            sample_kwargs["fitting_model"] = self.sample_inputs["fitting_model"].currentText()
+            sample_kwargs.update(self._model_kwargs(self.sample_inputs))
 
             # Reference
-            reference_kwargs = {f: self._parse(self.reference_inputs[f].text(), f) for f in self.field_names()}
-            reference_kwargs["fitting_model"] = self.reference_inputs["fitting_model"].currentText()
+            reference_kwargs = {f: self._parse(self.reference_inputs[f].text(), f)
+                                for f in list(self.field_names()) + list(self.pr_field_names())}
+            reference_kwargs.update(self._model_kwargs(self.reference_inputs))
 
             # Update all configs
             find_peaks_sample_config.update(**sample_kwargs)
@@ -182,10 +210,20 @@ class FindPeaksConfigDialog(QDialog):
             QMessageBox.critical(self, "Save Error", f"Failed to save config:\n{e}")
 
     @staticmethod
+    def _model_kwargs(inputs):
+        """Lineshape + the two options that apply to any lineshape."""
+        return {
+            "fitting_model": inputs["fitting_model"].currentText(),
+            "background": inputs["background"].currentText(),
+            "use_window": inputs["use_window"].isChecked(),
+        }
+
+    @staticmethod
     def _is_float_field(field):
         return (
             "fraction" in field or "rel" in field
             or field == "beta" or field.startswith("na_")
+            or field.startswith("pr_")
         )
 
     def _parse(self, value, field):
