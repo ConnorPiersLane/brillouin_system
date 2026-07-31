@@ -571,6 +571,48 @@ class HiBackend:
         return True
 
 
+    @staticmethod
+    def _accept_crossing(
+        result: ReflectionResult | None,
+        *,
+        reference_z_um: float,
+        gate_um: float,
+        reference_peak: float | None,
+        min_peak_fraction: float,
+        reference_name: str,
+    ) -> tuple[bool, str | None]:
+        """
+        Decide whether a sweep-scan crossing is the real surface.
+
+        Two independent gates, both needed:
+          - DISTANCE from a recent reference. Catches a crossing that is
+            plausible in shape but in the wrong place.
+          - PEAK AMPLITUDE relative to a reference peak. Every false crossing
+            observed on 2026-07-30 was a WEAK peak while genuine ones stayed
+            above 0.8x their reference: the plastic cuvette's back wall came in
+            at 0.12x, and a finder outlier at 0.006x. Amplitude separates these
+            by a wide margin and, unlike distance, needs no trade-off against
+            how far the eye may really have moved.
+
+        Returns (accepted, reason_if_rejected).
+        """
+        if result is None or not result.found:
+            return False, "no crossing found"
+
+        delta = result.event_z_um - reference_z_um
+        if abs(delta) > gate_um:
+            return False, (f"{delta:+.1f} µm from {reference_name} "
+                           f"(gate {gate_um:.0f} µm)")
+
+        if reference_peak and result.peak_value is not None:
+            frac = result.peak_value / reference_peak
+            if frac < min_peak_fraction:
+                return False, (f"peak {result.peak_value:.3f} V is {frac:.2f}× the "
+                               f"{reference_name} peak {reference_peak:.3f} V "
+                               f"(min {min_peak_fraction:.2f}×)")
+
+        return True, None
+
     def take_sweep_scan(self, request: RequestSweepScan) -> bool:
         """
         In-out sweep scan: repeated find-measure-find cycles.
@@ -606,6 +648,13 @@ class HiBackend:
             self.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
             return False
         plane_est = r0.event_z_um
+        # Amplitude reference for the in-crossings. The out-crossing of each
+        # cycle is instead judged against that cycle's own in-crossing, so a
+        # slow legitimate change in signal does not accumulate into a rejection.
+        ref_peak = r0.peak_value
+        log.info(f"[Sweep Scan] Plane at {plane_est:.1f} µm, reference peak "
+                 f"{ref_peak:.3f} V (crossings must exceed "
+                 f"{sw.min_peak_fraction * ref_peak:.3f} V).")
 
         measurements: list[MeasurementPoint] = []
         cycles: list[SweepCycle] = []
@@ -622,12 +671,17 @@ class HiBackend:
             # Park outside the current plane estimate and search inward.
             self.zaber_eye_lens.move_abs(plane_est - sw.approach_um)
             r_in: ReflectionResult = self.find_reflection_plane(is_go_forwards=True)
-            in_ok = r_in.found and abs(r_in.event_z_um - plane_est) <= sw.plausibility_gate_um
+            in_ok, in_why = self._accept_crossing(
+                r_in,
+                reference_z_um=plane_est,
+                gate_um=sw.plausibility_gate_um,
+                reference_peak=ref_peak,
+                min_peak_fraction=sw.min_peak_fraction,
+                reference_name="the last plane estimate",
+            )
             if r_in.found and not in_ok:
                 log.warning(f"[Sweep Scan] Cycle {k + 1}: in-crossing at "
-                            f"{r_in.event_z_um:.1f} µm is {r_in.event_z_um - plane_est:+.1f} µm "
-                            f"from the last plane estimate - discarded (gate "
-                            f"{sw.plausibility_gate_um:.0f} µm).")
+                            f"{r_in.event_z_um:.1f} µm rejected - {in_why}.")
 
             measurement_index = None
             r_out: ReflectionResult | None = None
@@ -651,15 +705,22 @@ class HiBackend:
                 )
                 measurement_index = len(measurements) - 1
 
-                # Continue inward past the plane, then search outward.
+                # Continue inward past the plane, then search outward. The
+                # out-crossing is judged against THIS cycle's in-crossing —
+                # only ~1 s old, so both gates can be tight.
                 self.zaber_eye_lens.move_abs(plane_est + sw.approach_um)
                 r_out = self.find_reflection_plane(is_go_forwards=False)
-                out_ok = r_out.found and abs(r_out.event_z_um - plane_est) <= sw.plausibility_gate_um
+                out_ok, out_why = self._accept_crossing(
+                    r_out,
+                    reference_z_um=r_in.event_z_um,
+                    gate_um=sw.out_gate_um,
+                    reference_peak=r_in.peak_value,
+                    min_peak_fraction=sw.min_peak_fraction,
+                    reference_name="this cycle's in-crossing",
+                )
                 if r_out.found and not out_ok:
                     log.warning(f"[Sweep Scan] Cycle {k + 1}: out-crossing at "
-                                f"{r_out.event_z_um:.1f} µm is {r_out.event_z_um - plane_est:+.1f} µm "
-                                f"from the plane estimate - discarded (gate "
-                                f"{sw.plausibility_gate_um:.0f} µm).")
+                                f"{r_out.event_z_um:.1f} µm rejected - {out_why}.")
                 if out_ok:
                     # Freshest estimate for aiming the next cycle. The
                     # bias-free (in+out)/2 label is computed in analysis.
@@ -699,6 +760,8 @@ class HiBackend:
             reflection_result_forwards=r0,
             reflection_result_backwards=None,
             sweep_cycles=cycles,
+            sweep_config=sw,
+            scanning_config=self._axial_scan_config,
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
 

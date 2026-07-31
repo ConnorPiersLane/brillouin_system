@@ -7,6 +7,8 @@ from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
+from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, \
     calculate_photon_counts_from_fitted_spectrum
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
@@ -78,6 +80,12 @@ class AxialScan:
     reflection_result_backwards: ReflectionResult | None = None
     # Set only by the in-out sweep scan: one entry per cycle, in order.
     sweep_cycles: list[SweepCycle] | None = None
+    # Acquisition provenance. scanning_config holds the search speed and
+    # detection thresholds, which the crossing biases depend on (the ~+5 um
+    # direction bias is a 2 mm/s number); sweep_config holds the cycle geometry
+    # (approach_um is otherwise only recoverable from the raw Zaber logs).
+    sweep_config: SweepScanConfig | None = None
+    scanning_config: ScanningConfig | None = None
 
 # -------------- Scan Fitting --------------
 @dataclass

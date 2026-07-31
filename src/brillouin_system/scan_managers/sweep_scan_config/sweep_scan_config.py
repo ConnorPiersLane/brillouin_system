@@ -29,7 +29,19 @@ class SweepScanConfig:
     approach_um: float = 300.0        # run-up distance past the plane on each side
     target_depth_um: float = 50.0     # measure at in-crossing + this (positive = inward)
     settle_s: float = 0.05            # lens settle time before the camera snap
-    plausibility_gate_um: float = 750.0  # |crossing - previous plane| beyond this = discard
+    # In-crossing gate: |in - previous plane estimate|. Must exceed the real
+    # eye motion between cycles (~1.5 s), so it stays loose.
+    plausibility_gate_um: float = 750.0
+    # Out-crossing gate: |out - THIS cycle's in-crossing|. The two crossings are
+    # ~1 s apart, so real motion is small (7-27 tracks: 90th pct 49 um, max 167)
+    # and this can be far tighter than the in-crossing gate.
+    out_gate_um: float = 200.0
+    # Amplitude gate: reject a crossing whose peak is below this fraction of its
+    # reference peak (initial find for in-crossings, same-cycle in-crossing for
+    # out-crossings). Every false crossing seen on 2026-07-30 was a WEAK peak:
+    # 0.12x the real one for the cuvette back wall, 0.006x for a finder outlier,
+    # while genuine crossings held above 0.8x. 0.3 separates them with margin.
+    min_peak_fraction: float = 0.3
 
 
 SWEEP_SCAN_TOML_PATH = Path(__file__).parent.resolve() / "sweep_scan_config.toml"
@@ -47,6 +59,8 @@ def _dataclass_to_toml_dict(cfg: SweepScanConfig) -> dict[str, Any]:
         "target_depth_um": float(cfg.target_depth_um),
         "settle_s": float(cfg.settle_s),
         "plausibility_gate_um": float(cfg.plausibility_gate_um),
+        "out_gate_um": float(cfg.out_gate_um),
+        "min_peak_fraction": float(cfg.min_peak_fraction),
     }
 
 

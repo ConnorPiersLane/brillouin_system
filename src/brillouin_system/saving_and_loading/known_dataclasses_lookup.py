@@ -16,6 +16,8 @@ from brillouin_system.my_dataclasses.background_image import ImageStatistics, Ba
 from brillouin_system.devices.zaber_engines.zaber_position import ZaberPosition
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
+from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
 
 known_classes = {
     cls.__name__: cls
@@ -31,5 +33,6 @@ known_classes = {
         Intrinsics, StereoExtrinsics, StereoCalibration,
         EyeTrackerConfig, EyeTrackerResults, Pupil3D,
         ReflectionResult,
+        ScanningConfig, SweepScanConfig,
     ]
 }

@@ -74,7 +74,15 @@ class SweepScanConfigDialog(QDialog):
 
         le_gate = QLineEdit()
         le_gate.setValidator(QDoubleValidator(0.0, 1e12, 6))
-        self._add_row(v, "Plausibility gate [µm]", "plausibility_gate_um", le_gate)
+        self._add_row(v, "In-crossing gate [µm]", "plausibility_gate_um", le_gate)
+
+        le_out_gate = QLineEdit()
+        le_out_gate.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        self._add_row(v, "Out-crossing gate [µm]", "out_gate_um", le_out_gate)
+
+        le_min_peak = QLineEdit()
+        le_min_peak.setValidator(QDoubleValidator(0.0, 1.0, 6))
+        self._add_row(v, "Min peak fraction", "min_peak_fraction", le_min_peak)
 
         g.setLayout(v)
         return g
@@ -117,6 +125,8 @@ class SweepScanConfigDialog(QDialog):
             target_depth_um=float(_req("target_depth_um")),
             settle_s=float(_req("settle_s")),
             plausibility_gate_um=float(_req("plausibility_gate_um")),
+            out_gate_um=float(_req("out_gate_um")),
+            min_peak_fraction=float(_req("min_peak_fraction")),
         )
 
     # ------------------------------------------------------------------ #
