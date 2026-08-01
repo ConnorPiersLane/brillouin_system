@@ -6,7 +6,8 @@ from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
-    FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS, FittingConfigs
+    FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
+    ROW_SELECTIONS, FittingConfigs
 )
 
 
@@ -101,9 +102,36 @@ class FindPeaksConfigDialog(QDialog):
         layout = QVBoxLayout()
         layout.addWidget(QLabel("Global Settings"))
 
-        # Selected Rows (comma-separated)
+        # How the summed row band is chosen
         row = QHBoxLayout()
-        row.addWidget(QLabel("Selected Rows"))
+        row.addWidget(QLabel("Row selection"))
+        combo = QComboBox()
+        combo.addItems(ROW_SELECTIONS)
+        combo.setToolTip(
+            "manual: use the row list below.\n"
+            "auto: take 'N rows' centred on the line's intensity centroid, "
+            "located once per scan and then frozen."
+        )
+        self.global_inputs["row_selection"] = combo
+        row.addWidget(combo)
+        layout.addLayout(row)
+
+        # Number of rows for the automatic band
+        row = QHBoxLayout()
+        row.addWidget(QLabel("N rows (auto)"))
+        edit = QLineEdit()
+        edit.setValidator(QIntValidator(1, 9999))
+        edit.setToolTip(
+            "Rows summed when row selection is 'auto'. 13 captures ~97% of "
+            "the signal; precision plateaus from about 11."
+        )
+        self.global_inputs["n_rows"] = edit
+        row.addWidget(edit)
+        layout.addLayout(row)
+
+        # Selected Rows (comma-separated), used when row selection is manual
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Selected Rows (manual)"))
         edit = QLineEdit()
         edit.setPlaceholderText("e.g. 2, 3, 4, 5")
         self.global_inputs["selected_rows"] = edit
@@ -147,6 +175,8 @@ class FindPeaksConfigDialog(QDialog):
         self.global_inputs["pixel_offset_left"].setText(str(global_cfg.pixel_offset_left))
         self.global_inputs["pixel_offset_right"].setText(str(global_cfg.pixel_offset_right))
         self.global_inputs["selected_rows"].setText(", ".join(str(x) for x in global_cfg.selected_rows))
+        self.global_inputs["row_selection"].setCurrentText(global_cfg.row_selection)
+        self.global_inputs["n_rows"].setText(str(global_cfg.n_rows))
 
     def create_buttons(self):
         layout = QHBoxLayout()
@@ -169,6 +199,8 @@ class FindPeaksConfigDialog(QDialog):
                 "pixel_offset_left": self._parse(self.global_inputs["pixel_offset_left"].text(), "int"),
                 "pixel_offset_right": self._parse(self.global_inputs["pixel_offset_right"].text(), "int"),
                 "selected_rows": self._parse_selected_rows(self.global_inputs["selected_rows"].text()),
+                "row_selection": self.global_inputs["row_selection"].currentText(),
+                "n_rows": max(self._parse(self.global_inputs["n_rows"].text(), "int"), 1),
             }
 
             # Sample

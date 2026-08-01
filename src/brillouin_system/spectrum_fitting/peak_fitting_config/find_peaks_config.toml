@@ -1,6 +1,10 @@
 [global]
 pixel_offset_left = 0
 pixel_offset_right = 0
+# "manual" uses selected_rows below; "auto" takes n_rows rows centred on the
+# line's intensity centroid, located once per scan and then frozen.
+row_selection = "manual"
+n_rows = 13
 selected_rows = [
     5,
     6,
