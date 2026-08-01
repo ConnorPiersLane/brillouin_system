@@ -111,11 +111,29 @@ class FindPeaksConfig:
         self.fitting_model = model
 
 
+ROW_SELECTIONS = ["manual", "auto"]
+
+
 @dataclass
 class SlineFromFrameConfig:
     pixel_offset_left: int
     pixel_offset_right: int
+    # Rows summed into the spectral line. With row_selection = "manual" this
+    # list is used as given. With "auto" the band is located automatically:
+    # n_rows contiguous rows centred on the line's intensity centroid, chosen
+    # ONCE and then frozen (see spectrum_fitting/row_selection.py — which rows
+    # are summed shifts the fitted peaks by ~3-4 MHz per row, so the band must
+    # not move between a scan's calibration and its samples).
     selected_rows: list[int]
+    row_selection: str = "manual"
+    n_rows: int = 13
+
+    def __post_init__(self):
+        if self.row_selection not in ROW_SELECTIONS:
+            raise ValueError(
+                f"Unknown row_selection '{self.row_selection}'. "
+                f"Choose one of {ROW_SELECTIONS}."
+            )
 
 @dataclass
 class FittingConfigs:

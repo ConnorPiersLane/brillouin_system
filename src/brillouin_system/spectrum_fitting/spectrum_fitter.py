@@ -23,6 +23,10 @@ from brillouin_system.spectrum_fitting.voigt_model import (
     _voigt_pixel_integrated,
 )
 from brillouin_system.spectrum_fitting.pixel_response import pixel_response_profile
+from brillouin_system.spectrum_fitting.row_selection import (
+    select_rows,
+    captured_fraction,
+)
 
 from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
 from brillouin_system.spectrum_fitting.na_correction5 import gaussian_angle_width
@@ -207,6 +211,11 @@ class SpectrumFitter:
         self.sline_config: SlineFromFrameConfig = sline_from_frame_config.get()
         self.sample_config: FindPeaksConfig = find_peaks_sample_config.get()
         self.reference_config: FindPeaksConfig = find_peaks_reference_config.get()
+        # Rows chosen by the automatic band selection, frozen after the first
+        # use so the band cannot drift between a scan's calibration and its
+        # samples (a one-row difference biases the two peaks by ~3-4 MHz in
+        # opposite directions).
+        self._auto_rows: list[int] | None = None
 
     def update_configs(self, configs: FittingConfigs):
         self.update_sline_config(configs.sline_config)
@@ -217,6 +226,38 @@ class SpectrumFitter:
         if not isinstance(sline_config, SlineFromFrameConfig):
             raise TypeError("sline_config must be a SlineFromFrame instance.")
         self.sline_config = sline_config
+        # A new sline config may change n_rows / the mode: re-locate the band.
+        self._auto_rows = None
+
+    def auto_select_rows(self, frames) -> list[int]:
+        """Locate and freeze the row band from a frame or a stack of frames.
+
+        Call this ONCE per scan with a representative stack (more frames = a
+        better-determined centroid), then use the same fitter — or the same
+        rows — for that scan's calibration and sample frames. The chosen rows
+        are returned so they can be stored with the data.
+        """
+        rows = select_rows(frames, self.sline_config.n_rows)
+        self._auto_rows = rows
+        print(f"[SpectrumFitter] auto row band: {rows[0]}-{rows[-1]} "
+              f"({len(rows)} rows, "
+              f"{100 * captured_fraction(frames, rows):.1f}% of the signal)")
+        return rows
+
+    def get_selected_rows(self, frame: np.ndarray | None = None) -> list[int]:
+        """Rows summed into the spectral line, honouring the selection mode."""
+        if self.sline_config.row_selection != "auto":
+            return list(self.sline_config.selected_rows)
+        if self._auto_rows is None:
+            if frame is None:
+                raise ValueError(
+                    "row_selection is 'auto' but no band has been located yet; "
+                    "call auto_select_rows(frames) first."
+                )
+            # Freeze on first use so the band stays put for the rest of the
+            # scan. Prefer calling auto_select_rows() with a stack.
+            self.auto_select_rows(frame)
+        return list(self._auto_rows)
 
     def update_sample_config(self, sample_config: FindPeaksConfig):
         if not isinstance(sample_config, FindPeaksConfig):
@@ -232,7 +273,7 @@ class SpectrumFitter:
         left_offset = self.sline_config.pixel_offset_left
         right_offset = self.sline_config.pixel_offset_right
 
-        rows = self.sline_config.selected_rows
+        rows = self.get_selected_rows(frame)
         height = frame.shape[0]
 
         if not rows or not all(0 <= r < height for r in rows):
