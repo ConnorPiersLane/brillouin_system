@@ -2,7 +2,11 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from brillouin_system.calibration.calibration import CalibrationPolyfitParameters, CalibrationCalculator
+from brillouin_system.calibration.calibration import (
+    CalibrationCalculator,
+    CalibrationData,
+    CalibrationPolyfitParameters,
+)
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -75,6 +79,14 @@ class AxialScan:
     measurements: list[MeasurementPoint]
     system_state: SystemState
     calibration_params: CalibrationPolyfitParameters | None
+    # The RAW calibration frames this scan was taken with, so its own
+    # calibration can be re-fitted later (e.g. with a different lineshape
+    # model). Analyses must use each scan's own calibration — session-level
+    # calibration files drift tens of MHz against the scans — and that is only
+    # possible if the frames travel with the scan. Controlled by
+    # calibration_config.save_calibration_frames; None for datasets recorded
+    # before the field existed or with the toggle off.
+    calibration_data: CalibrationData | None = None
     eye_tracker_results: EyeTrackerResults | None = None
     reflection_result_forwards: ReflectionResult | None = None
     reflection_result_backwards: ReflectionResult | None = None

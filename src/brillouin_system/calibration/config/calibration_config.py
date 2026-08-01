@@ -18,6 +18,11 @@ class CalibrationConfig:
     step: float
     reference: str  # "left", "right", or "distance"
     mode: str  # "poly" or "interp"
+    # Whether to store the raw calibration reference frames on each axial
+    # scan (AxialScan.calibration_data). Needed for later PSF reconstruction
+    # / debugging, but adds frames to every saved scan. The PSF DHO fit does
+    # NOT need this (the reconstructed PSF is baked into calibration_params).
+    save_calibration_frames: bool = True
 
     @property
     def calibration_freqs(self) -> list[float]:
@@ -46,6 +51,7 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         step=raw["step"],
         reference=raw["reference"],
         mode=raw["mode"],
+        save_calibration_frames=raw.get("save_calibration_frames", True),
     )
 
 
@@ -64,6 +70,7 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
             "step",
             "reference",
             "mode",
+            "save_calibration_frames",
         ]
     }
 

@@ -6,3 +6,8 @@ stop = 8.0
 step = 0.1
 reference = "distance"
 mode = "poly"
+# Store the raw calibration frames on each scan (AxialScan.calibration_data).
+# Needed to re-fit a scan's own calibration later — e.g. with a different
+# lineshape model. Costs disk space; the fitted polynomials are stored either
+# way.
+save_calibration_frames = true

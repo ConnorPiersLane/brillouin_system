@@ -453,6 +453,18 @@ class HiBackend:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
+    def _calibration_data_to_store(self) -> CalibrationData | None:
+        """The raw calibration frames to travel with a scan, or None.
+
+        Re-fitting a scan against its OWN calibration is only possible if the
+        frames are stored with it; the fitted polynomials alone cannot be
+        re-derived with a different lineshape model. Disable via
+        calibration_config.save_calibration_frames to save disk space.
+        """
+        if not self.calibration_config.save_calibration_frames:
+            return None
+        return self.calibration_data
+
     def _sline_rows_for_scan(self, measurements) -> list[int] | None:
         """Rows summed into the spectral line, to be stored with the scan.
 
@@ -577,6 +589,7 @@ class HiBackend:
             measurements=all_results,
             system_state=self.get_current_system_state(),
             calibration_params=self.calibration_poly_fit_params,
+            calibration_data=self._calibration_data_to_store(),
             eye_tracker_results=request_axial_scan.eye_tracker_results,
             reflection_result_forwards=reflection_result_forwards,
             reflection_result_backwards=reflection_result_backwards,
@@ -775,6 +788,7 @@ class HiBackend:
             eye_tracker_results=request.eye_tracker_results,
             reflection_result_forwards=r0,
             reflection_result_backwards=None,
+            calibration_data=self._calibration_data_to_store(),
             sweep_cycles=cycles,
             sweep_config=sw,
             scanning_config=self._axial_scan_config,

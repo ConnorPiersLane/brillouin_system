@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton,
-    QButtonGroup, QPushButton, QLabel, QMessageBox, QHBoxLayout
+    QButtonGroup, QPushButton, QLabel, QMessageBox, QHBoxLayout, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 
@@ -62,6 +62,9 @@ class CalibrationConfigDialog(QDialog):
         mode_layout.addWidget(self.poly_radio)
         mode_layout.addWidget(self.interp_radio)
 
+        # Save calibration frames checkbox
+        self.save_frames_checkbox = QCheckBox("Save calibration frames with each scan")
+
         # Form layout
         form.addRow("n_per_freq:", self.n_per_freq_input)
         form.addRow("Polynomial Degree:", self.degree_input)
@@ -70,6 +73,7 @@ class CalibrationConfigDialog(QDialog):
         form.addRow("Step (GHz):", self.step_input)
         form.addRow(QLabel("Reference Method:"), ref_layout)
         form.addRow(QLabel("Mode:"), mode_layout)
+        form.addRow(QLabel("Storage:"), self.save_frames_checkbox)
 
         layout.addLayout(form)
 
@@ -99,6 +103,8 @@ class CalibrationConfigDialog(QDialog):
             self.poly_radio.setChecked(True)
         else:
             self.interp_radio.setChecked(True)
+
+        self.save_frames_checkbox.setChecked(cfg.save_calibration_frames)
 
     def create_buttons(self):
         layout = QHBoxLayout()
@@ -137,6 +143,7 @@ class CalibrationConfigDialog(QDialog):
                 step=float(self.step_input.text()),
                 reference=reference,
                 mode=mode,
+                save_calibration_frames=self.save_frames_checkbox.isChecked(),
             )
 
             if self.on_apply:
