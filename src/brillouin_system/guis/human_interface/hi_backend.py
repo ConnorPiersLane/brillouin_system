@@ -453,6 +453,21 @@ class HiBackend:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
+    def _sline_rows_for_scan(self, measurements) -> list[int] | None:
+        """Rows summed into the spectral line, to be stored with the scan.
+
+        In automatic mode the band is located once (from this scan's frames if
+        it has not been located yet) and then frozen on the fitter, so the
+        scan's calibration and its samples always share it. Returns None only
+        if the rows cannot be determined.
+        """
+        try:
+            frame = measurements[0].frame_andor if measurements else None
+            return self.spectrum_fitter.get_selected_rows(frame)
+        except Exception as e:
+            log.info(f"Could not record the sline rows for this scan: {e}")
+            return None
+
     def _elastic_anchors_if_required(self) -> ElasticAnchors | None:
         """Anchors for fitting models that need them (na_lorentzian*); None otherwise.
         Raises if such a model is selected without a calibration (no fallback)."""
@@ -565,6 +580,7 @@ class HiBackend:
             eye_tracker_results=request_axial_scan.eye_tracker_results,
             reflection_result_forwards=reflection_result_forwards,
             reflection_result_backwards=reflection_result_backwards,
+            sline_rows=self._sline_rows_for_scan(all_results),
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
 
@@ -762,6 +778,7 @@ class HiBackend:
             sweep_cycles=cycles,
             sweep_config=sw,
             scanning_config=self._axial_scan_config,
+            sline_rows=self._sline_rows_for_scan(measurements),
         )
         self.axial_scan_dict[axial_scan.i] = axial_scan
 

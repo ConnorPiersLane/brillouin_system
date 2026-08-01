@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -86,6 +86,12 @@ class AxialScan:
     # (approach_um is otherwise only recoverable from the raw Zaber logs).
     sweep_config: SweepScanConfig | None = None
     scanning_config: ScanningConfig | None = None
+    # Camera rows summed into the spectral line for this scan. Recorded so a
+    # re-fit reproduces the acquisition exactly: which rows are summed shifts
+    # the individual peaks by ~3-4 MHz per row (the line is tilted), so a
+    # re-analysis on a different band would not reproduce the stored shifts.
+    # fit_axial_scan() applies these when present.
+    sline_rows: list[int] | None = None
 
 # -------------- Scan Fitting --------------
 @dataclass
@@ -99,6 +105,16 @@ class AnalyzedSpectrum:
 # -------------- Functions --------------
 def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()
+    # Re-fit on the rows the scan was acquired with, not on whatever the
+    # current config says — a different band would shift the peaks by a few
+    # MHz each and the re-fit would not reproduce the stored shifts.
+    if scan.sline_rows:
+        sline_config = replace(
+            spectrum_fitter.sline_config,
+            selected_rows=list(scan.sline_rows),
+            row_selection="manual",
+        )
+        spectrum_fitter.update_sline_config(sline_config)
     calibration_calculator = CalibrationCalculator(parameters=scan.calibration_params)
     spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
