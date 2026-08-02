@@ -1,9 +1,9 @@
 [andor_frame]
 advanced_gain_option = false
-x_start = 50
-x_end = 130
+x_start = 55
+x_end = 140
 y_start = 298
-y_end = 320
+y_end = 325
 vbin = 1
 hbin = 1
 pre_amp_mode = 18
