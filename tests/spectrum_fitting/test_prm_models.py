@@ -144,6 +144,14 @@ def test_mixing_lorentzian_sample_with_pr_reference_raises():
         fitter.fit(px, sline, is_reference_mode=False)
 
 
+def test_mismatched_camera_constants_raise():
+    fitter = make_fitter("prm1", "prm1")
+    fitter.reference_config.pr_tau_left_px = 0.35  # differs from sample's 0.4
+    px, sline = make_spectrum()
+    with pytest.raises(ValueError, match="[Cc]amera-constant mismatch"):
+        fitter.fit(px, sline, is_reference_mode=False)
+
+
 def test_reference_mode_never_blocked():
     # The guard protects sample fits; calibrations fit standalone.
     fitter = make_fitter("lorentzian", "prm1")

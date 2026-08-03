@@ -483,6 +483,21 @@ class SpectrumFitter:
                     f"samples must both use 'pixel_response' (e.g. prm0/prm1) "
                     f"or neither."
                 )
+            if requested_model == pr == reference_model:
+                ours = (config.pr_sigma_px, config.pr_tau_left_px,
+                        config.pr_tau_right_px)
+                theirs = (self.reference_config.pr_sigma_px,
+                          self.reference_config.pr_tau_left_px,
+                          self.reference_config.pr_tau_right_px)
+                if ours != theirs:
+                    raise ValueError(
+                        f"Camera-constant mismatch: sample config has "
+                        f"(sigma, tau_l, tau_r) = {ours} but reference config "
+                        f"has {theirs}. Different kernels define different "
+                        f"peak centres, so calibration and samples must use "
+                        f"identical pr_* constants — edit both sections of "
+                        f"the find-peaks config."
+                    )
 
         alpha = None
         na_v0 = None
