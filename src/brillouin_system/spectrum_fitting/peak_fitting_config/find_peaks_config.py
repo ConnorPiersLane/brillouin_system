@@ -11,23 +11,52 @@ FITTING_MODELS_SAMPLE = [
     "lorentzian",
     "na_lorentzian",
     "na_gauss_lorentzian",
+    "pixel_response",
+    "prm0",
+    "prm1",
 ]
 FITTING_MODELS_REFERENCE = [
     "lorentzian",
     "voigt",
     "pixel_response",
+    "prm0",
+    "prm1",
 ]
+
+# Preset names for the validated production recipes (2026-08-03 decision).
+# A preset pins lineshape + background + window + beta together, because the
+# combination is what was validated — the width recipe is only valid at
+# beta = 3.0 (the halo appears in the wings from ~3.5 gamma out). Use the
+# long-form (fitting_model + background) to deviate deliberately.
+#   prm0  pixel_response + per-peak flat offset   — unbiased WIDTHS; single-
+#         peak centers carry the halo's odd moment (distance is unaffected).
+#   prm1  pixel_response + per-peak linear bg     — unbiased CENTERS (the
+#         slope absorbs the halo's odd moment) at the cost of a state-
+#         dependent width-gap fabrication (up to ~+2.5 MHz, gold session).
+# Production usage: fit with prm1; the prm0 companion width-gap difference is
+# the QA indicator (accept widths when |gap_prm1 - gap_prm0| <= ~1.5 MHz).
+MODEL_PRESETS = {
+    "prm0": {"fitting_model": "pixel_response", "background": "flat_per_peak",
+             "use_window": True, "beta": 3.0},
+    "prm1": {"fitting_model": "pixel_response", "background": "linear_per_peak",
+             "use_window": True, "beta": 3.0},
+}
 
 # Baseline under the peaks:
 #   flat            one shared constant offset (the long-standing behaviour)
 #   linear          one shared constant + slope across the whole fit domain
+#   flat_per_peak   each peak gets its own constant offset over its own
+#                   window — the width-safe per-peak baseline (a free slope
+#                   is odd-symmetric: it corrects the CENTER exactly but
+#                   leaks into the WIDTH via covariance, fabricating up to
+#                   ~+2.5 MHz of L-R width gap; closure-tested 2026-08-02).
 #   linear_per_peak each peak gets its own constant + slope over its own
 #                   window — this is the one that removes the L-R split in
 #                   water (measured 2026-07: -3.3 -> -0.4 MHz), because the
 #                   bias comes from the LOCAL gradient under each peak.
 # Costs ~10% in single-frame distance precision. Validated on liquids only:
 # cornea splits are already unbiased and get WORSE with a background term.
-BACKGROUNDS = ["flat", "linear", "linear_per_peak"]
+BACKGROUNDS = ["flat", "linear", "flat_per_peak", "linear_per_peak"]
 
 # Models that were removed, with the migration hint shown if one is still set.
 _REMOVED_MODELS = {
@@ -98,6 +127,14 @@ class FindPeaksConfig:
         # Legacy names that folded the baseline into the lineshape name.
         if model in _LEGACY_BACKGROUND_MODELS:
             model, self.background = _LEGACY_BACKGROUND_MODELS[model]
+        # Preset names pin the validated combination (see MODEL_PRESETS):
+        # they override background, use_window and beta.
+        if model in MODEL_PRESETS:
+            preset = MODEL_PRESETS[model]
+            model = preset["fitting_model"]
+            self.background = preset["background"]
+            self.use_window = preset["use_window"]
+            self.beta = preset["beta"]
         if model in _REMOVED_MODELS:
             raise ValueError(
                 f"Fitting model '{model}' has been removed: "

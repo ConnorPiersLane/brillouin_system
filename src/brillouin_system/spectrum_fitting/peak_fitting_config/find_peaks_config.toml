@@ -35,6 +35,13 @@ na_collection = 0.42
 na_beam_diameter_mm = 5.5
 na_focal_length_mm = 10.0
 na_n_sample = 1.33
+# Frozen camera pixel-response constants, used by the pixel-response models
+# ("pixel_response" / "prm0" / "prm1"). Same values as [reference] — the two
+# sections must agree, and the reference model must be pixel-response too
+# whenever the sample model is (the fitter enforces this).
+pr_sigma_px = 0.25
+pr_tau_left_px = 0.4
+pr_tau_right_px = 0.2
 
 [reference]
 prominence_fraction = 0.05

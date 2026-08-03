@@ -9,6 +9,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     SlineFromFrameConfig,
     sline_from_frame_config,
     FittingConfigs,
+    MODEL_PRESETS,
 )
 from brillouin_system.spectrum_fitting.fit_util import (
     find_peak_locations,
@@ -54,15 +55,17 @@ NA_MODELS = ("na_lorentzian",) + NA_GAUSS_MODELS
 
 
 def normalize_model_name(model: str):
-    """Accept the retired '<model>_window' names.
+    """Accept the retired '<model>_window' names and the prm* presets.
 
     FindPeaksConfig normalises these on construction, but callers that assign
     config.fitting_model directly bypass __post_init__, so the fitter tolerates
-    the suffix too. Returns (base_name, window_forced).
+    them too. Returns (base_name, window_forced).
     """
     model = str(model)
     if model.endswith("_window"):
         return model[: -len("_window")], True
+    if model in MODEL_PRESETS:
+        return MODEL_PRESETS[model]["fitting_model"], True
     return model, False
 
 
@@ -182,6 +185,22 @@ def _make_background(background: str, px_fit, centers, offset0):
         def func(x, off, slope):
             return off + slope * (np.asarray(x, dtype=float) - x0)
         return func, [offset0, 0.0], [-np.inf, -np.inf], [np.inf, np.inf], 2
+
+    if background == "flat_per_peak":
+        # Per-peak constant offset, no slope: the width-safe per-peak baseline
+        # (a freed slope is odd-symmetric and leaks into the fitted width via
+        # covariance — see BACKGROUNDS in find_peaks_config).
+        n_parts = len(_background_masks(px_fit, centers))
+
+        def func(x, *params):
+            x = np.asarray(x, dtype=float)
+            out = np.zeros_like(x)
+            for i, m in enumerate(_background_masks(x, centers)):
+                out = out + m * params[i]
+            return out
+
+        return (func, [offset0] * n_parts, [0.0] * n_parts,
+                [np.inf] * n_parts, n_parts)
 
     if background == "linear_per_peak":
         # Reference points are fixed from the fit domain so the parameters keep
@@ -427,6 +446,14 @@ class SpectrumFitter:
         requested_model, window_forced = normalize_model_name(config.fitting_model)
         use_window = bool(getattr(config, "use_window", True)) or window_forced
         background = getattr(config, "background", "flat")
+        beta = config.beta
+
+        # Presets pin background and beta too (callers that assign
+        # config.fitting_model directly bypass FindPeaksConfig.__post_init__).
+        preset = MODEL_PRESETS.get(str(config.fitting_model))
+        if preset is not None:
+            background = preset["background"]
+            beta = preset["beta"]
 
         if requested_model not in SUPPORTED_MODELS:
             raise ValueError(
@@ -435,6 +462,27 @@ class SpectrumFitter:
                 f"Windowing and the baseline are separate config options "
                 f"(use_window, background), not part of the model name."
             )
+
+        # The model-mixing trap: 'pixel_response' defines the peak centre as
+        # the Lorentzian core BEFORE the asymmetric tail, ~0.27 px away from a
+        # plain Lorentzian's apparent centre. Fitting samples with one
+        # convention against a calibration fitted with the other injects a
+        # -168 MHz left-right split (measured 2026-08). Calibration and
+        # samples must therefore use the same lineshape family.
+        if not is_reference_mode:
+            reference_model, _ = normalize_model_name(
+                self.reference_config.fitting_model)
+            pr = "pixel_response"
+            if (pr in (requested_model, reference_model)
+                    and requested_model != reference_model):
+                raise ValueError(
+                    f"Model mixing: sample model '{requested_model}' with "
+                    f"reference model '{reference_model}'. The pixel-response "
+                    f"centre convention differs from a plain Lorentzian's by "
+                    f"~0.27 px (-168 MHz split when mixed), so calibration and "
+                    f"samples must both use 'pixel_response' (e.g. prm0/prm1) "
+                    f"or neither."
+                )
 
         alpha = None
         na_v0 = None
@@ -518,7 +566,6 @@ class SpectrumFitter:
         x_max = float(np.max(px))
         x_span = max(x_max - x_min, 1.0)
         offset0 = float(np.amin(sline))
-        beta = config.beta
 
         if use_window:
             mask = self._build_window_mask(px, cen, wid, beta=beta)
@@ -587,8 +634,9 @@ class SpectrumFitter:
                     model=fit_kind,
                 )
             peak_params = peak_params[::-1]
-            if background == "linear_per_peak":
-                bg_params = bg_params[2:] + bg_params[:2]
+            if background in ("flat_per_peak", "linear_per_peak"):
+                k = n_bg // 2
+                bg_params = bg_params[k:] + bg_params[:k]
 
         centers = [p[1] for p in peak_params]
         bg_at_peaks = bg_func(np.asarray(centers, dtype=float), *bg_params)
