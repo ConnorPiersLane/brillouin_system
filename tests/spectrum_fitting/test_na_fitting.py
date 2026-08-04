@@ -61,6 +61,12 @@ def make_fitter(model: str, na_collection: float = NA_EFF,
                 beam_d: float = BEAM_D_MM, focal: float = FOCAL_MM) -> SpectrumFitter:
     fitter = SpectrumFitter()
     fitter.update_sample_config(make_config(model, na_collection, beam_d, focal))
+    # Pin the reference config too: a fresh SpectrumFitter loads it from the
+    # production TOML, and the fitter rejects a pixel-response calibration
+    # paired with a Lorentzian-family sample model (the -168 MHz mixing trap).
+    # These tests are about the NA sample lineshape, so keep them independent
+    # of whatever model production happens to be configured for.
+    fitter.update_reference_config(make_config("lorentzian"))
     return fitter
 
 
