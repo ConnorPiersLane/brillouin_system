@@ -499,8 +499,11 @@ class HiBackend:
             self.calibration_poly_fit_params = None
             self.calibration_calculator = None
         else:
+            # Same fitter as the live frames: it holds the frozen row band, and
+            # the band must not move between a calibration and its samples.
             self.calibration_poly_fit_params = calibrate(data=self.calibration_data,
-                                                         poyfit_degree=self.calibration_config.degree)
+                                                         poyfit_degree=self.calibration_config.degree,
+                                                         fitter=self.spectrum_fitter)
             self.calibration_calculator: CalibrationCalculator = CalibrationCalculator(
                 parameters=self.calibration_poly_fit_params)
 

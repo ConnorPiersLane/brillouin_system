@@ -6,7 +6,9 @@ from brillouin_system.calibration.calibration import (
     CalibrationCalculator,
     CalibrationData,
     CalibrationPolyfitParameters,
+    calibrate,
 )
+from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
@@ -18,7 +20,9 @@ from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import Ph
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_analyzer import AnalyzedFreqShifts, TheoreticalPeakStdError, \
     SpectrumAnalyzer
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors
+from brillouin_system.spectrum_fitting.spectrum_fitter import (
+    SpectrumFitter, model_requires_anchors, normalize_model_name,
+)
 
 
 # -------------- Request for Scan --------------
@@ -115,6 +119,50 @@ class AnalyzedSpectrum:
 
 
 # -------------- Functions --------------
+def calibration_for_scan(scan: AxialScan, fitter: SpectrumFitter) -> CalibrationCalculator:
+    """This scan's own calibration, re-fitted from its raw frames when possible.
+
+    scan.calibration_params was fitted at ACQUISITION time with whatever
+    reference model was live then, so it silently pins the peak-centre
+    convention of that model. Re-analysing samples with a different lineshape
+    against it is the model-mixing trap (~0.27 px, -168 MHz split) that the
+    fitter's guard catches between the two live configs but cannot see here.
+    Re-fitting the stored frames with the current configs is what keeps the
+    calibration and the samples on the same convention.
+
+    Without the raw frames there is nothing to re-fit and no record of which
+    model produced the stored polynomial, so a pixel-response re-analysis of
+    such a scan is refused rather than quietly mixed.
+    """
+    sample_model, _ = normalize_model_name(fitter.sample_config.fitting_model)
+
+    if scan.calibration_data is not None:
+        degree = (scan.calibration_params.degree
+                  if scan.calibration_params is not None
+                  else calibration_config.get().degree)
+        params = calibrate(data=scan.calibration_data, poyfit_degree=degree,
+                           fitter=fitter)
+        print(f"[fit_axial_scan] Re-fitted this scan's calibration from its raw "
+              f"frames (model={fitter.reference_config.fitting_model}, "
+              f"degree={degree}) — shifts may differ from the stored analysis.")
+        return CalibrationCalculator(parameters=params)
+
+    if sample_model == "pixel_response":
+        raise ValueError(
+            f"Scan '{scan.id}' carries no raw calibration frames "
+            f"(calibration_data is None: recorded before they were stored, or "
+            f"with save_calibration_frames off), so its calibration cannot be "
+            f"re-fitted and there is no record of the model it was fitted "
+            f"with. A pixel-response sample fit against a calibration that is "
+            f"most likely lorentzian is the -168 MHz mixing trap. Analyse this "
+            f"scan with 'lorentzian' instead."
+        )
+
+    print("[fit_axial_scan] No raw calibration frames stored — using the "
+          "calibration polynomial as fitted at acquisition time.")
+    return CalibrationCalculator(parameters=scan.calibration_params)
+
+
 def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()
     # Re-fit on the rows the scan was acquired with, not on whatever the
@@ -127,7 +175,7 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
             row_selection="manual",
         )
         spectrum_fitter.update_sline_config(sline_config)
-    calibration_calculator = CalibrationCalculator(parameters=scan.calibration_params)
+    calibration_calculator = calibration_for_scan(scan, spectrum_fitter)
     spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
 
     do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active

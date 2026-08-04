@@ -417,10 +417,19 @@ def sort_xy(x, y):
     idx = np.argsort(x)
     return np.asarray(x)[idx], np.asarray(y)[idx]
 
-sf = SpectrumFitter()
 
-def calibrate(data: CalibrationData, poyfit_degree) -> CalibrationPolyfitParameters:
+def calibrate(data: CalibrationData, poyfit_degree,
+              fitter: SpectrumFitter | None = None) -> CalibrationPolyfitParameters:
+    """Fit a calibration from its raw frames.
+
+    Pass the same fitter used for the samples when re-fitting a scan's own
+    calibration: it carries that scan's row band, and the row band must not move
+    between a calibration and its samples (~3-4 MHz per row). A fitter built
+    here reads the configs as they are NOW, which is what a re-analysis wants —
+    the model can only be changed by re-fitting.
+    """
     degree = poyfit_degree
+    sf = fitter if fitter is not None else SpectrumFitter()
 
     all_fits = []
     freqs_all = []
