@@ -15,15 +15,19 @@ FITTING_MODELS_SAMPLE = [
     "prm0",
     "prm1",
 ]
-# The prm0/prm1 presets are SAMPLE recipes and are deliberately absent here:
-# their per-peak baseline (and the beta = 3.0 pin) was validated against the
-# local gradient under sample peaks, never on calibration frames. Pair a prm
-# sample fit with plain "pixel_response" — the mixing guard normalizes preset
-# names to their lineshape, so that is all it asks for.
+# prm0/prm1 are offered here too: a scan's calibration is re-fitted with this
+# config (calibration_for_scan), so picking the preset gives the sidebands the
+# same per-peak baseline, window and beta = 3.0 as the samples. That matters for
+# the width recipe — the instrument width subtracted from a sample linewidth
+# should be fitted the way the sample was. Plain "pixel_response" is the lighter
+# choice when only the centre convention has to match, which is all the
+# model-mixing guard requires.
 FITTING_MODELS_REFERENCE = [
     "lorentzian",
     "voigt",
     "pixel_response",
+    "prm0",
+    "prm1",
 ]
 
 # Preset names for the validated production recipes (2026-08-03 decision).
