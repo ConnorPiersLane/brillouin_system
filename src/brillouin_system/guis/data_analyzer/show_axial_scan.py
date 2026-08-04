@@ -30,6 +30,7 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
     AxialScan, fit_axial_scan, AnalyzedSpectrum
 )
 from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts
+from brillouin_system.spectrum_fitting.spectrum_fitter import is_pixel_response_fit
 from brillouin_system.spectrum_fitting.spectrum_analyzer import TheoreticalPeakStdError, \
     AnalyzedFreqShifts, MeasuredStatistics, analyze_statistics
 
@@ -346,7 +347,10 @@ class AxialScanViewer(QWidget):
         print(f"Freq shifts poly: left={fmt(freq_shift.freq_shift_left_peak_ghz)}, "
               f"right={fmt(freq_shift.freq_shift_right_peak_ghz)}, "
               f"distance={fmt(freq_shift.freq_shift_peak_distance_ghz)}")
-        print(f"HWHM (GHz): left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
+        fitted = self.list_analyzed_spectras[self.current_index].fitted_spectrum
+        kind = ("sample, instrument width subtracted"
+                if is_pixel_response_fit(fitted.model) else "raw, instrument-broadened")
+        print(f"HWHM (GHz) [{kind}]: left={fmt(freq_shift.hwhm_left_peak_ghz)}, "
               f"right={fmt(freq_shift.hwhm_right_peak_ghz)}")
         print(f"Photons: left={fmt(photons.left_peak_photons, precision=0)}, "
               f"right={fmt(photons.right_peak_photons, precision=0)}, "

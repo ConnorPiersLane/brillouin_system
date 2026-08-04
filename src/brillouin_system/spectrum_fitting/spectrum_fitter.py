@@ -74,6 +74,15 @@ def model_requires_anchors(model: str) -> bool:
     return normalize_model_name(model)[0] in NA_MODELS
 
 
+def is_pixel_response_fit(model: str | None) -> bool:
+    """True if a FittedSpectrum came from the pixel-response lineshape.
+
+    Takes the `model` string a fit carries (the fit_kind tag, e.g.
+    '2pixel_response_window_linear_per_peak'), not a config model name.
+    """
+    return "pixel_response" in str(model or "")
+
+
 # -----------------------------
 # Symmetric Lorentzian models
 # -----------------------------
