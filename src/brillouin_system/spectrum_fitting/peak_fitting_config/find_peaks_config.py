@@ -15,12 +15,15 @@ FITTING_MODELS_SAMPLE = [
     "prm0",
     "prm1",
 ]
+# The prm0/prm1 presets are SAMPLE recipes and are deliberately absent here:
+# their per-peak baseline (and the beta = 3.0 pin) was validated against the
+# local gradient under sample peaks, never on calibration frames. Pair a prm
+# sample fit with plain "pixel_response" — the mixing guard normalizes preset
+# names to their lineshape, so that is all it asks for.
 FITTING_MODELS_REFERENCE = [
     "lorentzian",
     "voigt",
     "pixel_response",
-    "prm0",
-    "prm1",
 ]
 
 # Preset names for the validated production recipes (2026-08-03 decision).

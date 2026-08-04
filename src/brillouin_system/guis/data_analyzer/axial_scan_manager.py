@@ -1,5 +1,6 @@
 import sys
 import pickle
+import traceback
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox
@@ -142,19 +143,30 @@ class AxialScanManager(QWidget):
                     print(f"⚠️ Scan {idx} is already open. Not opening a second viewer.")
                 except RuntimeError:
                     print(f"⚠️ Viewer for scan {idx} was closed unexpectedly. Reopening...")
-                    viewer = AxialScanViewer(scan)
-                    viewer.setAttribute(Qt.WA_DeleteOnClose, True)
-                    viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
-                    viewer.show()
-                    viewer.raise_()
-                    self.open_viewers[idx] = viewer
+                    self._open_viewer(idx, scan)
             else:
-                viewer = AxialScanViewer(scan)
-                viewer.setAttribute(Qt.WA_DeleteOnClose, True)
-                viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
-                viewer.show()
-                viewer.raise_()
-                self.open_viewers[idx] = viewer
+                self._open_viewer(idx, scan)
+
+    def _open_viewer(self, idx: int, scan: AxialScan):
+        # The viewer fits the whole scan in its constructor, so a bad fitting
+        # config (e.g. a pixel-response sample model against a lorentzian
+        # reference) raises here. Report it instead of letting the exception
+        # escape the slot — PyQt aborts the process on that.
+        try:
+            viewer = AxialScanViewer(scan)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(
+                self, "Cannot Open Scan",
+                f"Failed to analyze scan {idx}:\n\n{type(e).__name__}: {e}"
+            )
+            return
+
+        viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+        viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
+        viewer.show()
+        viewer.raise_()
+        self.open_viewers[idx] = viewer
 
     def remove_selected(self):
         selected_items = self.scan_list.selectedItems()
@@ -245,7 +257,23 @@ class AxialScanManager(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")
 
+def install_exception_hook():
+    """Show unhandled exceptions instead of letting PyQt kill the process.
+
+    PyQt5 calls qFatal() when an exception escapes a slot, which ends the app
+    with exit code 0xC0000409 and no visible message.
+    """
+    def hook(exc_type, exc, tb):
+        traceback.print_exception(exc_type, exc, tb)
+        QMessageBox.critical(
+            None, "Unhandled Error", f"{exc_type.__name__}: {exc}"
+        )
+
+    sys.excepthook = hook
+
+
 if __name__ == "__main__":
+    install_exception_hook()
     app = QApplication(sys.argv)
     window = AxialScanManager()
     window.show()
