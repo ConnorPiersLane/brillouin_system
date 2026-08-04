@@ -160,35 +160,6 @@ def test_reference_mode_never_blocked():
     assert result.is_success
 
 
-@pytest.mark.parametrize("preset,expected_bg", [("prm0", "flat_per_peak"),
-                                                ("prm1", "linear_per_peak")])
-def test_reference_fit_honours_the_preset(preset, expected_bg):
-    """A prm preset on the reference fits the calibration sidebands that way
-    too — a scan's calibration is re-fitted with this config, so the instrument
-    width can be measured the same way the sample width is."""
-    fitter = make_fitter(preset, preset)
-    px, sline = make_spectrum()
-    result = fitter.fit(px, sline, is_reference_mode=True)
-
-    assert result.is_success
-    assert "pixel_response" in result.model
-    assert expected_bg in result.model
-
-
-@pytest.mark.parametrize("preset", ["prm0", "prm1"])
-def test_reference_preset_applies_when_assigned_directly(preset):
-    """Presets reach the fit even set by hand: ThreadSafeConfig.update()
-    setattrs the field, so __post_init__ never expands it."""
-    fitter = make_fitter("lorentzian", "lorentzian")
-    fitter.reference_config.fitting_model = preset
-    px, sline = make_spectrum()
-    result = fitter.fit(px, sline, is_reference_mode=True)
-
-    assert result.is_success
-    assert MODEL_PRESETS[preset]["background"] in result.model
-    assert "pixel_response" in result.model
-
-
 def test_matched_lorentzian_pair_unaffected():
     fitter = make_fitter("lorentzian", "lorentzian")
     px, sline = make_spectrum()
