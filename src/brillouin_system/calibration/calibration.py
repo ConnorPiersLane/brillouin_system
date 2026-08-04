@@ -321,40 +321,43 @@ class CalibrationCalculator:
                 self.calibration_width_right_peak_ghz, px_right),
         )
 
-    def hwhm_ghz(self, fitting: FittedSpectrum,
-                 deconvolve: bool = True) -> tuple[float | None, float | None]:
-        """Reported HWHM of a fit's two peaks, in GHz.
+    def hwhm_ghz(self, fitting: FittedSpectrum) -> tuple[float | None, float | None]:
+        """Raw fitted HWHM of a fit's two peaks in GHz — still instrument-broadened.
 
-        For a pixel-response fit the returned widths are the SAMPLE linewidths:
-        the fitted width already has the camera kernel removed by the model, and
-        the instrument width measured from the calibration sidebands is
-        subtracted here — linearly, because Lorentzian widths add under
-        convolution. Both sides come from the same lineshape family (the fitter
-        refuses to mix them), so the two widths mean the same thing.
-
-        Every other lineshape returns the raw fitted width, uncorrected.
-
-        Pass deconvolve=False for a fit OF the calibration itself, where the
-        subtraction would just give zero.
+        This is the measured width of the peak as it lands on the detector. It
+        is what the precision bound needs; for the sample's own linewidth see
+        sample_linewidth_ghz.
         """
         if not fitting.is_success:
             return None, None
 
-        raw_l = float(abs(self.df_left_peak(
-            fitting.left_peak_center_px, fitting.left_peak_width_px)))
-        raw_r = float(abs(self.df_right_peak(
-            fitting.right_peak_center_px, fitting.right_peak_width_px)))
+        return (
+            float(abs(self.df_left_peak(
+                fitting.left_peak_center_px, fitting.left_peak_width_px))),
+            float(abs(self.df_right_peak(
+                fitting.right_peak_center_px, fitting.right_peak_width_px))),
+        )
 
-        if not (deconvolve and is_pixel_response_fit(fitting.model)):
-            return raw_l, raw_r
+    def sample_linewidth_ghz(self, fitting: FittedSpectrum) -> tuple[float | None, float | None]:
+        """Sample HWHM in GHz: fitted width minus the instrument width.
 
+        Linear subtraction, because Lorentzian widths add under convolution, and
+        evaluated at each peak's own pixel. The camera kernel is already out of
+        both terms — the pixel-response model removes it from the sample fit,
+        and the calibration was fitted with the same lineshape (the fitter
+        refuses to mix families), so the two widths mean the same thing.
+
+        Returns (None, None) unless that holds: only pixel-response fits are
+        the validated width recipe, and only a calibration carrying a width
+        model can supply the instrument term.
+        """
+        if not fitting.is_success or not is_pixel_response_fit(fitting.model):
+            return None, None
+
+        raw_l, raw_r = self.hwhm_ghz(fitting)
         inst_l, inst_r = self.instrument_hwhm_ghz(
             fitting.left_peak_center_px, fitting.right_peak_center_px)
         if inst_l is None or inst_r is None:
-            # Returning the raw width here would silently pass off an
-            # instrument-broadened number as a sample linewidth.
-            print("[CalibrationCalculator] No calibration width model: cannot "
-                  "deconvolve the instrument width from a pixel-response fit.")
             return None, None
 
         return raw_l - inst_l, raw_r - inst_r

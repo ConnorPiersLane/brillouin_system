@@ -1,6 +1,6 @@
-"""The reported HWHM of a pixel-response fit is the SAMPLE linewidth: the
-instrument width measured from the calibration sidebands is already subtracted.
-Every other lineshape keeps reporting the raw, instrument-broadened width.
+"""Widths are reported as three separate quantities, never one field whose
+meaning depends on the model: the raw fitted HWHM, the instrument HWHM from the
+calibration sidebands, and the sample linewidth left after subtracting them.
 """
 import numpy as np
 import pytest
@@ -15,6 +15,8 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 SLOPE = 0.1
 INSTRUMENT_PX = 2.0
 FIT_WIDTH_PX = 5.0
+
+PRM_FIT = "2pixel_response_window_linear_per_peak"
 
 
 def make_calc(with_width_model: bool = True) -> CalibrationCalculator:
@@ -42,43 +44,50 @@ def make_fit(model: str) -> FittedSpectrum:
     )
 
 
-def test_pixel_response_hwhm_has_instrument_width_subtracted():
-    left, right = make_calc().hwhm_ghz(make_fit("2pixel_response_window_linear_per_peak"))
+@pytest.mark.parametrize("model", [PRM_FIT, "2lorentzian_window"])
+def test_fitted_hwhm_is_raw_whatever_the_model(model):
+    """The meaning of hwhm_ghz never depends on the lineshape."""
+    left, right = make_calc().hwhm_ghz(make_fit(model))
+
+    expected = SLOPE * FIT_WIDTH_PX
+    assert left == pytest.approx(expected)
+    assert right == pytest.approx(expected)
+
+
+def test_instrument_hwhm_is_read_at_the_sample_peak_pixel():
+    left, right = make_calc().instrument_hwhm_ghz(20.0, 60.0)
+
+    expected = SLOPE * INSTRUMENT_PX
+    assert left == pytest.approx(expected)
+    assert right == pytest.approx(expected)
+
+
+def test_sample_linewidth_subtracts_the_instrument_width():
+    left, right = make_calc().sample_linewidth_ghz(make_fit(PRM_FIT))
 
     expected = SLOPE * (FIT_WIDTH_PX - INSTRUMENT_PX)
     assert left == pytest.approx(expected)
     assert right == pytest.approx(expected)
 
 
-def test_lorentzian_hwhm_stays_raw():
-    left, right = make_calc().hwhm_ghz(make_fit("2lorentzian_window"))
-
-    expected = SLOPE * FIT_WIDTH_PX
-    assert left == pytest.approx(expected)
-    assert right == pytest.approx(expected)
-
-
-def test_reference_mode_does_not_subtract():
-    """A fit OF the calibration is the instrument; subtracting gives zero."""
-    left, right = make_calc().hwhm_ghz(
-        make_fit("2pixel_response_window"), deconvolve=False)
-
-    expected = SLOPE * FIT_WIDTH_PX
-    assert left == pytest.approx(expected)
-    assert right == pytest.approx(expected)
-
-
-def test_missing_width_model_reports_none_rather_than_the_raw_width():
-    """Old scans have no width polynomial. Returning the raw width would pass
-    off an instrument-broadened number as a sample linewidth."""
-    left, right = make_calc(with_width_model=False).hwhm_ghz(
-        make_fit("2pixel_response_window"))
+def test_no_sample_linewidth_for_other_lineshapes():
+    """Only the pixel-response fit is the validated width recipe."""
+    left, right = make_calc().sample_linewidth_ghz(make_fit("2lorentzian_window"))
 
     assert left is None and right is None
+
+
+def test_no_sample_linewidth_without_a_calibration_width_model():
+    """Old scans have no width polynomial, so there is no instrument term."""
+    calc = make_calc(with_width_model=False)
+
+    assert calc.instrument_hwhm_ghz(20.0, 60.0) == (None, None)
+    assert calc.sample_linewidth_ghz(make_fit(PRM_FIT)) == (None, None)
 
 
 def test_failed_fit_reports_none():
-    left, right = make_calc().hwhm_ghz(
-        FittedSpectrum(is_success=False, x_pixels=np.arange(80.0), sline=np.zeros(80)))
+    fit = FittedSpectrum(is_success=False, x_pixels=np.arange(80.0), sline=np.zeros(80))
+    calc = make_calc()
 
-    assert left is None and right is None
+    assert calc.hwhm_ghz(fit) == (None, None)
+    assert calc.sample_linewidth_ghz(fit) == (None, None)

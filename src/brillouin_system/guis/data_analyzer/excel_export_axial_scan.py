@@ -38,7 +38,9 @@ class BrillouinExport:
 
     lp_ghz: Optional[float] = None
     # lp_ghz_interp: Optional[float] = None
-    lp_hwhm_ghz: Optional[float] = None
+    lp_hwhm_ghz: Optional[float] = None  # raw fitted width, instrument-broadened
+    lp_instrument_hwhm_ghz: Optional[float] = None  # instrument width at this peak's pixel
+    lp_linewidth_ghz: Optional[float] = None  # sample HWHM = fitted - instrument
     lp_photons: Optional[float] = None
     lp_theo_std_photons_mhz: Optional[float] = None
     lp_theo_std_pixelation_mhz: Optional[float] = None
@@ -47,6 +49,8 @@ class BrillouinExport:
     rp_ghz: Optional[float] = None
     # rp_ghz_interp: Optional[float] = None
     rp_hwhm_ghz: Optional[float] = None
+    rp_instrument_hwhm_ghz: Optional[float] = None
+    rp_linewidth_ghz: Optional[float] = None
     rp_photons: Optional[float] = None
     rp_theo_std_photons_mhz: Optional[float] = None
     rp_theo_std_pixelation_mhz: Optional[float] = None
@@ -133,9 +137,13 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         rp_ghz=shifts.freq_shift_right_peak_ghz,
         # rp_ghz_interp=shifts.freq_shift_right_peak_ghz_interp,
 
-        # Widths
+        # Widths: raw fitted, the instrument term, and what is left for the sample
         lp_hwhm_ghz=shifts.hwhm_left_peak_ghz,
         rp_hwhm_ghz=shifts.hwhm_right_peak_ghz,
+        lp_instrument_hwhm_ghz=shifts.instrument_hwhm_left_peak_ghz,
+        rp_instrument_hwhm_ghz=shifts.instrument_hwhm_right_peak_ghz,
+        lp_linewidth_ghz=shifts.linewidth_left_peak_ghz,
+        rp_linewidth_ghz=shifts.linewidth_right_peak_ghz,
 
         # Photon counts
         lp_photons=photons.left_peak_photons,

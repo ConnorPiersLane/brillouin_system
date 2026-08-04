@@ -834,15 +834,14 @@ class HiBackend:
 
         Returns: hwhm_left_peak_ghz, hwhm_right_peak_ghz
 
-        Pixel-response fits report the sample linewidth (instrument width
-        subtracted); other lineshapes report the raw fitted width. In reference
-        mode the fit IS the instrument, so nothing is subtracted.
+        The raw fitted width, as the peak lands on the detector — what you want
+        while watching the live spectrum. The instrument-subtracted sample
+        linewidth is an analysis output (see AnalyzedFreqShifts).
         """
         if self.calibration_calculator is None:
             return None, None
         else:
-            return self.calibration_calculator.hwhm_ghz(
-                fitting, deconvolve=not self.is_reference_mode)
+            return self.calibration_calculator.hwhm_ghz(fitting)
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:

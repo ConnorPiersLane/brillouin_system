@@ -36,12 +36,18 @@ class AnalyzedFreqShifts:
     freq_shift_left_peak_ghz: float | None
     freq_shift_right_peak_ghz: float | None
     freq_shift_peak_distance_ghz: float | None
-    # Pixel-response fits report the SAMPLE linewidth: camera kernel removed by
-    # the model, instrument width subtracted from the calibration sidebands
-    # (CalibrationCalculator.hwhm_ghz). Other lineshapes report the raw fitted
-    # width, still instrument-broadened.
+    # Raw fitted width, as the peak lands on the detector: still broadened by
+    # the instrument, whatever the lineshape. Unchanged meaning for every model.
     hwhm_left_peak_ghz: float | None
     hwhm_right_peak_ghz: float | None
+    # Instrument HWHM from the calibration sidebands, at each peak's own pixel,
+    # and the sample linewidth left after subtracting it. The linewidth pair is
+    # None unless the fit is pixel-response and the calibration carries a width
+    # model (see CalibrationCalculator.sample_linewidth_ghz).
+    instrument_hwhm_left_peak_ghz: float | None = None
+    instrument_hwhm_right_peak_ghz: float | None = None
+    linewidth_left_peak_ghz: float | None = None
+    linewidth_right_peak_ghz: float | None = None
 
 
 @dataclass
@@ -79,14 +85,22 @@ class SpectrumAnalyzer:
                 hwhm_right_peak_ghz=None,
             )
 
-        hwhm_left, hwhm_right = self.calibration_calculator.hwhm_ghz(fitting)
+        calc = self.calibration_calculator
+        hwhm_left, hwhm_right = calc.hwhm_ghz(fitting)
+        inst_left, inst_right = calc.instrument_hwhm_ghz(
+            fitting.left_peak_center_px, fitting.right_peak_center_px)
+        width_left, width_right = calc.sample_linewidth_ghz(fitting)
 
         return AnalyzedFreqShifts(
-            freq_shift_left_peak_ghz=self.calibration_calculator.freq_left_peak(fitting.left_peak_center_px),
-            freq_shift_right_peak_ghz=self.calibration_calculator.freq_right_peak(fitting.right_peak_center_px),
-            freq_shift_peak_distance_ghz=self.calibration_calculator.freq_peak_distance(fitting.inter_peak_distance),
+            freq_shift_left_peak_ghz=calc.freq_left_peak(fitting.left_peak_center_px),
+            freq_shift_right_peak_ghz=calc.freq_right_peak(fitting.right_peak_center_px),
+            freq_shift_peak_distance_ghz=calc.freq_peak_distance(fitting.inter_peak_distance),
             hwhm_left_peak_ghz=hwhm_left,
             hwhm_right_peak_ghz=hwhm_right,
+            instrument_hwhm_left_peak_ghz=inst_left,
+            instrument_hwhm_right_peak_ghz=inst_right,
+            linewidth_left_peak_ghz=width_left,
+            linewidth_right_peak_ghz=width_right,
         )
 
 
@@ -110,12 +124,10 @@ class SpectrumAnalyzer:
 
 
         # All values are in GHz, as this is a distance approx for the spectrometer
-        # Lorentzian Profile, approximate std with fwhm.
-        # deconvolve=False on purpose: the bound is set by how wide the peak
-        # actually lands on the detector, not by the sample's intrinsic
-        # linewidth, so this needs the raw instrument-broadened width even for a
-        # pixel-response fit (which otherwise reports the deconvolved width).
-        s_l, s_r = self.calibration_calculator.hwhm_ghz(fs, deconvolve=False)
+        # Lorentzian Profile, approximate std with fwhm. The raw fitted width is
+        # the right one here: the bound is set by how wide the peak actually
+        # lands on the detector, not by the sample's own linewidth.
+        s_l, s_r = self.calibration_calculator.hwhm_ghz(fs)
 
         a_l = abs(self.calibration_calculator.df_left_peak(px=fs.left_peak_center_px, dpx=1))
         a_r = abs(self.calibration_calculator.df_right_peak(px=fs.right_peak_center_px, dpx=1))
