@@ -34,9 +34,12 @@ that bias is also why July's per-session estimates spanned 2.7-4.8. The
 common-mode term scales the whole spectrum without moving peak centres, so
 shot-noise predictions for the fitted SHIFT must use the Poisson gain g.
 
-Cross-checks on 3.89: implied read noise 1.26 ADU * 3.89 = 4.9 e- (DU897
-datasheet 4-6); Andor quotes 4-5 e-/count for this camera in Conventional
-mode; and with 3.89 the full noise budget of the fitted shift closes with no
+Cross-checks on 3.89: implied read noise 1.26 ADU * 3.89 = 4.9 e- -- the
+typical conventional-CCD magnitude at preamp 1x (the iXon Ultra 897 spec
+sheet quotes 2.7 e- at 0.08 MHz, but at the OPTIMAL preamp setting;
+input-referred read noise scales with the sensitivity, so preamp 1x is
+expected higher -- per-unit performance booklet not on hand to verify);
+and with 3.89 the full noise budget of the fitted shift closes with no
 free parameters (see theoretical_precision's docstring).
 
 TWO TRAPS in photon-transfer measurements, both of which we fell into first:
