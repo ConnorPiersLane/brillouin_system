@@ -113,6 +113,22 @@ class SpectrumAnalyzer:
                               ) -> TheoreticalPeakStdError:
         """ See paper: Precise nanometer Localization Analysis for Individual Fluorescent Probes
 
+        THIS IS A LOWER BOUND, NOT A PREDICTION of the pipeline's per-frame
+        scatter. It assumes an ideal (maximum-likelihood) estimator and pure
+        photon noise from the peak itself. The production pipeline sits a
+        measured ~1.45x above it (verified 2026-08-12 by Monte Carlo with
+        exactly-known noise; scripts in Data/Calibration_paper_data):
+          * x1.14 -- the exact Cramer-Rao bound for the real 7-parameter
+            pixel-integrated model with the real noise (read noise + shot
+            noise of the stray-light pedestal, both ignored here);
+          * x1.28 -- the production prm1 fit is unweighted least squares,
+            not maximum likelihood, so it does not reach the bound (the
+            plain lorentzian_window fit costs x1.15).
+        Measured per-frame scatter matches x1.45 plus the ~0.8 MHz per-peak
+        pattern-translation drift, closing the budget with nothing left over.
+        Use these numbers as the floor the measurement cannot beat, and scale
+        by the factors above when an absolute prediction is needed.
+
         corr_left_right is the correlation between the two peak-centre errors,
         used only for the distance. Shot noise in the two peaks comes from
         different photons on different pixels, so the default of 0 is the right

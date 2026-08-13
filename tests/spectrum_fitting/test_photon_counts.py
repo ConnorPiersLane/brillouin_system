@@ -11,8 +11,10 @@ from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import (
 
 
 def test_sensitivity_matches_photon_transfer_measurement():
-    """Measured 2026-07-27 on the DU897: 3.5 +- 0.5 e-/count at preamp 1x."""
-    assert 3.0 <= SENSITIVITY_E_PER_COUNT_PREAMP_1X <= 4.0
+    """Measured 2026-08-12 on the DU897: 3.89 +- 0.04 e-/count at preamp 1x
+    (quadratic photon transfer; a linear fit is biased low by common-mode
+    source noise and gave the earlier 3.5)."""
+    assert SENSITIVITY_E_PER_COUNT_PREAMP_1X == pytest.approx(3.89)
 
 
 def test_conventional_mode_uses_measured_sensitivity():
