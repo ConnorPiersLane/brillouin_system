@@ -7,7 +7,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
     FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
-    ROW_SELECTIONS, FittingConfigs
+    NA_WEIGHTINGS, ROW_SELECTIONS, FittingConfigs
 )
 
 
@@ -43,10 +43,12 @@ class FindPeaksConfigDialog(QDialog):
         return ["pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px"]
 
     def na_field_names(self):
-        # NA-integrated models (na_lorentzian* / na_gauss_lorentzian*), sample
-        # only: aperture-clip NA; Gaussian coupling geometry (gauss models:
-        # fiber-mode beam diameter at pupil [session-calibrated on water] +
-        # objective focal length); sample refractive index.
+        # NA collection model (na_lorentzian* fitting model and the post-hoc
+        # correction), sample only: aperture-clip NA; Gaussian coupling
+        # geometry (na_weighting = uniform_gaussian: fiber-mode beam diameter
+        # at pupil [session-calibrated on water] + objective focal length);
+        # sample refractive index. The weighting itself is a combo box, not a
+        # float field — see create_config_group.
         return ["na_collection", "na_beam_diameter_mm", "na_focal_length_mm", "na_n_sample"]
 
     def create_dual_form(self):
@@ -81,6 +83,25 @@ class FindPeaksConfigDialog(QDialog):
         inputs["fitting_model"] = combo
         row.addWidget(combo)
         vlayout.addLayout(row)
+
+        # NA collection weight (sample group only, alongside the NA fields).
+        if "na_collection" in extra_fields:
+            row = QHBoxLayout()
+            row.addWidget(QLabel("NA weighting"))
+            na_combo = QComboBox()
+            na_combo.addItems(NA_WEIGHTINGS)
+            na_combo.setToolTip(
+                "Collection weight over the NA cone (na_lorentzian model and "
+                "the post-hoc correction):\n"
+                "uniform: hard pupil only — the NA 0.14 recipe (~ +3.5 MHz on "
+                "water, parameter-free).\n"
+                "uniform_gaussian: adds the Gaussian fiber-coupling apodization "
+                "from na_beam_diameter_mm / na_focal_length_mm — required at "
+                "NA 0.42."
+            )
+            inputs["na_weighting"] = na_combo
+            row.addWidget(na_combo)
+            vlayout.addLayout(row)
 
         # Windowing and baseline apply to any lineshape.
         row = QHBoxLayout()
@@ -161,6 +182,7 @@ class FindPeaksConfigDialog(QDialog):
 
         for field in self.na_field_names():
             self.sample_inputs[field].setText(str(getattr(sample, field)))
+        self.sample_inputs["na_weighting"].setCurrentText(sample.na_weighting)
 
         for field in self.pr_field_names():
             self.reference_inputs[field].setText(str(getattr(reference, field)))
@@ -206,6 +228,7 @@ class FindPeaksConfigDialog(QDialog):
             # Sample
             sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f)
                              for f in list(self.field_names()) + list(self.na_field_names())}
+            sample_kwargs["na_weighting"] = self.sample_inputs["na_weighting"].currentText()
             sample_kwargs.update(self._model_kwargs(self.sample_inputs))
 
             # Reference

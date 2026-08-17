@@ -41,7 +41,8 @@ V0 = float(gaussian_angle_width(BEAM_D_MM, FOCAL_MM, N_SAMPLE))
 
 
 def make_config(model: str, na_collection: float = NA_EFF,
-                beam_d: float = BEAM_D_MM, focal: float = FOCAL_MM) -> FindPeaksConfig:
+                beam_d: float = BEAM_D_MM, focal: float = FOCAL_MM,
+                na_weighting: str = "uniform") -> FindPeaksConfig:
     return FindPeaksConfig(
         prominence_fraction=0.05,
         min_peak_width=1,
@@ -50,6 +51,7 @@ def make_config(model: str, na_collection: float = NA_EFF,
         wlen_pixels=20,
         fitting_model=model,
         beta=4.0,
+        na_weighting=na_weighting,
         na_collection=na_collection,
         na_beam_diameter_mm=beam_d,
         na_focal_length_mm=focal,
@@ -58,9 +60,11 @@ def make_config(model: str, na_collection: float = NA_EFF,
 
 
 def make_fitter(model: str, na_collection: float = NA_EFF,
-                beam_d: float = BEAM_D_MM, focal: float = FOCAL_MM) -> SpectrumFitter:
+                beam_d: float = BEAM_D_MM, focal: float = FOCAL_MM,
+                na_weighting: str = "uniform") -> SpectrumFitter:
     fitter = SpectrumFitter()
-    fitter.update_sample_config(make_config(model, na_collection, beam_d, focal))
+    fitter.update_sample_config(
+        make_config(model, na_collection, beam_d, focal, na_weighting))
     # Pin the reference config too: a fresh SpectrumFitter loads it from the
     # production TOML, and the fitter rejects a pixel-response calibration
     # paired with a Lorentzian-family sample model (the -168 MHz mixing trap).
@@ -220,6 +224,41 @@ def test_na_gauss_fit_raises_without_coupling_geometry():
         )
     with pytest.raises(ValueError, match="na_beam_diameter_mm"):
         make_fitter("na_gauss_lorentzian_window", focal=0.0).fit(
+            px, data, is_reference_mode=False, anchors=ANCHORS
+        )
+
+
+def test_na_weighting_toggle_selects_gauss_kernel():
+    """The config toggle alone (model stays 'na_lorentzian') must switch the
+    collection weight to uniform+Gaussian — equivalent to the legacy
+    na_gauss_lorentzian name."""
+    px, data = make_spectrum(v0=V0)
+    fs = make_fitter("na_lorentzian_window", na_weighting="uniform_gaussian").fit(
+        px, data, is_reference_mode=False, anchors=ANCHORS
+    )
+    assert fs.is_success
+    # fit_kind records the kernel actually used
+    assert fs.model.startswith("2na_gauss_lorentzian")
+    assert fs.left_peak_center_px == pytest.approx(CEN_LEFT, abs=0.03)
+    assert fs.right_peak_center_px == pytest.approx(CEN_RIGHT, abs=0.03)
+
+
+def test_legacy_gauss_model_name_normalizes_to_toggle():
+    cfg = make_config("na_gauss_lorentzian")
+    assert cfg.fitting_model == "na_lorentzian"
+    assert cfg.na_weighting == "uniform_gaussian"
+
+
+def test_invalid_na_weighting_raises():
+    with pytest.raises(ValueError, match="na_weighting"):
+        make_config("na_lorentzian", na_weighting="gaussian")
+
+
+def test_na_toggle_gauss_requires_coupling_geometry():
+    px, data = make_spectrum(v0=V0)
+    with pytest.raises(ValueError, match="na_beam_diameter_mm"):
+        make_fitter("na_lorentzian_window", beam_d=0.0,
+                    na_weighting="uniform_gaussian").fit(
             px, data, is_reference_mode=False, anchors=ANCHORS
         )
 

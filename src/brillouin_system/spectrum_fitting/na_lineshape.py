@@ -43,8 +43,8 @@ def na_angular_grid(alpha: float, n_quad: int = 41, v0: float | None = None):
     This has a single geometric input (alpha), no soft coupling parameter.
 
     Optionally pass v0 to add the Gaussian fiber-coupling apodization
-    exp(-2 (v/v0)^2) (na_correction5 form, validated on water) — used by the
-    na_gauss_lorentzian* fitting models; v0 is an empirical, session-drifting
+    exp(-2 (v/v0)^2) (na_correction5 form, validated on water) — used when the
+    config sets na_weighting = "uniform_gaussian"; v0 is an empirical, session-drifting
     quantity (the effective fiber-mode diameter), so it must be re-calibrated
     on water per session (na_beam_diameter_mm).
 
@@ -57,6 +57,59 @@ def na_angular_grid(alpha: float, n_quad: int = 41, v0: float | None = None):
         weight = weight * np.exp(-2.0 * (v / v0) ** 2)
     frac = 1.0 - np.cos(v / 2.0)
     return v, weight, frac
+
+
+def na_mean_shift_ratio(config, n_quad: int = 2001) -> float:
+    """Post-hoc scalar <cos(v/2)>: the NA-cone mean of f(v)/f180 under the
+    configured collection weight (config.na_weighting).
+
+    This is the paper's post-hoc correction route (Figs. 4/5): fit with the
+    standard symmetric model (prm0/prm1, unchanged), then DIVIDE the measured
+    shift by this ratio to recover the true 180-degree shift. The integral is a
+    pure constant per aperture/weighting — it never enters the fit, and leaves
+    split, width and precision untouched (tested 2026-08-05).
+
+        "uniform"          (NA 0.14): ratio ~ 1 - alpha^2/16 -> about +3.5 MHz
+                           on water at 5.07 GHz, parameter-free.
+        "uniform_gaussian" (NA 0.42): needs na_beam_diameter_mm (the
+                           per-session D, calibrated on water) and
+                           na_focal_length_mm; a uniform pupil overcorrects
+                           at this aperture.
+
+    Reads the same config fields as the na_lorentzian fitting model, so one
+    config setting drives both the in-fit and the post-hoc route.
+    """
+    weighting = str(getattr(config, "na_weighting", "uniform"))
+    na = float(config.na_collection)
+    n_sample = float(config.na_n_sample)
+    if not 0.0 < na < n_sample:
+        raise ValueError(
+            f"The NA correction requires the collection NA (aperture clip): set "
+            f"na_collection (0 < NA < n_sample) in the find-peaks sample config "
+            f"(got na_collection={na}, na_n_sample={n_sample})."
+        )
+    alpha = float(np.arcsin(na / n_sample))
+    v0 = None
+    if weighting == "uniform_gaussian":
+        beam_d = float(config.na_beam_diameter_mm)
+        focal = float(config.na_focal_length_mm)
+        if beam_d <= 0.0 or focal <= 0.0:
+            raise ValueError(
+                f"na_weighting 'uniform_gaussian' requires the Gaussian coupling "
+                f"geometry: set na_beam_diameter_mm (collection-fiber mode at the "
+                f"pupil) and na_focal_length_mm (objective) in the find-peaks "
+                f"sample config (got beam={beam_d}, focal={focal})."
+            )
+        v0 = float(gaussian_angle_width(beam_d, focal, n_sample))
+    elif weighting != "uniform":
+        raise ValueError(
+            f"Unknown na_weighting '{weighting}'. "
+            f"Choose 'uniform' or 'uniform_gaussian'."
+        )
+    v, weight, frac = na_angular_grid(alpha, n_quad, v0=v0)
+    numerator = float(np.trapezoid(weight * (1.0 - frac), v))
+    denominator = float(np.trapezoid(weight, v))
+    return numerator / denominator
 
 
 def make_na_lorentzian(rayleigh_px, alpha, n_quad: int = 41, v0: float | None = None):

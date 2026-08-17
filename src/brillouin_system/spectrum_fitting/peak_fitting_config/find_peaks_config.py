@@ -10,7 +10,6 @@ from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
 FITTING_MODELS_SAMPLE = [
     "lorentzian",
     "na_lorentzian",
-    "na_gauss_lorentzian",
     "pixel_response",
     "prm0",
     "prm1",
@@ -64,6 +63,23 @@ MODEL_PRESETS = {
 # cornea splits are already unbiased and get WORSE with a background term.
 BACKGROUNDS = ["flat", "linear", "flat_per_peak", "linear_per_peak"]
 
+# Collection weight W(v) over the NA cone. Selects the kernel of the
+# na_lorentzian fitting model AND the post-hoc scalar correction
+# (na_lineshape.na_mean_shift_ratio), so one config drives both routes:
+#   uniform           W = sin(v): hard pupil, uniform transmission. The
+#                     parameter-free low-NA model (paper Fig. 4) — at NA 0.14
+#                     it is worth about +3.5 MHz on water.
+#   uniform_gaussian  W = sin(v) * exp(-2 (v/v0)^2): hard clip plus the
+#                     Gaussian fiber-coupling apodization (paper Fig. 5) —
+#                     required at NA 0.42, where a uniform pupil overcorrects.
+#                     v0 comes from na_beam_diameter_mm (the per-session knob,
+#                     calibrated on water) and na_focal_length_mm.
+NA_WEIGHTINGS = ["uniform", "uniform_gaussian"]
+
+# Legacy model name that folded the collection weight into the lineshape name;
+# normalised to na_lorentzian + na_weighting = "uniform_gaussian".
+_LEGACY_NA_GAUSS_MODEL = "na_gauss_lorentzian"
+
 # Models that were removed, with the migration hint shown if one is still set.
 _REMOVED_MODELS = {
     "asym_lorentzian": "tested on calibration data and rejected (it triples the "
@@ -95,19 +111,23 @@ class FindPeaksConfig:
     # Baseline model, independent of the lineshape — see BACKGROUNDS above.
     background: str = "flat"
     beta: float = 4.0
-    # NA-integrated models only (0.0 = unset -> those models refuse to run).
+    # NA collection model (na_lorentzian fitting model and the post-hoc
+    # correction; 0.0 = unset -> those refuse to run).
+    # na_weighting: collection weight over the cone — see NA_WEIGHTINGS above.
+    #   "uniform" (NA 0.14 recipe): hard pupil only; na_collection is then the
+    #     EFFECTIVE NA (it absorbs any apodization).
+    #   "uniform_gaussian" (NA 0.42 recipe): na_collection is the NOMINAL
+    #     objective NA (physical pupil edge); the apodization is modeled
+    #     explicitly via the two geometry fields below.
     # na_collection: hard aperture clip as an NA (alpha = arcsin(NA/n)).
-    #   - na_lorentzian* (uniform pupil): the EFFECTIVE NA, calibrated per
-    #     session on water (absorbs the coupling apodization).
-    #   - na_gauss_lorentzian*: the NOMINAL objective NA (physical pupil edge);
-    #     the apodization is modeled explicitly via the two fields below.
-    # na_gauss_lorentzian* only — Gaussian fiber-coupling weight
+    # "uniform_gaussian" only — Gaussian fiber-coupling weight
     # exp(-2 (v/v0)^2), v0 = arcsin(sin(arctan((D/2)/f))/n):
     #   na_beam_diameter_mm: D, 1/e^2 diameter of the collection-fiber mode at
     #     the objective pupil (collimator output beam; F810APC-780 nominal
     #     7.5 mm). The session-calibration knob: tune on water (effective < nominal).
     #   na_focal_length_mm: f, focal length of the OBJECTIVE (20X: 10, 5X: 40).
     # na_n_sample: refractive index of the sample medium.
+    na_weighting: str = "uniform"
     na_collection: float = 0.0
     na_beam_diameter_mm: float = 0.0
     na_focal_length_mm: float = 0.0
@@ -133,6 +153,11 @@ class FindPeaksConfig:
         # Legacy names that folded the baseline into the lineshape name.
         if model in _LEGACY_BACKGROUND_MODELS:
             model, self.background = _LEGACY_BACKGROUND_MODELS[model]
+        # Legacy name that folded the NA collection weight into the lineshape
+        # name — now a separate toggle (na_weighting).
+        if model == _LEGACY_NA_GAUSS_MODEL:
+            model = "na_lorentzian"
+            self.na_weighting = "uniform_gaussian"
         # Preset names pin the validated combination (see MODEL_PRESETS):
         # they override background, use_window and beta.
         if model in MODEL_PRESETS:
@@ -150,6 +175,11 @@ class FindPeaksConfig:
             raise ValueError(
                 f"Unknown background '{self.background}'. "
                 f"Choose one of {BACKGROUNDS}."
+            )
+        if self.na_weighting not in NA_WEIGHTINGS:
+            raise ValueError(
+                f"Unknown na_weighting '{self.na_weighting}'. "
+                f"Choose one of {NA_WEIGHTINGS}."
             )
         self.fitting_model = model
 

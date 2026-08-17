@@ -10,6 +10,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     sline_from_frame_config,
     FittingConfigs,
     MODEL_PRESETS,
+    NA_WEIGHTINGS,
 )
 from brillouin_system.spectrum_fitting.fit_util import (
     find_peak_locations,
@@ -47,9 +48,12 @@ SUPPORTED_MODELS = (
 # Models that fit the NA-integrated lineshape: each Brillouin peak is anchored
 # at its own Rayleigh-order elastic line, so they need ElasticAnchors from the
 # calibration (see model_requires_anchors below).
-# na_gauss_* additionally weight the collection cone by the Gaussian fiber-
-# coupling apodization (na_beam_diameter_mm / na_focal_length_mm config)
-# instead of a uniform pupil.
+# The collection weight over the cone is the config toggle na_weighting
+# ("uniform" = hard pupil only, the NA 0.14 recipe; "uniform_gaussian" adds
+# the Gaussian fiber-coupling apodization from na_beam_diameter_mm /
+# na_focal_length_mm, the NA 0.42 recipe). The legacy 'na_gauss_lorentzian'
+# name is still accepted for callers that assign config.fitting_model directly
+# and forces the Gaussian weighting.
 NA_GAUSS_MODELS = ("na_gauss_lorentzian",)
 NA_MODELS = ("na_lorentzian",) + NA_GAUSS_MODELS
 
@@ -517,6 +521,17 @@ class SpectrumFitter:
                     f"calibration (CalibrationCalculator.elastic_anchors()); none were "
                     f"provided — is a calibration loaded?"
                 )
+            # The collection weight comes from the config toggle; the legacy
+            # 'na_gauss_lorentzian' model name forces the Gaussian weighting.
+            if requested_model in NA_GAUSS_MODELS:
+                na_weighting = "uniform_gaussian"
+            else:
+                na_weighting = str(getattr(config, "na_weighting", "uniform"))
+            if na_weighting not in NA_WEIGHTINGS:
+                raise ValueError(
+                    f"Unknown na_weighting '{na_weighting}'. "
+                    f"Choose one of {NA_WEIGHTINGS}."
+                )
             na = float(config.na_collection)
             n_sample = float(config.na_n_sample)
             if not 0.0 < na < n_sample:
@@ -526,14 +541,14 @@ class SpectrumFitter:
                     f"sample config (got na_collection={na}, na_n_sample={n_sample})."
                 )
             alpha = float(np.arcsin(na / n_sample))
-            if requested_model in NA_GAUSS_MODELS:
+            if na_weighting == "uniform_gaussian":
                 beam_d = float(config.na_beam_diameter_mm)
                 focal = float(config.na_focal_length_mm)
                 if beam_d <= 0.0 or focal <= 0.0:
                     raise ValueError(
-                        f"Model '{requested_model}' requires the Gaussian coupling "
-                        f"geometry: set na_beam_diameter_mm (collection-fiber mode at "
-                        f"the pupil) and na_focal_length_mm (objective) in the "
+                        f"na_weighting 'uniform_gaussian' requires the Gaussian "
+                        f"coupling geometry: set na_beam_diameter_mm (collection-fiber "
+                        f"mode at the pupil) and na_focal_length_mm (objective) in the "
                         f"find-peaks sample config (got beam={beam_d}, focal={focal})."
                     )
                 na_v0 = float(gaussian_angle_width(beam_d, focal, n_sample))
@@ -617,7 +632,13 @@ class SpectrumFitter:
         p0 = list(p0_pk) + list(p0_bg)
         bounds = (list(lo_pk) + list(lo_bg), list(hi_pk) + list(hi_bg))
 
-        fit_kind = f"{n_peaks}{requested_model}"
+        # Report which NA kernel was actually fitted, so the choice survives in
+        # the saved data even when it came from the na_weighting toggle.
+        kind_model = requested_model
+        if requested_model in NA_MODELS:
+            kind_model = ("na_gauss_lorentzian" if na_v0 is not None
+                          else "na_lorentzian")
+        fit_kind = f"{n_peaks}{kind_model}"
         if use_window:
             fit_kind += "_window"
         if background != "flat":
