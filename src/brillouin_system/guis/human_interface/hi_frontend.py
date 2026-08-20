@@ -67,7 +67,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 #todo: fix sample mode closing shutter.
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = False
 use_eye_tracker_dummy = False
