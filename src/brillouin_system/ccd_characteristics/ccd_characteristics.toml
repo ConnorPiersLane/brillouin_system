@@ -1,0 +1,32 @@
+# Measured characteristics of THE camera. Numbers + provenance live here;
+# the scripts that obtain them live in measurement_scripts/ next to this
+# file. Provenance is stored as keys (not comments) so programmatic writes
+# keep it. Re-measure after any hardware / readout-mode / ROI change.
+
+[ccd]
+camera_model = "Andor iXon Ultra 897 (DU897_BV)"
+camera_serial = "9303"
+valid_mode = "Conventional amplifier, 0.08 MHz readout, preamp 1x, sensor -20 C"
+
+sensitivity_e_per_count_preamp_1x = 3.89
+sensitivity_measured = "2026-08-12"
+sensitivity_method = "Quadratic photon transfer var = S/g + (eps*S)^2 + c on 126 scans x 50 frames (2026-8-3 / 2026-8-5 water series); consecutive-frame differences, no outlier rejection. A LINEAR PTC is biased low by the source common mode (gave 2.9). See measure_gain_photon_transfer.py."
+
+sensitivity_e_per_count_em_preamp_1x = 0.0
+
+read_noise_counts = 1.1
+read_noise_measured = "2026-08-19"
+read_noise_method = "Closed-shutter dark exposure ladder: per-pixel std IS the read noise (no measurable dark current at operating settings; 1.10 counts = 4.3 e-). A per-scan dark stack at the live settings takes precedence over this constant. See measure_read_noise_and_dark.py."
+
+dark_median_counts = 200.2
+dark_median_measured = "2026-08-20"
+dark_median_method = "Median pixel count of raw frames (2026-8-13: 200.2, 2026-8-6: 200.3). Electronic offset, carries no shot noise - the Thompson bound subtracts it from the fitted pedestal. A per-scan dark stack takes precedence. See measure_read_noise_and_dark.py."
+
+em_excess_noise_factor = 2.0
+
+[psf]
+psf_sigma_px = 0.25
+psf_tau_left_px = 0.4
+psf_tau_right_px = 0.2
+psf_tau_outer_left_px = 0.5
+psf_tau_outer_right_px = 0.0
