@@ -35,3 +35,6 @@ src/**/*.h5
 tests/**/*.h5
 src/brillouin_system/scan_managers/reflection_error_data/
 src/brillouin_system/eye_tracker/stereo_imaging/images/
+
+# large external datasets (321 MB), deliberately not in git
+tests/data/
