@@ -168,15 +168,29 @@ def calibration_for_scan(scan: AxialScan, fitter: SpectrumFitter) -> Calibration
     return CalibrationCalculator(parameters=scan.calibration_params)
 
 
+def stored_sline_rows(scan: AxialScan) -> list[int] | None:
+    """The scan's stored acquisition row band as a plain int list, or None.
+
+    Scans loaded from HDF5 carry sline_rows as a numpy array, whose truth
+    value is ambiguous — `if scan.sline_rows:` raises ValueError on them.
+    Always go through this helper.
+    """
+    rows = getattr(scan, "sline_rows", None)
+    if rows is None or len(rows) == 0:
+        return None
+    return [int(r) for r in rows]
+
+
 def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     spectrum_fitter = SpectrumFitter()
     # Re-fit on the rows the scan was acquired with, not on whatever the
     # current config says — a different band would shift the peaks by a few
     # MHz each and the re-fit would not reproduce the stored shifts.
-    if scan.sline_rows:
+    sline_rows = stored_sline_rows(scan)
+    if sline_rows is not None:
         sline_config = replace(
             spectrum_fitter.sline_config,
-            selected_rows=list(scan.sline_rows),
+            selected_rows=sline_rows,
             row_selection="manual",
         )
         spectrum_fitter.update_sline_config(sline_config)
@@ -199,7 +213,7 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     reflection_mapper = None
     if not is_reference_mode and config_requires_reflection_background(
             spectrum_fitter.sample_config):
-        n_rows = len(scan.sline_rows) if scan.sline_rows else None
+        n_rows = len(sline_rows) if sline_rows is not None else None
         reflection_mapper = ReflectionBackgroundMapper(
             ReflectionBackground.load_default(), calibration_calculator,
             n_rows=n_rows)
