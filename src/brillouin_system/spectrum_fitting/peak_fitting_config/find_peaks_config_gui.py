@@ -207,19 +207,29 @@ class FindPeaksConfigDialog(QDialog):
             layout.addLayout(row)
 
         # Camera pixel-response constants — global: one camera, one kernel,
-        # shared by the sample and reference fits.
+        # shared by the sample and reference fits. The label shows the
+        # MEASURED reference value in brackets: the working value here is
+        # editable and saved to ccd_characteristics.toml, but the measured
+        # reference in that file is never touched by the GUI, so the
+        # measurement cannot be lost by experimentation.
         layout.addWidget(QLabel("Camera PSF (shared by both fits)"))
+        psf = psf_config.get()
         for key in self.pr_field_names():
             row = QHBoxLayout()
-            row.addWidget(QLabel(key.replace("_", " ").capitalize()))
+            measured = getattr(psf, f"{key}_measured", None)
+            label = key.replace("_", " ").capitalize()
+            if measured is not None:
+                label += f"  (measured: {measured:g})"
+            row.addWidget(QLabel(label))
             edit = QLineEdit()
             edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
             edit.setToolTip(
-                "Frozen camera constants for the 'lorentzian_x_psf' model — "
+                "Camera constants for the 'lorentzian_x_psf' model — "
                 "Gaussian charge-diffusion blur and the one-sided readout "
-                "tails. Not fitted per frame; measured 2026-07 on the fine "
-                "EOM sweeps: 0.25 / 0.40 / 0.20 px. Re-measure after any "
-                "camera/ROI change."
+                "tails. Not fitted per frame. The bracketed value is the "
+                "MEASURED reference stored in ccd_characteristics.toml "
+                "(fine EOM sweeps; see measure_psf_kernel.py) — Save "
+                "writes only the working value, never the reference."
             )
             self.global_inputs[key] = edit
             row.addWidget(edit)

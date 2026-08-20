@@ -133,10 +133,15 @@ def main(argv=None):
     print(f"\n==== Best kernel ====")
     print(f"sigma {sigma:.3f} px, tau_left {tl:.3f} px, tau_right {tr:.3f} px "
           f"-> rms {rms:.2f} MHz (baseline {base:.2f})")
-    print("\nPaste into ccd_characteristics.toml [psf]:")
+    print("\nPaste into ccd_characteristics.toml [psf] — a re-measurement "
+          "updates BOTH the working values and the _measured references:")
     print(f"psf_sigma_px = {sigma:.3g}")
     print(f"psf_tau_left_px = {tl:.3g}")
     print(f"psf_tau_right_px = {tr:.3g}")
+    print(f"psf_sigma_px_measured = {sigma:.3g}")
+    print(f"psf_tau_left_px_measured = {tl:.3g}")
+    print(f"psf_tau_right_px_measured = {tr:.3g}")
+    print('psf_measured = "<date>"')
     return 0
 
 

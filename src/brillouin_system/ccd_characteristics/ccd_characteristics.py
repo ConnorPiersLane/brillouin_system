@@ -98,6 +98,16 @@ class PsfConstants:
     psf_sigma_px: float = 0.0
     psf_tau_left_px: float = 0.0
     psf_tau_right_px: float = 0.0
+    # MEASURED reference values of the kernel, kept separately so they can
+    # never be lost: the working psf_* fields above may be tuned in the
+    # config GUI and saved, but the GUI never writes these — they change
+    # only on a re-measurement (measurement_scripts/measure_psf_kernel.py).
+    # The GUI shows them in brackets next to each working field.
+    psf_sigma_px_measured: float = 0.25
+    psf_tau_left_px_measured: float = 0.40
+    psf_tau_right_px_measured: float = 0.20
+    psf_measured: str = ""
+    psf_method: str = ""
     # Outer-order tails (the opt-in n_peaks=4 fit only). The tail is a
     # POSITION property falling ~linearly toward the readout side — measured
     # 2026-08-20 from the outer calibration lines of four 4-peak-ROI sessions
