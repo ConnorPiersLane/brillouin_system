@@ -13,6 +13,7 @@ FITTING_MODELS_SAMPLE = [
     "pixel_response",
     "prm0",
     "prm1",
+    "prmr",
 ]
 # One pixel-response entry, on purpose: the calibration has a single
 # lineshape, and offering prm0/prm1 here would be two names for it that
@@ -40,10 +41,23 @@ FITTING_MODELS_REFERENCE = [
 #         dependent width-gap fabrication (up to ~+2.5 MHz, gold session).
 # Production usage: fit with prm1; the prm0 companion width-gap difference is
 # the QA indicator (accept widths when |gap_prm1 - gap_prm0| <= ~1.5 MHz).
+#   prmr  pixel_response + per-peak flat offset + ONE shared scale of the
+#         MEASURED reflection background ("ReflectionBG", 2026-08-19) — the
+#         background model that replaces prm1's linear slope with the
+#         instrument's actual stray pattern, registered onto the session
+#         through the calibrations (frequency-anchored, so it survives VIPA
+#         realignment). Needs measured_background passed to fit() — see
+#         spectrum_fitting/reflection_background.py. Closure-validated
+#         2026-08-19/20 (raw template 9/12, calibration-mapped 10/12 cells
+#         |split| < 2 MHz at beta 3+4, no per-dataset beta rule; a per-peak
+#         scale was tested and REJECTED, splits +3..+4 MHz on wide glycerol).
 MODEL_PRESETS = {
     "prm0": {"fitting_model": "pixel_response", "background": "flat_per_peak",
              "use_window": True, "beta": 3.0},
     "prm1": {"fitting_model": "pixel_response", "background": "linear_per_peak",
+             "use_window": True, "beta": 3.0},
+    "prmr": {"fitting_model": "pixel_response",
+             "background": "reflection",
              "use_window": True, "beta": 3.0},
 }
 
@@ -59,9 +73,22 @@ MODEL_PRESETS = {
 #                   window — this is the one that removes the L-R split in
 #                   water (measured 2026-07: -3.3 -> -0.4 MHz), because the
 #                   bias comes from the LOCAL gradient under each peak.
+#   reflection      each peak gets its own constant offset, plus ONE shared
+#                   scale of the MEASURED reflection-plane background (the
+#                   laser's satellite comb imaged by the VIPA — the structure
+#                   the linear_per_peak slope was absorbing). The template is
+#                   registered onto the session's pixel axis through the
+#                   calibrations; fits then need measured_background (see
+#                   spectrum_fitting/reflection_background.py). One parameter
+#                   fewer than linear_per_peak, a shaped basis instead of a
+#                   free slope; deliberately NO shift parameter (a fitted
+#                   shift trades against the AS centre at ~5 MHz/px) and NO
+#                   per-peak scale (re-opens the amplitude<->centre trade,
+#                   +3..+4 MHz on wide glycerol; both measured 2026-08-19/20).
 # Costs ~10% in single-frame distance precision. Validated on liquids only:
 # cornea splits are already unbiased and get WORSE with a background term.
-BACKGROUNDS = ["flat", "linear", "flat_per_peak", "linear_per_peak"]
+BACKGROUNDS = ["flat", "linear", "flat_per_peak", "linear_per_peak",
+               "reflection"]
 
 # Collection weight W(v) over the NA cone. Selects the kernel of the
 # na_lorentzian fitting model AND the post-hoc scalar correction

@@ -78,6 +78,29 @@ def model_requires_anchors(model: str) -> bool:
     return normalize_model_name(model)[0] in NA_MODELS
 
 
+def resolved_background(config) -> str:
+    """The background a fit will actually use for this config.
+
+    Preset-aware: callers that assign config.fitting_model directly bypass
+    FindPeaksConfig.__post_init__, so a preset name can sit there with a stale
+    config.background — fit() resolves it the same way.
+    """
+    preset = MODEL_PRESETS.get(str(config.fitting_model))
+    if preset is not None:
+        return preset["background"]
+    return str(getattr(config, "background", "flat"))
+
+
+def config_requires_reflection_background(config) -> bool:
+    """True if fits with this config need the mapped reflection background.
+
+    Callers then build it per scan: ReflectionBackgroundMapper(
+    ReflectionBackground.load_default(), calibration, n_rows).render(px)
+    and pass the result to fit() as measured_background.
+    """
+    return resolved_background(config) == "reflection"
+
+
 def is_pixel_response_fit(model: str | None) -> bool:
     """True if a FittedSpectrum came from the pixel-response lineshape.
 
@@ -179,11 +202,14 @@ def _background_masks(x, centers):
     return [left, ~left]
 
 
-def _make_background(background: str, px_fit, centers, offset0):
+def _make_background(background: str, px_fit, centers, offset0,
+                     measured_bg=None):
     """Return (func(x, *bg_params), p0, lo, hi, n_params).
 
     The per-peak masks are bound at build time, so the model must be rebuilt if
-    the fit domain changes.
+    the fit domain changes. measured_bg is the (px, R) pair for the
+    'reflection' background, sampled on the full pixel axis so the
+    model also evaluates on the refined grid.
     """
     if background == "flat":
         # Lower bound 0 preserves the long-standing behaviour (the sline is
@@ -234,6 +260,46 @@ def _make_background(background: str, px_fit, centers, offset0):
         for _ in range(n_parts):
             p0 += [offset0, 0.0]
         return func, p0, [-np.inf] * n, [np.inf] * n, n
+
+    if background == "reflection":
+        # Per-peak flat offset + ONE shared scale of the measured reflection
+        # background (the bg19 minimal model, validated 2026-08-19). The
+        # shaped basis function replaces prm1's free slope. Two deliberate
+        # restrictions, both measured 2026-08-19/20:
+        #   * NO shift parameter — a fitted template shift trades against the
+        #     AS centre at ~5 MHz/px; registration belongs to the calibration
+        #     (ReflectionBackgroundMapper).
+        #   * NO per-peak scale — freeing s per peak removes the S-side
+        #     constraint on the scale and re-opens the amplitude<->centre
+        #     trade (splits +3..+4 MHz on wide glycerol). Envelope changes
+        #     after a realignment are an instrument-state property: verify or
+        #     retake the TEMPLATE, do not free the fit.
+        if measured_bg is None:
+            raise ValueError(
+                "Background 'reflection' needs the mapped reflection "
+                "background: pass measured_background to fit() — build it "
+                "with ReflectionBackgroundMapper(...).render(px) (see "
+                "spectrum_fitting/reflection_background.py)."
+            )
+        px_ref, r_ref = measured_bg
+        n_parts = len(_background_masks(px_fit, centers))
+
+        def func(x, *params):
+            x = np.asarray(x, dtype=float)
+            r = np.interp(x, px_ref, r_ref, left=0.0, right=0.0)
+            out = params[n_parts] * r
+            for i, m in enumerate(_background_masks(x, centers)):
+                out = out + m * params[i]
+            return out
+
+        # s is the sample's pattern strength relative to the reflection-plane
+        # template: measured 1e-3..9e-3 across the validated datasets, so 1.0
+        # is a generous sanity ceiling, not a tuning.
+        n = n_parts + 1
+        p0 = [offset0] * n_parts + [1e-3]
+        lo = [0.0] * n_parts + [0.0]
+        hi = [np.inf] * n_parts + [1.0]
+        return func, p0, lo, hi, n
 
     raise ValueError(f"Unknown background '{background}'.")
 
@@ -454,7 +520,12 @@ class SpectrumFitter:
         sline: np.ndarray,
         is_reference_mode: bool,
         anchors: ElasticAnchors | None = None,
+        measured_background: np.ndarray | None = None,
     ) -> FittedSpectrum:
+        """Fit the sline. measured_background is the reflection background
+        mapped onto this px axis (ReflectionBackgroundMapper.render(px));
+        required by (and only used with) background='reflection'
+        (the 'prmr' preset)."""
         config = self.reference_config if is_reference_mode else self.sample_config
         requested_model, window_forced = normalize_model_name(config.fitting_model)
         use_window = bool(getattr(config, "use_window", True)) or window_forced
@@ -556,9 +627,28 @@ class SpectrumFitter:
         px = np.asarray(px, dtype=np.float64)
         sline = np.asarray(sline, dtype=np.float64)
 
+        if background == "reflection":
+            if measured_background is None:
+                raise ValueError(
+                    "Background 'reflection' needs the mapped "
+                    "reflection background: pass measured_background = "
+                    "ReflectionBackgroundMapper(...).render(px) (see "
+                    "spectrum_fitting/reflection_background.py)."
+                )
+            measured_background = np.asarray(measured_background,
+                                             dtype=np.float64)
+            if measured_background.shape != px.shape:
+                raise ValueError(
+                    f"measured_background must be sampled on the same pixel "
+                    f"axis as the sline (got {measured_background.shape} vs "
+                    f"px {px.shape})."
+                )
+
         finite_mask = np.isfinite(px) & np.isfinite(sline)
         px = px[finite_mask]
         sline = sline[finite_mask]
+        if measured_background is not None:
+            measured_background = measured_background[finite_mask]
 
         # Keep this if your peak finder expects non-negative data. Remove if you want
         # the offset/background model to handle negative baseline excursions.
@@ -622,6 +712,8 @@ class SpectrumFitter:
         )
         bg_func, p0_bg, lo_bg, hi_bg, n_bg = _make_background(
             background, px_fit, cen, offset0,
+            measured_bg=(None if measured_background is None
+                         else (px, measured_background)),
         )
 
         n_pk = len(p0_pk)
@@ -682,6 +774,10 @@ class SpectrumFitter:
             if background in ("flat_per_peak", "linear_per_peak"):
                 k = n_bg // 2
                 bg_params = bg_params[k:] + bg_params[:k]
+            elif background == "reflection":
+                # Per-peak offsets swap with their peaks; the shared scale
+                # (last parameter) stays.
+                bg_params = bg_params[:-1][::-1] + bg_params[-1:]
 
         centers = [p[1] for p in peak_params]
         bg_at_peaks = bg_func(np.asarray(centers, dtype=float), *bg_params)

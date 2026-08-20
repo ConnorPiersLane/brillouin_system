@@ -39,7 +39,12 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
 from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors, \
+    config_requires_reflection_background
+from brillouin_system.spectrum_fitting.reflection_background import (
+    ReflectionBackground,
+    ReflectionBackgroundMapper,
+)
 
 
 log = get_logger(__name__)
@@ -55,6 +60,13 @@ class HiBackend:
 
         # init Spectrum Fitter:
         self.spectrum_fitter = SpectrumFitter()
+
+        # Reflection background ("ReflectionBG") for the reflection
+        # background / prmr preset: the packaged template is loaded lazily,
+        # the mapper is rebuilt whenever the calibration or row band changes.
+        self._reflection_bg: ReflectionBackground | None = None
+        self._reflection_mapper: ReflectionBackgroundMapper | None = None
+        self._reflection_mapper_key = None
 
         # Devices
         if use_dummy:
@@ -447,8 +459,10 @@ class HiBackend:
 
         try:
             anchors = self._elastic_anchors_if_required()
+            measured_bg = self._reflection_background_if_required(px)
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode,
-                                            anchors=anchors)
+                                            anchors=anchors,
+                                            measured_background=measured_bg)
         except Exception as e:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
@@ -493,6 +507,35 @@ class HiBackend:
                 f"elastic anchors, but no calibration is loaded."
             )
         return self.calibration_calculator.elastic_anchors()
+
+    def _reflection_background_if_required(self, px) -> np.ndarray | None:
+        """The mapped reflection background for sample fits, or None.
+
+        Only built when the sample config uses the reflection
+        background (the prmr preset). The packaged template is registered onto
+        the CURRENT calibration in frequency space, so it survives VIPA
+        realignment; raises if no calibration is loaded (no fallback)."""
+        if self.is_reference_mode:
+            return None
+        if not config_requires_reflection_background(self.spectrum_fitter.sample_config):
+            return None
+        if self.calibration_calculator is None:
+            raise ValueError(
+                "Background 'reflection' requires a calibration to "
+                "register the reflection background, but none is loaded."
+            )
+        sline_config = self.spectrum_fitter.sline_config
+        n_rows = (sline_config.n_rows if sline_config.row_selection == "auto"
+                  else len(sline_config.selected_rows))
+        key = (id(self.calibration_calculator), n_rows)
+        if self._reflection_mapper is None or self._reflection_mapper_key != key:
+            if self._reflection_bg is None:
+                self._reflection_bg = ReflectionBackground.load_default()
+            self._reflection_mapper = ReflectionBackgroundMapper(
+                self._reflection_bg, self.calibration_calculator,
+                n_rows=n_rows)
+            self._reflection_mapper_key = key
+        return self._reflection_mapper.render(px)
 
     def update_calibration_calculator(self):
         if self.calibration_data is None:

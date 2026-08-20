@@ -22,6 +22,11 @@ from brillouin_system.spectrum_fitting.spectrum_analyzer import AnalyzedFreqShif
     SpectrumAnalyzer
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter, model_requires_anchors, normalize_model_name,
+    config_requires_reflection_background,
+)
+from brillouin_system.spectrum_fitting.reflection_background import (
+    ReflectionBackground,
+    ReflectionBackgroundMapper,
 )
 
 
@@ -188,6 +193,17 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
     if not is_reference_mode and model_requires_anchors(spectrum_fitter.sample_config.fitting_model):
         anchors = calibration_calculator.elastic_anchors()
 
+    # The reflection background (prmr preset) needs the packaged
+    # reflection template registered onto THIS scan's own calibration —
+    # frequency-anchored, so it applies across alignment changes.
+    reflection_mapper = None
+    if not is_reference_mode and config_requires_reflection_background(
+            spectrum_fitter.sample_config):
+        n_rows = len(scan.sline_rows) if scan.sline_rows else None
+        reflection_mapper = ReflectionBackgroundMapper(
+            ReflectionBackground.load_default(), calibration_calculator,
+            n_rows=n_rows)
+
     list_analyzed_spectras: list[AnalyzedSpectrum] = []
 
     for measurement in scan.measurements:
@@ -202,8 +218,11 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
         px, sline = spectrum_fitter.get_px_sline_from_image(frame)
 
         # Fit spectrum
+        measured_bg = (reflection_mapper.render(px)
+                       if reflection_mapper is not None else None)
         fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode,
-                                      anchors=anchors)
+                                      anchors=anchors,
+                                      measured_background=measured_bg)
 
         analyzed_shift = spectrum_analyzer.analyze_spectrum(fitting=fitting)
 
