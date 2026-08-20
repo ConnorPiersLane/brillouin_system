@@ -35,8 +35,6 @@ class HiSignaller(QObject):
     stop_live_signal = pyqtSignal()
 
     # Bool Signals outwards
-    background_available_state = pyqtSignal(bool)
-    background_subtraction_state = pyqtSignal(bool)
     illumination_mode_state  = pyqtSignal(bool)
     reference_mode_state = pyqtSignal(bool)
     do_live_fitting_state = pyqtSignal(bool)
@@ -109,9 +107,7 @@ class HiSignaller(QObject):
 
     def update_gui(self):
         self.emit_is_illumination_continuous()
-        self.emit_is_background_available()
         self.emit_camera_settings()
-        self.emit_do_background_subtraction()
         self.emit_do_live_fitting_state()
         self.update_stage_positions() #xyz stage
         self.update_zaber_lens_position(self.backend.zaber_eye_lens.get_position()) # lens
@@ -135,41 +131,13 @@ class HiSignaller(QObject):
         return item
 
     @pyqtSlot()
-    def emit_do_background_subtraction(self):
-        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
-
-    @pyqtSlot()
-    def emit_is_background_available(self):
-        self.background_available_state.emit(self.backend.is_background_image_available())
-
-    @pyqtSlot()
     def emit_is_illumination_continuous(self):
         self.illumination_mode_state.emit(self.backend.is_shutter_open)
-
-
-    # Toggle
-    @pyqtSlot()
-    def toggle_background_subtraction(self):
-        if self.backend.do_background_subtraction:
-            self.backend.stop_background_subtraction()
-            log.info("Background subtraction disabled")
-        elif self.backend.is_background_image_available():
-            self.backend.start_background_subtraction()
-            log.info("Background subtraction enabled")
-        else:
-            log.info("Cannot enable background subtraction: no background image available")
-            return
-
-        # Emit updated state to viewer
-        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
-        self.background_available_state.emit(self.backend.is_background_image_available())
-
 
     @pyqtSlot()
     def emit_background_data(self):
         data = BackgroundImage(
             dark_image=self.backend.dark_image,
-            bg_image=self.backend.bg_image,
         )
         self.background_data_ready.emit(data)
 
@@ -204,9 +172,6 @@ class HiSignaller(QObject):
             self.backend.change_to_reference_mode()
         self.emit_camera_settings()
         self.reference_mode_state.emit(self.backend.is_reference_mode)
-        # Emit updated state to viewer
-        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
-        self.background_available_state.emit(self.backend.is_background_image_available())
 
     @pyqtSlot()
     def emit_camera_settings(self):
@@ -228,21 +193,9 @@ class HiSignaller(QObject):
         except Exception as e:
             log.info(f"Failed to apply camera settings: {e}")
 
-        # Remove Background if sample mode
-        if not self.backend.is_reference_mode:
-            self.remove_background()
-
-    def remove_background(self):
-        self.backend.stop_background_subtraction()
-        self.backend.bg_image = None
-        self.background_subtraction_state.emit(False)
-        self.background_available_state.emit(False)
-        log.info("Background subtraction stopped (if had been running) and BGs removed")
-
     @pyqtSlot(object)
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.backend.update_andor_config_settings(andor_config)
-        self.remove_background()
 
     @pyqtSlot(object)
     def update_scanning_config(self, scanning_config: ScanningConfig):
@@ -332,19 +285,18 @@ class HiSignaller(QObject):
             log.warning(f"Failed to read microwave frequency: {e}")
 
     @pyqtSlot()
-    def acquire_background_image(self):
+    def acquire_dark_images(self):
 
         # Stop live view
         self._running = False
 
         try:
-            self.backend.take_bg_and_darknoise_images()
-            self.background_available_state.emit(self.backend.is_background_image_available())
-            log.info("Background image acquired.")
+            self.backend.take_darknoise_images()
+            log.info("Dark images acquired.")
         except OperationCancelled:
-            log.info("Background acquisition cancelled by user.")
+            log.info("Dark acquisition cancelled by user.")
         except Exception as e:
-            log.warning(f"Failed to acquire background image: {e}")
+            log.warning(f"Failed to acquire dark images: {e}")
 
         if self.backend.is_shutter_open:
             self.restart_live_view_when_ready()

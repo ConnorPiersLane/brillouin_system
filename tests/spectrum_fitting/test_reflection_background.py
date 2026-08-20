@@ -10,9 +10,9 @@ import pytest
 
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
-    PixelResponseConstants,
+    PsfConstants,
 )
-from brillouin_system.spectrum_fitting.pixel_response import pixel_response_profile
+from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackground,
     ReflectionBackgroundMapper,
@@ -190,11 +190,11 @@ def make_config(model: str) -> FindPeaksConfig:
     )
 
 
-def make_fitter(sample_model="prmr", reference_model="pixel_response"):
+def make_fitter(sample_model="prmr", reference_model="lorentzian_x_psf"):
     fitter = SpectrumFitter()
-    fitter.pr_config = PixelResponseConstants(
-        pr_sigma_px=SIGMA, pr_tau_left_px=TAU_L,
-        pr_tau_right_px=TAU_R)
+    fitter.psf_config = PsfConstants(
+        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
+        psf_tau_right_px=TAU_R)
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))
     return fitter
@@ -204,8 +204,8 @@ def make_sample(R, s_true=0.05, seed=1):
     px = np.arange(0.0, 200.0)
     cen_l, cen_r = 78.0, 118.0
     truth = (
-        pixel_response_profile(px, 3000.0, cen_l, 1.0, SIGMA, TAU_L)
-        + pixel_response_profile(px, 3000.0, cen_r, 1.0, SIGMA, TAU_R)
+        psf_profile(px, 3000.0, cen_l, 1.0, SIGMA, TAU_L)
+        + psf_profile(px, 3000.0, cen_r, 1.0, SIGMA, TAU_R)
         + np.where(px <= 98.0, 90.0, 60.0)
         + s_true * R
     )
@@ -215,11 +215,11 @@ def make_sample(R, s_true=0.05, seed=1):
 
 def test_prmr_preset_expands():
     cfg = make_config("prmr")
-    assert cfg.fitting_model == "pixel_response"
+    assert cfg.fitting_model == "lorentzian_x_psf"
     assert cfg.background == "reflection"
     assert cfg.use_window is True
     assert cfg.beta == 3.0
-    assert normalize_model_name("prmr") == ("pixel_response", True)
+    assert normalize_model_name("prmr") == ("lorentzian_x_psf", True)
 
 
 def test_config_requires_reflection_background_helper():

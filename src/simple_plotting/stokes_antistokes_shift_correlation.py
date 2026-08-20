@@ -24,8 +24,7 @@ import numpy as np
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
-from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
+from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 DATA = Path(r"C:\Users\cplan\Partners HealthCare Dropbox\Connor Lane\Data\2026-8-5")
@@ -41,18 +40,15 @@ def scan_shifts(scan):
     ss = scan.system_state
     sf = SpectrumFitter()
     calc = CalibrationCalculator(parameters=scan.calibration_params)
-    analyzer = SpectrumAnalyzer(calibration_calculator=calc)
     vas, vs = [], []
     for m in scan.measurements:
         f = m.frame_andor.copy()
-        f = (subtract_background(frame=f, bg_frame=ss.bg_image)
-             if ss.is_do_bg_subtraction_active
-             else subtract_darknoise(frame=f, darknoise_frame=ss.dark_image))
+        f = subtract_darknoise(frame=f, darknoise_frame=ss.dark_image)
         px, sline = sf.get_px_sline_from_image(f)
-        fit = sf.fit(px=px, sline=sline, is_reference_mode=False, anchors=None)
+        fit = sf.fit(px=px, sline=sline, is_reference_mode=False)
         if not fit.is_success:
             continue
-        res = analyzer.analyze_spectrum(fitting=fit)
+        res = calc.analyze(fit)
         l, r = res.freq_shift_left_peak_ghz, res.freq_shift_right_peak_ghz
         if l is None or r is None or not (4.0 < l < 6.5) or not (4.0 < r < 6.5):
             continue

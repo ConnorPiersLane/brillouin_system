@@ -47,7 +47,7 @@ class IxonUltra(BaseCamera):
     captured output is the SDK's own mislabelling: the value is the preamp
     MULTIPLIER (1x/2x/3x). Electrons per count is a separate calibration
     constant — see SENSITIVITY_E_PER_COUNT_PREAMP_1X in
-    spectrum_fitting/helpers/calculate_photon_counts.py.
+    noise_analysis/pixel_counts_and_photons.py.
 
     [0]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=0 (1.0 e⁻/count)
     [1]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=1 (2.0 e⁻/count)
@@ -295,7 +295,7 @@ class IxonUltra(BaseCamera):
 
         The electrons-per-count sensitivity is a separate calibration constant;
         see SENSITIVITY_E_PER_COUNT_PREAMP_1X in
-        spectrum_fitting/helpers/calculate_photon_counts.py.
+        noise_analysis/pixel_counts_and_photons.py.
         """
         return self.cam.get_preamp_gain()
 

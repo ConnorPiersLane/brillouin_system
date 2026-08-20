@@ -8,7 +8,7 @@ the Brillouin peaks — the structure prm1's linear slope used to absorb.
 
 The production correction fits the measured pattern with ONE shared scale:
 
-    pixel_response pair + per-peak flat offset + s * R
+    lorentzian_x_psf pair + per-peak flat offset + s * R
 
 (the 'prmr' preset / 'reflection' background in SpectrumFitter). A per-peak
 scale was tested 2026-08-20 and rejected: freeing s on each side removes the

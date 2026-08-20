@@ -1,12 +1,20 @@
+import math
+
 import numpy as np
 import pytest
 
+from brillouin_system.calibration.calibration import (
+    CalibrationCalculator,
+    CalibrationPolyfitParameters,
+)
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import (
+from brillouin_system.spectrum_fitting.noise_analysis import (
+    LORENTZIAN_PHOTON_FACTOR,
+    PixelCountsAndPhotons,
     SENSITIVITY_E_PER_COUNT_PREAMP_1X,
-    calculate_photon_counts_from_fitted_spectrum,
     count_to_electrons,
     electrons_per_count,
+    theoretical_precision,
 )
 
 
@@ -60,23 +68,28 @@ def _fs(amp_l=100.0, wid_l=1.2, amp_r=110.0, wid_r=1.0):
     )
 
 
-def test_photon_counts_use_the_area_of_each_peak():
-    fs = _fs()
-    p = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
-    expected_left = np.pi * 100.0 * 1.2 * SENSITIVITY_E_PER_COUNT_PREAMP_1X
-    assert p.left_peak_photons == pytest.approx(expected_left)
+def test_counts_and_photons_use_the_area_of_each_peak():
+    p = PixelCountsAndPhotons.from_fit(_fs(), preamp_gain=1.0, emccd_gain=0)
+    # Counts: exact pixel-integrated Lorentzian area pi * amp * width.
+    assert p.left_peak_counts == pytest.approx(np.pi * 100.0 * 1.2)
+    assert p.right_peak_counts == pytest.approx(np.pi * 110.0 * 1.0)
+    # Photons: counts scaled by the measured sensitivity.
+    assert p.left_peak_photons == pytest.approx(
+        p.left_peak_counts * SENSITIVITY_E_PER_COUNT_PREAMP_1X)
+    assert p.total_counts == pytest.approx(p.left_peak_counts + p.right_peak_counts)
     assert p.total_photons == pytest.approx(p.left_peak_photons + p.right_peak_photons)
 
 
-def test_failed_fit_returns_no_photons():
+def test_failed_fit_returns_no_counts_or_photons():
     fs = FittedSpectrum(is_success=False, x_pixels=np.arange(3), sline=np.zeros(3))
-    p = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
+    p = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    assert p.left_peak_counts is None
     assert p.left_peak_photons is None
     assert p.total_photons is None
 
 
 def test_sensitivity_override_is_respected():
-    p = calculate_photon_counts_from_fitted_spectrum(
+    p = PixelCountsAndPhotons.from_fit(
         _fs(), preamp_gain=1.0, emccd_gain=0, sensitivity_e_per_count=1.0
     )
     assert p.left_peak_photons == pytest.approx(np.pi * 100.0 * 1.2)
@@ -85,31 +98,18 @@ def test_sensitivity_override_is_respected():
 def test_lorentzian_crlb_factor_is_two():
     """Thompson's photon term assumes a Gaussian (bound s/sqrt(N)); a Lorentzian
     of HWHM g has bound g*sqrt(2/N), so the variance carries a factor 2."""
-    from brillouin_system.spectrum_fitting.spectrum_analyzer import (
-        LORENTZIAN_CRLB_FACTOR,
-    )
-
-    assert LORENTZIAN_CRLB_FACTOR == pytest.approx(2.0)
+    assert LORENTZIAN_PHOTON_FACTOR == pytest.approx(2.0)
 
 
-def _analyzer_with_linear_calibration():
+def _linear_calculator():
     """Left order rises with px, right order falls, distance in between —
     matching the real instrument's opposite-sign dispersions."""
-    import numpy as np
-
-    from brillouin_system.calibration.calibration import (
-        CalibrationCalculator,
-        CalibrationPolyfitParameters,
-    )
-    from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
-
-    params = CalibrationPolyfitParameters(
+    return CalibrationCalculator(CalibrationPolyfitParameters(
         degree=1,
         freq_left_peak=np.array([0.28, 0.0]),
         freq_right_peak=np.array([-0.35, 30.0]),
         freq_peak_distance=np.array([-0.156, 10.0]),
-    )
-    return SpectrumAnalyzer(CalibrationCalculator(params))
+    ))
 
 
 def _fitted_two_peaks():
@@ -127,14 +127,19 @@ def _fitted_two_peaks():
     )
 
 
+def _bound(fs, photons, calc, corr=0.0):
+    return theoretical_precision(
+        fs=fs, photons=photons, calibration_calculator=calc,
+        dark_frame_std=None, preamp_gain=1.0, emccd_gain=0,
+        corr_left_right=corr)
+
+
 def test_distance_precision_combines_the_two_orders_in_quadrature():
     """With uncorrelated peaks, var(c_R - c_L) = var(c_R) + var(c_L)."""
-    import math
-
-    an = _analyzer_with_linear_calibration()
+    calc = _linear_calculator()
     fs = _fitted_two_peaks()
-    photons = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
-    t = an.theoretical_precision(fs, photons, None, preamp_gain=1.0, emccd_gain=0)
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    t = _bound(fs, photons, calc)
 
     a_l, a_r, a_d = 0.28, 0.35, 0.156
     expected = 1e3 * a_d * math.hypot(
@@ -144,10 +149,10 @@ def test_distance_precision_combines_the_two_orders_in_quadrature():
 
 
 def test_distance_is_tighter_than_either_single_order():
-    an = _analyzer_with_linear_calibration()
+    calc = _linear_calculator()
     fs = _fitted_two_peaks()
-    photons = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
-    t = an.theoretical_precision(fs, photons, None, preamp_gain=1.0, emccd_gain=0)
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    t = _bound(fs, photons, calc)
 
     assert t.distance_total_mhz < t.left_peak_total_mhz
     assert t.distance_total_mhz < t.right_peak_total_mhz
@@ -155,23 +160,85 @@ def test_distance_is_tighter_than_either_single_order():
 
 def test_anticorrelation_widens_the_distance_uncertainty():
     """cov enters with a minus sign, so negative correlation inflates it."""
-    an = _analyzer_with_linear_calibration()
+    calc = _linear_calculator()
     fs = _fitted_two_peaks()
-    photons = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
 
-    indep = an.theoretical_precision(fs, photons, None, 1.0, 0).distance_total_mhz
-    anti = an.theoretical_precision(fs, photons, None, 1.0, 0,
-                                    corr_left_right=-0.2).distance_total_mhz
-    pos = an.theoretical_precision(fs, photons, None, 1.0, 0,
-                                   corr_left_right=0.2).distance_total_mhz
+    indep = _bound(fs, photons, calc).distance_total_mhz
+    anti = _bound(fs, photons, calc, corr=-0.2).distance_total_mhz
+    pos = _bound(fs, photons, calc, corr=0.2).distance_total_mhz
     assert anti > indep > pos
 
 
+def test_pedestal_shot_noise_widens_the_bound():
+    """The fitted background level under a peak feeds the b term (Poisson),
+    so a brighter stray pedestal must widen the bound — from the fit alone,
+    no background-frame stack."""
+    calc = _linear_calculator()
+    fs_clean = _fitted_two_peaks()
+    from dataclasses import replace
+    fs_pedestal = replace(fs_clean, left_peak_bg_counts=500.0,
+                          right_peak_bg_counts=500.0)
+    photons = PixelCountsAndPhotons.from_fit(fs_clean, preamp_gain=1.0,
+                                             emccd_gain=0)
+    clean = _bound(fs_clean, photons, calc)
+    pedestal = _bound(fs_pedestal, photons, calc)
+    assert pedestal.left_peak_bg_mhz > clean.left_peak_bg_mhz
+    assert pedestal.distance_total_mhz > clean.distance_total_mhz
+
+
+def test_dark_stack_std_feeds_the_read_noise_term():
+    """A per-pixel dark std frame (the scan's closed-shutter stack) replaces
+    the read-noise fallback; a noisier camera widens the bound."""
+    calc = _linear_calculator()
+    fs = _fitted_two_peaks()
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    quiet = np.full((15, 84), 0.1)
+    noisy = np.full((15, 84), 5.0)
+    t_quiet = theoretical_precision(
+        fs=fs, photons=photons, calibration_calculator=calc,
+        dark_frame_std=quiet, preamp_gain=1.0, emccd_gain=0)
+    t_noisy = theoretical_precision(
+        fs=fs, photons=photons, calibration_calculator=calc,
+        dark_frame_std=noisy, preamp_gain=1.0, emccd_gain=0)
+    assert t_noisy.left_peak_bg_mhz > t_quiet.left_peak_bg_mhz
+    assert t_noisy.distance_total_mhz > t_quiet.distance_total_mhz
+
+
+def test_detected_width_reduces_to_gamma_without_psf():
+    from brillouin_system.spectrum_fitting.psf import detected_hwhm_px
+    assert detected_hwhm_px(1.5, 0.0, 0.0) == pytest.approx(1.5)
+
+
+def test_detected_width_grows_with_the_psf():
+    from brillouin_system.spectrum_fitting.psf import detected_hwhm_px
+    plain = detected_hwhm_px(1.2, 0.0, 0.0)
+    blurred = detected_hwhm_px(1.2, 0.25, 0.4)
+    # Production kernel widens a 1.2 px core by a few-to-ten percent.
+    assert 1.02 * plain < blurred < 1.25 * plain
+
+
+def test_psf_fit_bound_uses_the_detected_width():
+    """Same fitted widths: a PSF-tagged fit must report a wider (more
+    honest) bound than a plain-Lorentzian one, because its photons are
+    spread by the camera PSF on top of the fitted core."""
+    from dataclasses import replace
+    calc = _linear_calculator()
+    fs_plain = _fitted_two_peaks()                       # model='' -> plain
+    fs_psf = replace(fs_plain, model="2lorentzian_x_psf_window")
+    photons = PixelCountsAndPhotons.from_fit(fs_plain, preamp_gain=1.0,
+                                             emccd_gain=0)
+    t_plain = _bound(fs_plain, photons, calc)
+    t_psf = _bound(fs_psf, photons, calc)
+    assert t_psf.left_peak_photons_mhz > t_plain.left_peak_photons_mhz
+    assert t_psf.distance_total_mhz > t_plain.distance_total_mhz
+
+
 def test_failed_fit_has_no_distance_precision():
-    an = _analyzer_with_linear_calibration()
+    calc = _linear_calculator()
     fs = FittedSpectrum(is_success=False, x_pixels=np.arange(3), sline=np.zeros(3))
-    photons = calculate_photon_counts_from_fitted_spectrum(fs, preamp_gain=1.0, emccd_gain=0)
-    t = an.theoretical_precision(fs, photons, None, preamp_gain=1.0, emccd_gain=0)
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    t = _bound(fs, photons, calc)
     assert t.distance_total_mhz is None
 
 
@@ -186,7 +253,7 @@ def test_em_guard_is_not_bypassed_by_the_public_helpers():
     with pytest.raises(ValueError, match="Electron-Multiplying"):
         count_to_electrons(1000, preamp_gain=1.0, emccd_gain=100)
     with pytest.raises(ValueError, match="Electron-Multiplying"):
-        calculate_photon_counts_from_fitted_spectrum(_fs(), preamp_gain=1.0, emccd_gain=100)
+        PixelCountsAndPhotons.from_fit(_fs(), preamp_gain=1.0, emccd_gain=100)
 
 
 def test_em_mode_works_when_a_sensitivity_is_supplied():

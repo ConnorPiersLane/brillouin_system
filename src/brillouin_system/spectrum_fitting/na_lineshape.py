@@ -9,7 +9,7 @@ f180 * cos(v/2) (< f180). Fitting a symmetric peak to this asymmetric,
 down-shifted blob biases the position low; fitting THIS model returns f180 —
 the true 180-degree shift — directly.
 
-The angular collection weight reuses na_correction5 (validated on water):
+The angular collection weight (validated on water):
     W(v) = exp(-2 (v/v0)^2) * sin(v),   v in [0, alpha]
 with v0 (effective coupling angular width) and alpha (pupil clip) derived
 from the objective geometry there.
@@ -28,10 +28,27 @@ from __future__ import annotations
 
 import numpy as np
 
-from brillouin_system.spectrum_fitting.na_correction5 import (
-    gaussian_angle_width,
-    pupil_angle_limit,
-)
+def gaussian_angle_width(
+    beam_diameter: float,
+    focal_length: float,
+    n_sample: float = 1.328,
+) -> float:
+    """v0: 1/e^2 angular half-width of the Gaussian fiber-coupling weight in
+    the SAMPLE, from the collection-mode beam diameter at the objective pupil
+    and the objective focal length (air angle refracted into the sample)."""
+    theta_air = np.arctan((beam_diameter / 2.0) / focal_length)
+    return np.arcsin(np.sin(theta_air) / n_sample)
+
+
+def pupil_angle_limit(
+    pupil_diameter: float,
+    focal_length: float,
+    n_sample: float = 1.328,
+) -> float:
+    """alpha: hard aperture clip of the collection cone in the SAMPLE, from
+    the physical pupil diameter and the objective focal length."""
+    theta_air = np.arctan((pupil_diameter / 2.0) / focal_length)
+    return np.arcsin(np.sin(theta_air) / n_sample)
 
 
 def na_angular_grid(alpha: float, n_quad: int = 41, v0: float | None = None):
@@ -43,7 +60,7 @@ def na_angular_grid(alpha: float, n_quad: int = 41, v0: float | None = None):
     This has a single geometric input (alpha), no soft coupling parameter.
 
     Optionally pass v0 to add the Gaussian fiber-coupling apodization
-    exp(-2 (v/v0)^2) (na_correction5 form, validated on water) — used when the
+    exp(-2 (v/v0)^2) (validated on water) — used when the
     config sets na_weighting = "uniform_gaussian"; v0 is an empirical, session-drifting
     quantity (the effective fiber-mode diameter), so it must be re-calibrated
     on water per session (na_beam_diameter_mm).
@@ -76,10 +93,14 @@ def na_mean_shift_ratio(config, n_quad: int = 2001) -> float:
                            na_focal_length_mm; a uniform pupil overcorrects
                            at this aperture.
 
-    Reads the same config fields as the na_lorentzian fitting model, so one
-    config setting drives both the in-fit and the post-hoc route.
+    Reads the na_* fields of the sample find-peaks config.
+
+    na_weighting "none" returns exactly 1.0 (no correction) without touching
+    the other na_* fields, so pipelines can divide by this unconditionally.
     """
     weighting = str(getattr(config, "na_weighting", "uniform"))
+    if weighting == "none":
+        return 1.0
     na = float(config.na_collection)
     n_sample = float(config.na_n_sample)
     if not 0.0 < na < n_sample:
@@ -112,100 +133,6 @@ def na_mean_shift_ratio(config, n_quad: int = 2001) -> float:
     return numerator / denominator
 
 
-def make_na_lorentzian(rayleigh_px, alpha, n_quad: int = 41, v0: float | None = None):
-    """
-    Build an NA-integrated Lorentzian model anchored at the elastic line.
-
-    Fixed inputs: rayleigh_px (elastic-line pixel) and alpha (effective
-    collection half-angle in the sample; e.g. na_correction5.pupil_angle_limit,
-    or an effective value calibrated on a reference liquid). By default the
-    pupil is treated as UNIFORM (paper model) — no Gaussian coupling.
-
-    Free parameters:  [amp, center, gamma, offset]
-        center = the 180-degree peak position (px) -> the true shift downstream
-        gamma  = intrinsic HWHM (px); NA broadening comes from the fixed kernel
-    """
-    R = float(rayleigh_px)
-    v, weight, frac = na_angular_grid(alpha, n_quad, v0=v0)
-    wsum = float(np.trapezoid(weight, v))
-    if wsum <= 0:
-        raise ValueError("NA collection weight integrates to <= 0.")
-
-    def _na_lorentzian(x, amp, center, gamma, offset):
-        x = np.asarray(x, dtype=float)
-        gamma = max(float(gamma), 1e-9)
-        # Sub-peak centers: down-shifted from `center` by the NA fraction of the
-        # elastic-line distance (center - R).
-        sub_centers = center - (center - R) * frac          # (n_quad,)
-        dx = x[:, None] - sub_centers[None, :]              # (nx, n_quad)
-        lor = gamma**2 / (dx**2 + gamma**2)                 # (nx, n_quad)
-        integ = np.trapezoid(weight[None, :] * lor, v, axis=1) / wsum
-        return amp * integ + offset
-
-    return _na_lorentzian
-
-
-def make_2na_lorentzian_binned(
-    rayleigh_left_px,
-    rayleigh_right_px,
-    alpha,
-    n_quad: int = 41,
-    v0: float | None = None,
-):
-    """
-    Joint two-peak NA-integrated Lorentzian model for SpectrumFitter, each peak
-    anchored at its own Rayleigh-order elastic line (VIPA: Stokes of order n +
-    anti-Stokes of order n+1). Sub-peak cores are pixel-integrated (same arctan
-    form as SpectrumFitter's plain Lorentzian), so amplitudes and widths are
-    directly comparable.
-
-    Free parameters: [amp1, cen1, gamma1, amp2, cen2, gamma2, offset]
-    (same layout as _2lorentzian_binned); cen1/cen2 are the true 180-degree
-    peak positions in px.
-    """
-    r_left = float(rayleigh_left_px)
-    r_right = float(rayleigh_right_px)
-    if not (np.isfinite(r_left) and np.isfinite(r_right)):
-        raise ValueError("Elastic anchors (rayleigh_left/right_px) must be finite.")
-    v, weight, frac = na_angular_grid(alpha, n_quad, v0=v0)
-    wsum = float(np.trapezoid(weight, v))
-    if wsum <= 0:
-        raise ValueError("NA collection weight integrates to <= 0.")
-
-    def _na_peak_pixel_integrated(x, amp, cen, gamma, rayleigh):
-        gamma = max(float(gamma), 1e-12)
-        sub_centers = cen - (cen - rayleigh) * frac            # (n_quad,)
-        dl = x[:, None] - 0.5 - sub_centers[None, :]           # (nx, n_quad)
-        dr = x[:, None] + 0.5 - sub_centers[None, :]
-        prof = amp * gamma * (np.arctan(dr / gamma) - np.arctan(dl / gamma))
-        return np.trapezoid(weight[None, :] * prof, v, axis=1) / wsum
-
-    def _2na_lorentzian_binned(x, amp1, cen1, gamma1, amp2, cen2, gamma2, offset):
-        x = np.asarray(x, dtype=float)
-        return (
-            _na_peak_pixel_integrated(x, amp1, cen1, gamma1, r_left)
-            + _na_peak_pixel_integrated(x, amp2, cen2, gamma2, r_right)
-            + offset
-        )
-
-    return _2na_lorentzian_binned
-
-
-def make_na_lorentzian_from_geometry(
-    rayleigh_px,
-    pupil_diameter,
-    focal_length,
-    n_sample: float = 1.328,
-    n_quad: int = 41,
-    beam_diameter: float | None = None,
-):
-    """
-    Convenience: derive the aperture `alpha` from the objective pupil geometry
-    (na_correction5.pupil_angle_limit). Uniform pupil by default; pass
-    beam_diameter to additionally apply the Gaussian coupling apodization.
-    """
-    alpha = pupil_angle_limit(pupil_diameter, focal_length, n_sample)
-    v0 = None
-    if beam_diameter is not None:
-        v0 = gaussian_angle_width(beam_diameter, focal_length, n_sample)
-    return make_na_lorentzian(rayleigh_px, alpha, n_quad, v0=v0)
+# The in-fit NA lineshape builders (make_na_lorentzian and friends) were
+# removed 2026-08-20 with the na_lorentzian fitting models: the post-hoc
+# scalar above is the production route, validated equivalent on water.

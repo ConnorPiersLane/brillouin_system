@@ -32,6 +32,7 @@ Usage:
 """
 import copy
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -43,14 +44,12 @@ from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalyzedSpectrum
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import (
-    calculate_photon_counts_from_fitted_spectrum,
+from brillouin_system.spectrum_fitting.noise_analysis import (
+    PixelCountsAndPhotons, theoretical_precision,
 )
-from brillouin_system.spectrum_fitting.helpers.subtract_background import (
-    subtract_background, subtract_darknoise,
-)
-from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors
+from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
+from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 DATA = Path(r"C:\Users\cplan\Dropbox (Personal)\Boston\Data\2026-7-30")
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
@@ -65,7 +64,10 @@ MAX_PLANE_GAP_UM = 50.0     # the strict depth-registration gate
 # i.e. +1.7 MHz on every point (common-mode -- it cannot change any shape).
 SESSION_D_MM = 6.241
 N_SAMPLE = 1.376
-FITTING_MODEL = "na_gauss_lorentzian_window"
+# The NA lineshape models were removed 2026-08-20: fit a plain windowed
+# Lorentzian and DIVIDE the shifts by the post-hoc scalar <cos(v/2)>
+# (na_mean_shift_ratio, Gaussian coupling weight) — validated equivalent.
+FITTING_MODEL = "lorentzian_window"
 # The calibration must be fitted in the SAME lineshape family as the samples --
 # the fitter refuses to mix pixel-response with plain-Lorentzian centres. The
 # live TOML tracks whatever the GUI was last set to (prm1/pixel_response at the
@@ -101,33 +103,40 @@ def session_fitter() -> SpectrumFitter:
     return sf
 
 
+def na_corrected(shifts, ratio):
+    """Divide the three shifts by the post-hoc NA ratio (widths untouched)."""
+    def d(v):
+        return None if v is None else v / ratio
+    return replace(
+        shifts,
+        freq_shift_left_peak_ghz=d(shifts.freq_shift_left_peak_ghz),
+        freq_shift_right_peak_ghz=d(shifts.freq_shift_right_peak_ghz),
+        freq_shift_peak_distance_ghz=d(shifts.freq_shift_peak_distance_ghz),
+    )
+
+
 def fit_scan(scan: AxialScan, sf: SpectrumFitter) -> list[AnalyzedSpectrum]:
     calc = CalibrationCalculator(parameters=scan.calibration_params)
-    analyzer = SpectrumAnalyzer(calibration_calculator=calc)
     ss = scan.system_state
     cam = ss.andor_camera_info
-
-    anchors = None
-    if not ss.is_reference_mode and model_requires_anchors(sf.sample_config.fitting_model):
-        anchors = calc.elastic_anchors()
+    ratio = na_mean_shift_ratio(sf.sample_config)
 
     out = []
     for measurement in scan.measurements:
         frame = measurement.frame_andor.copy()
-        frame = (subtract_background(frame=frame, bg_frame=ss.bg_image)
-                 if ss.is_do_bg_subtraction_active
-                 else subtract_darknoise(frame=frame, darknoise_frame=ss.dark_image))
+        frame = subtract_darknoise(frame=frame, darknoise_frame=ss.dark_image)
 
         px, sline = sf.get_px_sline_from_image(frame)
-        fit = sf.fit(px=px, sline=sline, is_reference_mode=ss.is_reference_mode, anchors=anchors)
-        photons = calculate_photon_counts_from_fitted_spectrum(
+        fit = sf.fit(px=px, sline=sline, is_reference_mode=ss.is_reference_mode)
+        photons = PixelCountsAndPhotons.from_fit(
             fs=fit, preamp_gain=cam.preamp_gain, emccd_gain=cam.gain)
-        theo = analyzer.theoretical_precision(
-            fs=fit, photons=photons,
-            bg_frame_std=ss.bg_image.std_image if ss.is_do_bg_subtraction_active else None,
+        theo = theoretical_precision(
+            fs=fit, photons=photons, calibration_calculator=calc,
+            dark_frame_std=(ss.dark_image.std_image
+                            if ss.dark_image is not None else None),
             preamp_gain=cam.preamp_gain, emccd_gain=cam.gain)
         out.append(AnalyzedSpectrum(fitted_spectrum=fit,
-                                    analyzed_shifts=analyzer.analyze_spectrum(fitting=fit),
+                                    analyzed_shifts=na_corrected(calc.analyze(fit), ratio),
                                     photons=photons, theoretical_precisions=theo))
     return out
 

@@ -25,4 +25,3 @@ class ImageStatistics:
 @dataclass
 class BackgroundImage:
     dark_image: ImageStatistics | None = None
-    bg_image: ImageStatistics | None = None

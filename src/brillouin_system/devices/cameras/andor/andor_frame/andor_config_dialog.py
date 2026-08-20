@@ -31,11 +31,10 @@ class AndorConfigDialog(QDialog):
             "flip_image_horizontally": QCheckBox("Flip Image Horizontally"),
             "verbose": QCheckBox("Verbose Output"),
             "n_dark_images": QLineEdit(),
-            "n_bg_images": QLineEdit(),
         }
 
         # Int validators
-        for key in ["x_start", "x_end", "y_start", "y_end", "vbin", "hbin", "pre_amp_mode", "vss_index", "n_dark_images", "n_bg_images"]:
+        for key in ["x_start", "x_end", "y_start", "y_end", "vbin", "hbin", "pre_amp_mode", "vss_index", "n_dark_images"]:
             self.inputs[key].setValidator(QIntValidator(0, 9999))
 
         layout = QVBoxLayout()
@@ -82,7 +81,6 @@ class AndorConfigDialog(QDialog):
         self.inputs["flip_image_horizontally"].setChecked(cfg.flip_image_horizontally)
         self.inputs["verbose"].setChecked(cfg.verbose)
         self.inputs["n_dark_images"].setText(str(cfg.n_dark_images))
-        self.inputs["n_bg_images"].setText(str(cfg.n_bg_images))
 
     def _parse_temperature(self, value: str) -> float | str:
         value = value.strip().lower()
@@ -108,7 +106,6 @@ class AndorConfigDialog(QDialog):
             flip_image_horizontally=self.inputs["flip_image_horizontally"].isChecked(),
             verbose=self.inputs["verbose"].isChecked(),
             n_dark_images=int(self.inputs["n_dark_images"].text()),
-            n_bg_images=int(self.inputs["n_bg_images"].text()),
         )
 
     def apply_settings(self):

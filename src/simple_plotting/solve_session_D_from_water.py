@@ -21,14 +21,18 @@ from scipy.optimize import brentq
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
-from brillouin_system.spectrum_fitting.spectrum_analyzer import SpectrumAnalyzer
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors
+from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
 
 P = Path(sys.argv[1] if len(sys.argv) > 1 else
          r"C:\Users\cplan\Partners HealthCare Dropbox\Connor Lane\Data\2026-7-27\water_na014_na042.h5")
 N_WATER = 1.33
-MODEL = "na_gauss_lorentzian_window"
+# The NA lineshape models are gone (2026-08-20): this now uses the production
+# post-hoc route — fit a plain windowed Lorentzian, then DIVIDE the shift by
+# the scalar <cos(v/2)> (na_mean_shift_ratio) with the Gaussian coupling
+# weight. Validated equivalent to the in-fit NA model on water.
+MODEL = "lorentzian_window"
 # The calibration must be fitted in the same lineshape family as the samples, and
 # the live TOML tracks whatever the GUI was last set to (pixel_response/prm1 as of
 # 2026-08). Pin it: mixing families moves the solved D by ~0.4 mm.
@@ -58,9 +62,7 @@ for s in SCANS:
     slines = []
     for m in s.measurements:
         f = m.frame_andor.copy()
-        f = (subtract_background(frame=f, bg_frame=ss.bg_image)
-             if ss.is_do_bg_subtraction_active
-             else subtract_darknoise(frame=f, darknoise_frame=ss.dark_image))
+        f = subtract_darknoise(frame=f, darknoise_frame=ss.dark_image)
         slines.append(sf0.get_px_sline_from_image(f))
     CACHE.append((s, slines))
 print(f"cached {sum(len(c[1]) for c in CACHE)} frames from {len(SCANS)} scans")
@@ -84,16 +86,16 @@ def group_shift(group: str, d_mm: float):
         pin_reference(sf)
 
         calc = CalibrationCalculator(parameters=scan.calibration_params)
-        analyzer = SpectrumAnalyzer(calibration_calculator=calc)
-        anchors = calc.elastic_anchors() if model_requires_anchors(MODEL) else None
+        cfg.na_weighting = "uniform_gaussian"
+        ratio = na_mean_shift_ratio(cfg)
 
         for px, sline in slines:
-            fit = sf.fit(px=px, sline=sline, is_reference_mode=False, anchors=anchors)
+            fit = sf.fit(px=px, sline=sline, is_reference_mode=False)
             if not fit.is_success:
                 continue
-            v = analyzer.analyze_spectrum(fitting=fit).freq_shift_peak_distance_ghz
+            v = calc.analyze(fit).freq_shift_peak_distance_ghz
             if v is not None and 4.0 < v < 6.5:
-                vals.append(v)
+                vals.append(v / ratio)
     a = np.array(vals, float)
     return a.mean(), a.std(ddof=1), a.size
 
@@ -116,11 +118,10 @@ for g in ["na042", "na014"]:
         if scan.id != g:
             continue
         calc = CalibrationCalculator(parameters=scan.calibration_params)
-        an = SpectrumAnalyzer(calibration_calculator=calc)
         for px, sline in slines:
-            fit = sf.fit(px=px, sline=sline, is_reference_mode=False, anchors=None)
+            fit = sf.fit(px=px, sline=sline, is_reference_mode=False)
             if fit.is_success:
-                v = an.analyze_spectrum(fitting=fit).freq_shift_peak_distance_ghz
+                v = calc.analyze(fit).freq_shift_peak_distance_ghz
                 if v is not None and 4.0 < v < 6.5:
                     vals.append(v)
     a = np.array(vals, float)

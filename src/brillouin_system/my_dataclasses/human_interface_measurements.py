@@ -3,25 +3,25 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from brillouin_system.calibration.calibration import (
+    AnalyzedFreqShifts,
     CalibrationCalculator,
     CalibrationData,
     CalibrationPolyfitParameters,
     calibrate,
 )
 from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.eye_tracker.eye_tracker_results import EyeTrackerResults
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.scan_managers.ni_reflection_finder4 import ReflectionResult
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
-from brillouin_system.spectrum_fitting.helpers.calculate_photon_counts import PhotonsCounts, \
-    calculate_photon_counts_from_fitted_spectrum
-from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background, subtract_darknoise
-from brillouin_system.spectrum_fitting.spectrum_analyzer import AnalyzedFreqShifts, TheoreticalPeakStdError, \
-    SpectrumAnalyzer
+from brillouin_system.spectrum_fitting.noise_analysis import (
+    PixelCountsAndPhotons, TheoreticalPeakStdError, theoretical_precision,
+)
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
-    SpectrumFitter, model_requires_anchors, normalize_model_name,
+    SpectrumFitter, normalize_model_name,
     config_requires_reflection_background,
 )
 from brillouin_system.spectrum_fitting.reflection_background import (
@@ -119,7 +119,7 @@ class AxialScan:
 class AnalyzedSpectrum:
     fitted_spectrum: FittedSpectrum
     analyzed_shifts: AnalyzedFreqShifts
-    photons: PhotonsCounts
+    photons: PixelCountsAndPhotons
     theoretical_precisions: TheoreticalPeakStdError
 
 
@@ -152,13 +152,13 @@ def calibration_for_scan(scan: AxialScan, fitter: SpectrumFitter) -> Calibration
               f"degree={degree}) — shifts may differ from the stored analysis.")
         return CalibrationCalculator(parameters=params)
 
-    if sample_model == "pixel_response":
+    if sample_model == "lorentzian_x_psf":
         raise ValueError(
             f"Scan '{scan.id}' carries no raw calibration frames "
             f"(calibration_data is None: recorded before they were stored, or "
             f"with save_calibration_frames off), so its calibration cannot be "
             f"re-fitted and there is no record of the model it was fitted "
-            f"with. A pixel-response sample fit against a calibration that is "
+            f"with. A PSF-convolved sample fit against a calibration that is "
             f"most likely lorentzian is the -168 MHz mixing trap. Analyse this "
             f"scan with 'lorentzian' instead."
         )
@@ -181,11 +181,14 @@ def stored_sline_rows(scan: AxialScan) -> list[int] | None:
     return [int(r) for r in rows]
 
 
-def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
+def fitter_for_scan(scan: AxialScan) -> SpectrumFitter:
+    """A SpectrumFitter pinned to the scan's stored acquisition row band.
+
+    Re-fit on the rows the scan was acquired with, not on whatever the
+    current config says — a different band would shift the peaks by a few
+    MHz each and the re-fit would not reproduce the stored shifts.
+    """
     spectrum_fitter = SpectrumFitter()
-    # Re-fit on the rows the scan was acquired with, not on whatever the
-    # current config says — a different band would shift the peaks by a few
-    # MHz each and the re-fit would not reproduce the stored shifts.
     sline_rows = stored_sline_rows(scan)
     if sline_rows is not None:
         sline_config = replace(
@@ -194,18 +197,27 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
             row_selection="manual",
         )
         spectrum_fitter.update_sline_config(sline_config)
-    calibration_calculator = calibration_for_scan(scan, spectrum_fitter)
-    spectrum_analyzer = SpectrumAnalyzer(calibration_calculator=calibration_calculator)
+    return spectrum_fitter
 
-    do_bg_subtraction = scan.system_state.is_do_bg_subtraction_active
+
+def fit_axial_scan(scan: AxialScan,
+                   fitter: SpectrumFitter | None = None,
+                   calibration_calculator: CalibrationCalculator | None = None,
+                   ) -> list[AnalyzedSpectrum]:
+    """Fit every measurement of a scan against its own calibration.
+
+    fitter / calibration_calculator let a caller that already built them
+    (e.g. the analyzer GUI, which also needs the calculator for calibration
+    plots) inject them instead of paying for a second calibration re-fit.
+    A supplied fitter must carry the scan's row band — build it with
+    fitter_for_scan().
+    """
+    spectrum_fitter = fitter if fitter is not None else fitter_for_scan(scan)
+    sline_rows = stored_sline_rows(scan)
+    if calibration_calculator is None:
+        calibration_calculator = calibration_for_scan(scan, spectrum_fitter)
 
     is_reference_mode = scan.system_state.is_reference_mode
-
-    # Models that anchor peaks at the Rayleigh orders (na_lorentzian*) need the
-    # anchors from this scan's calibration; raises if it cannot provide them.
-    anchors = None
-    if not is_reference_mode and model_requires_anchors(spectrum_fitter.sample_config.fitting_model):
-        anchors = calibration_calculator.elastic_anchors()
 
     # The reflection background (prmr preset) needs the packaged
     # reflection template registered onto THIS scan's own calibration —
@@ -220,13 +232,23 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
 
     list_analyzed_spectras: list[AnalyzedSpectrum] = []
 
+    # Frames are fitted RAW (user rule 2026-08-20): nothing is subtracted
+    # from the data. The fit's background parameters absorb the dark/bias
+    # pedestal, and the Thompson bound removes that level analytically
+    # (an electronic offset carries no shot noise). This also matches
+    # calibrate(), which always fit the calibration frames raw — sample and
+    # reference frames now go through the identical treatment.
+    # Dark/bias level per pixel for the bound: the scan's own dark stack
+    # wins; the ccd_characteristics reference value is the fallback; a
+    # frame median only if even that is unset.
+    dark = scan.system_state.dark_image
+    if dark is not None:
+        dark_level_per_px = float(np.median(dark.mean_image))
+    else:
+        dark_level_per_px = ccd_config.get().dark_median_counts or None
+
     for measurement in scan.measurements:
         frame = measurement.frame_andor.copy()
-
-        if do_bg_subtraction:
-            frame = subtract_background(frame=frame, bg_frame=scan.system_state.bg_image)
-        else:
-            frame = subtract_darknoise(frame=frame, darknoise_frame=scan.system_state.dark_image)
 
         # Generate sline
         px, sline = spectrum_fitter.get_px_sline_from_image(frame)
@@ -235,25 +257,31 @@ def fit_axial_scan(scan: AxialScan) -> list[AnalyzedSpectrum]:
         measured_bg = (reflection_mapper.render(px)
                        if reflection_mapper is not None else None)
         fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode,
-                                      anchors=anchors,
                                       measured_background=measured_bg)
 
-        analyzed_shift = spectrum_analyzer.analyze_spectrum(fitting=fitting)
+        analyzed_shift = calibration_calculator.analyze(fitting)
 
-        # Photon counts
-        photons = calculate_photon_counts_from_fitted_spectrum(fs=fitting,
-                                                               preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
-                                                               emccd_gain=scan.system_state.andor_camera_info.gain)
+        # Per-peak counts and photons, from the fit parameters alone
+        photons = PixelCountsAndPhotons.from_fit(
+            fs=fitting,
+            preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
+            emccd_gain=scan.system_state.andor_camera_info.gain)
 
-        if scan.system_state.is_do_bg_subtraction_active:
-            bg_frame_std = scan.system_state.bg_image.std_image
-        else:
-            bg_frame_std = None
-
-        theoretical_std: TheoreticalPeakStdError = spectrum_analyzer.theoretical_precision(
-            fs=fitting, photons=photons, bg_frame_std=bg_frame_std,
-            preamp_gain = scan.system_state.andor_camera_info.preamp_gain,
-        emccd_gain = scan.system_state.andor_camera_info.gain)
+        # The fitted pedestal of a raw-frame fit contains the dark/bias
+        # level; pass it (per summed sline pixel) so the bound's pedestal
+        # shot-noise term only sees the light part. Source: the scan's own
+        # dark stack median, or the frame median when no darks were taken.
+        level = (dark_level_per_px if dark_level_per_px is not None
+                 else float(np.median(frame)))
+        n_rows = len(spectrum_fitter.get_selected_rows(frame))
+        bias_counts = level * n_rows
+        theoretical_std: TheoreticalPeakStdError = theoretical_precision(
+            fs=fitting, photons=photons,
+            calibration_calculator=calibration_calculator,
+            dark_frame_std=dark.std_image if dark is not None else None,
+            preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
+            emccd_gain=scan.system_state.andor_camera_info.gain,
+            pedestal_bias_counts=bias_counts)
 
         # Append
         anaylzed_spectra = AnalyzedSpectrum(

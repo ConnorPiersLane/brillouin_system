@@ -19,10 +19,10 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
-    PixelResponseConstants,
+    PsfConstants,
     SlineFromFrameConfig,
 )
-from brillouin_system.spectrum_fitting.pixel_response import pixel_response_profile
+from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 SIGMA, TAU_L, TAU_R = 0.25, 0.4, 0.2
@@ -43,9 +43,9 @@ def make_config(model: str) -> FindPeaksConfig:
 
 def make_fitter(model: str) -> SpectrumFitter:
     fitter = SpectrumFitter()
-    fitter.pr_config = PixelResponseConstants(
-        pr_sigma_px=SIGMA, pr_tau_left_px=TAU_L,
-        pr_tau_right_px=TAU_R)
+    fitter.psf_config = PsfConstants(
+        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
+        psf_tau_right_px=TAU_R)
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config(model))
     fitter.update_sline_config(SlineFromFrameConfig(
@@ -60,8 +60,8 @@ def make_frame(separation_px: float) -> np.ndarray:
     px = np.arange(0, 86, dtype=float)
     mid = 43.0
     line = (
-        pixel_response_profile(px, 3000.0, mid - separation_px / 2, 1.0, SIGMA, TAU_L)
-        + pixel_response_profile(px, 3000.0, mid + separation_px / 2, 1.0, SIGMA, TAU_R)
+        psf_profile(px, 3000.0, mid - separation_px / 2, 1.0, SIGMA, TAU_L)
+        + psf_profile(px, 3000.0, mid + separation_px / 2, 1.0, SIGMA, TAU_R)
         + 100.0
     )
     return np.tile(line / N_ROWS, (N_ROWS, 1))
@@ -72,12 +72,9 @@ def make_calibration_data() -> CalibrationData:
     blocks = []
     for freq, sep in [(4.0, 20.0), (6.0, 30.0), (8.0, 40.0)]:
         point = CalibrationMeasurementPoint(
-            frame=make_frame(sep), microwave_freq=freq,
-            fitting_results=FittedSpectrum(
-                is_success=False, x_pixels=np.arange(86.0), sline=np.zeros(86)),
-        )
+            frame=make_frame(sep), microwave_freq=freq)
         blocks.append(MeasurementsPerFreq(
-            set_freq_ghz=freq, state_mode=None, cali_meas_points=[point]))
+            set_freq_ghz=freq, cali_meas_points=[point]))
     return CalibrationData(measured_freqs=blocks)
 
 

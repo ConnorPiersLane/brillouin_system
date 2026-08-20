@@ -10,6 +10,7 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import ando
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
+from brillouin_system.devices.cameras.andor.replayCamera import ReplayCamera
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 
@@ -37,9 +38,7 @@ from brillouin_system.calibration.calibration import CalibrationData, \
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
-from brillouin_system.spectrum_fitting.helpers.subtract_background import subtract_background
-from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, model_requires_anchors, \
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, \
     config_requires_reflection_background
 from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackground,
@@ -70,9 +69,14 @@ class HiBackend:
 
         # Devices
         if use_dummy:
-            camera=DummyCamera()
             shutter_manager=ShutterManagerDummy('human_interface')
             microwave=MicrowaveDummy()
+            # Replay real stored frames (water sample + EOM calibration) so
+            # dummy mode shows real signals; falls back to synthetic frames
+            # if the replay file is missing on this machine.
+            camera=ReplayCamera(microwave=microwave, shutter_manager=shutter_manager)
+            if camera.has_replay_data:
+                microwave.set_available_frequencies(camera.calibration_freqs)
             # Simulated NI + eye lens with a moving simulated cornea: the DAQ
             # signal is coupled to the lens-cornea distance, so reflection
             # finding actually works in dummy mode.
@@ -132,7 +136,6 @@ class HiBackend:
         # State
         self.is_shutter_open: bool = True
         self.is_reference_mode: bool = False
-        self.do_background_subtraction: bool = False
         self.do_live_fitting = False
 
         # Calibration
@@ -141,8 +144,8 @@ class HiBackend:
         self.calibration_calculator: CalibrationCalculator | None = None
         self.calibration_config: CalibrationConfig = calibration_config.get()
 
-        # Background (BG) Image and dark_image for the sample
-        self.bg_image: ImageStatistics | None = None
+        # Dark image for the sample (the background-frame subtraction feature
+        # was removed 2026-08-20 — never used in production, not planned)
         self.dark_image: ImageStatistics | None = None
 
         self.init_shutters()
@@ -205,8 +208,6 @@ class HiBackend:
     def init_state_mode(self, is_reference_mode: bool) -> SystemState:
         return SystemState(
             is_reference_mode=is_reference_mode,
-            is_do_bg_subtraction_active=False,
-            bg_image=None,
             dark_image=None,
             andor_camera_info=self.andor_camera.get_camera_info_dataclass()
         )
@@ -267,8 +268,6 @@ class HiBackend:
 
     def change_system_state(self, state_mode: SystemState):
         self.is_reference_mode = state_mode.is_reference_mode
-        self.do_background_subtraction = state_mode.is_do_bg_subtraction_active
-        self.bg_image = state_mode.bg_image
         self.set_andor_exposure(
             exposure_time=state_mode.andor_camera_info.exposure,
             emccd_gain=state_mode.andor_camera_info.gain,
@@ -277,8 +276,6 @@ class HiBackend:
     def get_current_system_state(self) -> SystemState:
         return SystemState(
             is_reference_mode=self.is_reference_mode,
-            is_do_bg_subtraction_active=self.do_background_subtraction,
-            bg_image=self.bg_image,
             dark_image=self.dark_image,
             andor_camera_info=self.andor_camera.get_camera_info_dataclass()
         )
@@ -302,25 +299,6 @@ class HiBackend:
         log.info("[BrillouinBackend] Switched to sample mode.")
 
 
-
-    # ----------------- Background Subtraction ----------------- #
-
-    def start_background_subtraction(self):
-        if self.is_background_image_available():
-            self.do_background_subtraction = True
-        else:
-            self.do_background_subtraction = False
-            log.info("[BrillouinBackend] No Background Image available")
-
-    def stop_background_subtraction(self):
-        self.do_background_subtraction = False
-        log.info("[BrillouinBackend] Background subtraction unabled")
-
-    def subtract_background(self, frame: np.ndarray) -> np.ndarray:
-        if not self.is_background_image_available():
-            log.info("[AcquisitionManager] No background image available")
-            return frame
-        return subtract_background(frame=frame, bg_frame=self.bg_image)
 
     def take_n_images(self, n_images: int) -> np.ndarray:
         """Acquire up to n_images, with cancel support and progress logging.
@@ -355,42 +333,8 @@ class HiBackend:
         return np.stack(frames, axis=0)
 
 
-    def take_bg_and_darknoise_images(self):
-
+    def take_darknoise_images(self):
         self.dark_image: ImageStatistics = self.get_dark_image(n_images=self._andor_config.n_dark_images)
-        self.bg_image: ImageStatistics = self.get_bg_image(n_images=self._andor_config.n_bg_images)
-
-
-
-
-    def get_bg_image(self, n_images: int) -> ImageStatistics:
-        """Capture and average multiple frames to use as background."""
-
-        if self.is_shutter_open:
-            self.shutter_manager.sample.close()
-        else:
-            pass # shutter should already be closed
-        time.sleep(0.05)  # Optional delay before acquisition
-
-        # andor_config = self._andor_config
-
-        log.info(f"Taking {n_images} Background Images...")
-        n_images = self.take_n_images(n_images)
-
-        if isinstance(self.andor_camera, DummyCamera):
-            n_images = n_images * 0.8
-
-
-        log.info("[BrillouinBackend] ...Background Images acquired.")
-
-
-        if self.is_shutter_open:
-            self.shutter_manager.sample.open()
-        else:
-            pass # do not open shutter
-
-        return generate_image_statistics_dataclass(n_images)
-
 
     def get_dark_image(self, n_images: int) -> ImageStatistics | None:
 
@@ -406,7 +350,10 @@ class HiBackend:
 
         n_images = self.take_n_images(n_dark_images)
 
-        if isinstance(self.andor_camera, DummyCamera):
+        # The plain DummyCamera generates bright synthetic frames even with the
+        # shutter closed — scale them down so they pass as darks. The
+        # ReplayCamera serves realistic dark frames itself.
+        if type(self.andor_camera) is DummyCamera:
             n_images = n_images * 0.01
 
         self.andor_camera.open_shutter()
@@ -415,16 +362,6 @@ class HiBackend:
         log.info(f"{n_dark_images} dark images acquired with: {self.andor_camera.get_exposure_dataclass()}")
 
         return generate_image_statistics_dataclass(n_images)
-
-
-
-    def is_background_image_available(self) -> bool:
-        if self.bg_image is None:
-            return False
-        else:
-            return True
-
-
 
 
     # ---------------- Get Frames  ----------------
@@ -458,10 +395,8 @@ class HiBackend:
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
         try:
-            anchors = self._elastic_anchors_if_required()
             measured_bg = self._reflection_background_if_required(px)
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode,
-                                            anchors=anchors,
                                             measured_background=measured_bg)
         except Exception as e:
             log.info(f"Fitting error: {e}")
@@ -493,20 +428,6 @@ class HiBackend:
         except Exception as e:
             log.info(f"Could not record the sline rows for this scan: {e}")
             return None
-
-    def _elastic_anchors_if_required(self) -> ElasticAnchors | None:
-        """Anchors for fitting models that need them (na_lorentzian*); None otherwise.
-        Raises if such a model is selected without a calibration (no fallback)."""
-        if self.is_reference_mode:
-            return None
-        if not model_requires_anchors(self.spectrum_fitter.sample_config.fitting_model):
-            return None
-        if self.calibration_calculator is None:
-            raise ValueError(
-                f"Sample model '{self.spectrum_fitter.sample_config.fitting_model}' requires "
-                f"elastic anchors, but no calibration is loaded."
-            )
-        return self.calibration_calculator.elastic_anchors()
 
     def _reflection_background_if_required(self, px) -> np.ndarray | None:
         """The mapped reflection background for sample fits, or None.
@@ -849,13 +770,8 @@ class HiBackend:
         log.info(f"[Sweep Scan] Config updated: {sweep_config}")
 
     def display_spectrum(self, frame):
-        if self.do_background_subtraction:
-            frame_with_sub_bg = self.subtract_background(frame)
-            fs = self.get_fitted_spectrum(frame_with_sub_bg)
-            self.b2f_emit_display_result(self.get_display_results(frame=frame_with_sub_bg, fitting=fs))
-        else:
-            fs = self.get_fitted_spectrum(frame)
-            self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
+        fs = self.get_fitted_spectrum(frame)
+        self.b2f_emit_display_result(self.get_display_results(frame=frame, fitting=fs))
 
 
     def get_axial_scan_data(self, index: int):
@@ -865,12 +781,15 @@ class HiBackend:
             return None
 
     def get_freq_shift(self, fitting: FittedSpectrum) -> float | None:
-        if self.calibration_calculator is None:
+        if self.calibration_calculator is None or not fitting.is_success:
             return None
-        else:
-            return self.calibration_calculator.compute_freq_shift(fitting=fitting,
-                                                                  reference=self.calibration_config.reference,
-                                                                  mode=self.calibration_config.mode)
+        calc = self.calibration_calculator
+        reference = self.calibration_config.reference
+        if reference == "left":
+            return float(calc.freq_left_peak(fitting.left_peak_center_px))
+        if reference == "right":
+            return float(calc.freq_right_peak(fitting.right_peak_center_px))
+        return float(calc.freq_peak_distance(fitting.inter_peak_distance))
 
     def get_hwhm_shift(self, fitting: FittedSpectrum) -> tuple:
         """
@@ -990,17 +909,18 @@ class HiBackend:
                         frame = self.get_andor_frame()
                         fs = self.get_fitted_spectrum(frame)
 
+                        # fs is the LIVE fit for the display only; the stored
+                        # calibration is raw frames + frequencies — the one
+                        # fitting pass happens in calibrate().
                         cali_point = CalibrationMeasurementPoint(
                             frame=frame,
                             microwave_freq=self.microwave.get_frequency(),
-                            fitting_results=fs,
                         )
                         freq_points.append(cali_point)
                         self.b2f_emit_display_result(self.get_display_results(frame, fs))
 
                     measured_freqs.append(MeasurementsPerFreq(
                         set_freq_ghz=freq,
-                        state_mode=self.get_current_system_state(),
                         cali_meas_points=freq_points
                     ))
 

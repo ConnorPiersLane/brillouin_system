@@ -17,16 +17,6 @@ selected_rows = [
 row_selection = "auto"
 n_rows = 11
 
-[camera]
-pr_sigma_px = 0.25
-pr_tau_left_px = 0.4
-pr_tau_right_px = 0.2
-# outer-order tails for n_peaks = 4 (provisional, measured 2026-08-20
-# from outer calibration lines; tau falls ~linearly toward the readout
-# side: +0.50 / +0.40 / +0.20 / +0.00 across the four positions)
-pr_tau_outer_left_px = 0.5
-pr_tau_outer_right_px = 0.0
-
 [sample]
 prominence_fraction = 0.001
 min_peak_width = 1
@@ -37,7 +27,6 @@ fitting_model = "prmr"
 use_window = true
 background = "flat"
 beta = 3.0
-n_peaks = 2
 na_weighting = "uniform_gaussian"
 na_collection = 0.42
 na_beam_diameter_mm = 5.5
@@ -50,7 +39,7 @@ min_peak_width = 1
 min_peak_height = 800
 rel_height = 0.5
 wlen_pixels = 40
-fitting_model = "pixel_response"
+fitting_model = "lorentzian_x_psf"
 use_window = true
 background = "flat"
 beta = 3.0

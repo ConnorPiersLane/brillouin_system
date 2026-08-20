@@ -4,29 +4,34 @@ from typing import Optional
 import numpy as np
 
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.my_dataclasses.system_state import SystemState
-from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, is_pixel_response_fit
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, is_psf_fit
+
+# The production line is deliberately minimal (cleaned 2026-08-20): a
+# calibration stores raw frames + set frequencies, NOTHING else — fits happen
+# in exactly one place, calibrate(). Fields removed from stored data:
+#   CalibrationMeasurementPoint.fitting_results (the live acquisition fit —
+#     display-only, was never read by calibrate())
+#   MeasurementsPerFreq.state_mode (a full SystemState snapshot per frequency
+#     block — never read by anything)
+# Old files still load: the HDF5 reader drops unknown fields, pickle restores
+# them as plain instance attributes.
 
 
 @dataclass
 class CalibrationMeasurementPoint:
     frame: np.ndarray
     microwave_freq: float
-    fitting_results: FittedSpectrum
 
 
 @dataclass
 class MeasurementsPerFreq:
     set_freq_ghz: float
-    state_mode: SystemState
     cali_meas_points: list[CalibrationMeasurementPoint]
 
-"""
-This is stored:
-"""
+
 @dataclass
 class CalibrationData:
+    """The stored calibration: raw sideband frames per swept EOM frequency."""
     measured_freqs: list[MeasurementsPerFreq]
 
 
@@ -40,12 +45,38 @@ class CalibrationPolyfitParameters:
     calibration_width_left_peak: Optional[np.ndarray] = field(default=None)
     calibration_width_right_peak: Optional[np.ndarray] = field(default=None)
 
-    left_px_points: Optional[np.ndarray] = field(default=None) # must be increase (see np.interp)
+    # The measured sideband points behind the polynomials (one entry per
+    # fitted calibration frame, sorted by px) — kept for calibration plots
+    # and residual diagnostics; never used to EVALUATE the calibration (the
+    # np.interp mode was removed 2026-08-20, polynomials are the only map).
+    left_px_points: Optional[np.ndarray] = field(default=None)
     left_freq_points: Optional[np.ndarray] = field(default=None)
-    right_px_points: Optional[np.ndarray] = field(default=None) # must be increase (see np.interp)
+    right_px_points: Optional[np.ndarray] = field(default=None)
     right_freq_points: Optional[np.ndarray] = field(default=None)
-    dist_px_points: Optional[np.ndarray] = field(default=None) # must be increase (see np.interp)
+    dist_px_points: Optional[np.ndarray] = field(default=None)
     dist_freq_points: Optional[np.ndarray] = field(default=None)
+
+
+@dataclass
+class AnalyzedFreqShifts:
+    """One fit converted to GHz through a calibration (CalibrationCalculator
+    .analyze). The former SpectrumAnalyzer, removed 2026-08-20: the calculator
+    already owns every primitive, so the conversion lives here."""
+    freq_shift_left_peak_ghz: float | None
+    freq_shift_right_peak_ghz: float | None
+    freq_shift_peak_distance_ghz: float | None
+    # Raw fitted width, as the peak lands on the detector: still broadened by
+    # the instrument, whatever the lineshape. Unchanged meaning for every model.
+    hwhm_left_peak_ghz: float | None
+    hwhm_right_peak_ghz: float | None
+    # Instrument HWHM from the calibration sidebands, at each peak's own pixel,
+    # and the sample linewidth left after subtracting it. The linewidth pair is
+    # None unless the fit is PSF-convolved and the calibration carries a width
+    # model (see CalibrationCalculator.sample_linewidth_ghz).
+    instrument_hwhm_left_peak_ghz: float | None = None
+    instrument_hwhm_right_peak_ghz: float | None = None
+    linewidth_left_peak_ghz: float | None = None
+    linewidth_right_peak_ghz: float | None = None
 
 
 class CalibrationCalculator:
@@ -60,151 +91,13 @@ class CalibrationCalculator:
         The polynomial fit coefficients for various calibration functions.
     """
 
-    @staticmethod
-    def interpolate_freq(px, px_points, freq_points):
-        if px_points is None or freq_points is None:
-            return None
-        return np.interp(px, px_points, freq_points)
-
     def __init__(self, parameters: CalibrationPolyfitParameters):
         """Initialize the calculator with polynomial fit parameters."""
         self.p = parameters
 
-    def compute_freq_shift(
-            self,
-            fitting: FittedSpectrum,
-            reference: str = "distance",
-            mode: str = "poly",
-    ) -> float | None:
-        """
-        Compute frequency shift [GHz] from a fitted spectrum.
-
-        Parameters
-        ----------
-        fitting : FittedSpectrum
-            Result of the spectral fit.
-        reference : str
-            Which calibration reference to use:
-            - "left"
-            - "right"
-            - "distance"
-        mode : str
-            Calibration mode:
-            - "poly"
-            - "interp"
-
-        Returns
-        -------
-        float | None
-            Frequency shift in GHz, or None if fit failed.
-
-        Raises
-        ------
-        ValueError
-            If reference or mode is invalid.
-        """
-        if not fitting.is_success:
-            return None
-
-        if mode not in {"poly", "interp"}:
-            raise ValueError(f"Unknown mode '{mode}'. Use 'poly' or 'interp'.")
-
-        if reference == "left":
-            px_value = fitting.left_peak_center_px
-            if mode == "poly":
-                result = self.freq_left_peak(px_value)
-            else:
-                result = self.freq_left_peak_interp(px_value)
-
-        elif reference == "right":
-            px_value = fitting.right_peak_center_px
-            if mode == "poly":
-                result = self.freq_right_peak(px_value)
-            else:
-                result = self.freq_right_peak_interp(px_value)
-
-        elif reference == "distance":
-            px_value = fitting.inter_peak_distance
-            if mode == "poly":
-                result = self.freq_peak_distance(px_value)
-            else:
-                result = self.freq_peak_distance_interp(px_value)
-
-        else:
-            raise ValueError(
-                f"Unknown reference '{reference}'. Use 'left', 'right', or 'distance'."
-            )
-
-        return None if result is None else float(result)
-
-    def elastic_anchors(self) -> ElasticAnchors:
-        """
-        Pixel positions of the left/right Rayleigh (elastic) lines: the roots of
-        the per-peak calibration polynomials at frequency = 0.
-
-        The calibration sweep covers ~4-8 GHz, so 0 GHz is an extrapolation —
-        the root is found by Newton iteration seeded from the calibration point
-        with the smallest frequency, and validated. Raises ValueError if the
-        calibration cannot provide the anchors (no silent fallback).
-        """
-        if self.p is None:
-            raise ValueError(
-                "Cannot extract elastic anchors: no calibration parameters available."
-            )
-        left = self._poly_zero_crossing(
-            self.p.freq_left_peak, self.p.left_px_points, self.p.left_freq_points, "left",
-        )
-        right = self._poly_zero_crossing(
-            self.p.freq_right_peak, self.p.right_px_points, self.p.right_freq_points, "right",
-        )
-        return ElasticAnchors(rayleigh_left_px=left, rayleigh_right_px=right)
-
-    @staticmethod
-    def _poly_zero_crossing(coeffs, px_points, freq_points, label: str) -> float:
-        if coeffs is None or not np.all(np.isfinite(coeffs)):
-            raise ValueError(
-                f"Cannot extract {label} elastic anchor: calibration polynomial is missing/invalid."
-            )
-        coeffs = np.asarray(coeffs, dtype=float)
-
-        if px_points is not None and freq_points is not None and len(px_points) > 0:
-            x = float(np.asarray(px_points)[np.argmin(np.abs(np.asarray(freq_points)))])
-        elif len(coeffs) == 2:
-            # Linear calibration: the root is unique, no seed needed.
-            x = -coeffs[1] / coeffs[0]
-        else:
-            raise ValueError(
-                f"Cannot extract {label} elastic anchor: calibration has no sideband "
-                f"pixel points to seed the root search for a degree-{len(coeffs) - 1} polynomial."
-            )
-
-        deriv = np.polyder(coeffs)
-        for _ in range(100):
-            f = np.polyval(coeffs, x)
-            fp = np.polyval(deriv, x)
-            if fp == 0 or not np.isfinite(fp):
-                raise ValueError(
-                    f"Cannot extract {label} elastic anchor: zero/invalid slope during Newton iteration."
-                )
-            step = f / fp
-            x = x - step
-            if abs(step) < 1e-10:
-                break
-
-        if not np.isfinite(x) or abs(np.polyval(coeffs, x)) > 1e-6:
-            raise ValueError(
-                f"Cannot extract {label} elastic anchor: Newton iteration did not converge "
-                f"(px={x}, residual={np.polyval(coeffs, x)} GHz)."
-            )
-        return float(x)
-
     def freq_left_peak(self, px):
         """Frequency of the left Brillouin peak [GHz] at pixel position px."""
         return np.polyval(self.p.freq_left_peak, px)
-
-    def freq_left_peak_interp(self, px):
-        """Frequency of the left Brillouin peak [GHz] at pixel position px."""
-        return self.interpolate_freq(px, self.p.left_px_points, self.p.left_freq_points)
 
     def dfreq_dpx_left_peak(self, px):
         """Slope d(freq)/d(px) for left peak at pixel position px [GHz/pixel]."""
@@ -215,10 +108,6 @@ class CalibrationCalculator:
         """Frequency of the right Brillouin peak [GHz] at pixel position px."""
         return np.polyval(self.p.freq_right_peak, px)
 
-    def freq_right_peak_interp(self, px):
-        """Frequency of the left Brillouin peak [GHz] at pixel position px."""
-        return self.interpolate_freq(px, self.p.right_px_points, self.p.right_freq_points)
-
     def dfreq_dpx_right_peak(self, px):
         """Slope d(freq)/d(px) for right peak at pixel position px [GHz/pixel]."""
         coeffs = np.polyder(self.p.freq_right_peak, m=1)
@@ -227,11 +116,6 @@ class CalibrationCalculator:
     def freq_peak_distance(self, px):
         """Frequency distance between left and right peaks [GHz] at pixel position px."""
         return np.polyval(self.p.freq_peak_distance, px)
-
-    def freq_peak_distance_interp(self, px):
-        """Frequency of the left Brillouin peak [GHz] at pixel position px."""
-        return self.interpolate_freq(px, self.p.dist_px_points, self.p.dist_freq_points)
-
 
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
@@ -351,7 +235,7 @@ class CalibrationCalculator:
         the validated width recipe, and only a calibration carrying a width
         model can supply the instrument term.
         """
-        if not fitting.is_success or not is_pixel_response_fit(fitting.model):
+        if not fitting.is_success or not is_psf_fit(fitting.model):
             return None, None
 
         raw_l, raw_r = self.hwhm_ghz(fitting)
@@ -362,15 +246,37 @@ class CalibrationCalculator:
 
         return raw_l - inst_l, raw_r - inst_r
 
+    def analyze(self, fitting: FittedSpectrum) -> AnalyzedFreqShifts:
+        """Convert one fit's pixel-domain results to GHz."""
+        if not fitting.is_success:
+            return AnalyzedFreqShifts(
+                freq_shift_left_peak_ghz=None,
+                freq_shift_right_peak_ghz=None,
+                freq_shift_peak_distance_ghz=None,
+                hwhm_left_peak_ghz=None,
+                hwhm_right_peak_ghz=None,
+            )
+
+        hwhm_left, hwhm_right = self.hwhm_ghz(fitting)
+        inst_left, inst_right = self.instrument_hwhm_ghz(
+            fitting.left_peak_center_px, fitting.right_peak_center_px)
+        width_left, width_right = self.sample_linewidth_ghz(fitting)
+
+        return AnalyzedFreqShifts(
+            freq_shift_left_peak_ghz=self.freq_left_peak(fitting.left_peak_center_px),
+            freq_shift_right_peak_ghz=self.freq_right_peak(fitting.right_peak_center_px),
+            freq_shift_peak_distance_ghz=self.freq_peak_distance(fitting.inter_peak_distance),
+            hwhm_left_peak_ghz=hwhm_left,
+            hwhm_right_peak_ghz=hwhm_right,
+            instrument_hwhm_left_peak_ghz=inst_left,
+            instrument_hwhm_right_peak_ghz=inst_right,
+            linewidth_left_peak_ghz=width_left,
+            linewidth_right_peak_ghz=width_right,
+        )
+
     def print_all_models(self):
         """Print all available calibration models."""
-        print("==== All Calibration Models ====")
-        self._print_poly("Left Peak", self.p.freq_left_peak)
-        self._print_poly("Right Peak", self.p.freq_right_peak)
-        self._print_poly("Inter-Peak Distance", self.p.freq_peak_distance)
-        # self._print_poly("Centroid", self.p.freq_peak_centroid)
-        # self._print_dc_model()
-        print("================================")
+        print(self.get_str_all_models())
 
     def get_str_all_models(self) -> str:
         """Return all available calibration models as a formatted string."""
@@ -379,8 +285,6 @@ class CalibrationCalculator:
         lines.append(self._poly_to_line("Left Peak", self.p.freq_left_peak))
         lines.append(self._poly_to_line("Right Peak", self.p.freq_right_peak))
         lines.append(self._poly_to_line("Inter-Peak Distance", self.p.freq_peak_distance))
-        # lines.append(self._poly_to_line("Centroid", self.p.freq_peak_centroid))
-        # lines.append(self._dc_model_to_line())
         lines.append("================================")
         return "\n".join(lines)
 
@@ -404,10 +308,6 @@ class CalibrationCalculator:
             else:
                 terms.append(f"{c:.4g}·x^{power}")
         return " + ".join(terms) if terms else "0"
-
-    def _print_poly(self, name: str, coeffs: np.ndarray):
-        eq = self._poly_to_str(coeffs)
-        print(f"{name}: f(x) ≈ {eq}  [GHz]")
 
 
 def get_calibration_calculator_from_data(calibration_data: CalibrationData, poyfit_degree) -> CalibrationCalculator:
@@ -436,9 +336,6 @@ def calibrate(data: CalibrationData, poyfit_degree,
 
     for freq_block in data.measured_freqs:
         for point in freq_block.cali_meas_points:
-            # if point.fitting_results.is_success:
-            #     all_fits.append(point.fitting_results)
-            #     freqs_all.append(point.microwave_freq)
             px, sline = sf.get_px_sline_from_image(point.frame)
             fs = sf.fit(px, sline, is_reference_mode=True)
             if fs.is_success:
@@ -461,25 +358,11 @@ def calibrate(data: CalibrationData, poyfit_degree,
             return np.full(deg + 1, np.nan)
         return np.polyfit(x, y, deg)
 
-    left_peaks_mean = []
-    right_peaks_mean = []
-    distance_peaks_mean = []
-    freqs_mean = []
-
-    fits_by_freq = {}
-
-    for fs, freq in zip(all_fits, freqs_all):
-        fits_by_freq.setdefault(freq, []).append(fs)
-
-    for freq, fits in fits_by_freq.items():
-        freqs_mean.append(freq)
-        left_peaks_mean.append(np.mean([fs.left_peak_center_px for fs in fits]))
-        right_peaks_mean.append(np.mean([fs.right_peak_center_px for fs in fits]))
-        distance_peaks_mean.append(np.mean([fs.inter_peak_distance for fs in fits]))
-
-    left_px_sorted, left_freq_sorted = sort_xy(np.asarray(left_peaks_mean), np.asarray(freqs_mean))
-    right_px_sorted, right_freq_sorted = sort_xy(np.asarray(right_peaks_mean), np.asarray(freqs_mean))
-    dist_px_sorted, dist_freq_sorted = sort_xy(np.asarray(distance_peaks_mean), np.asarray(freqs_mean))
+    # The measured points travel with the parameters (one entry per fitted
+    # frame, sorted by px) — for plots and residual diagnostics.
+    left_px_sorted, left_freq_sorted = sort_xy(left_px, freqs_all)
+    right_px_sorted, right_freq_sorted = sort_xy(right_px, freqs_all)
+    dist_px_sorted, dist_freq_sorted = sort_xy(inter_px, freqs_all)
 
     return CalibrationPolyfitParameters(
         degree=degree,

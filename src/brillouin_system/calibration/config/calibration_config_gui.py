@@ -50,18 +50,6 @@ class CalibrationConfigDialog(QDialog):
         ref_layout.addWidget(self.right_radio)
         ref_layout.addWidget(self.dist_radio)
 
-        # Mode radio buttons
-        self.mode_group = QButtonGroup(self)
-        self.poly_radio = QRadioButton("Polynomial")
-        self.interp_radio = QRadioButton("Interpolation")
-
-        self.mode_group.addButton(self.poly_radio)
-        self.mode_group.addButton(self.interp_radio)
-
-        mode_layout = QVBoxLayout()
-        mode_layout.addWidget(self.poly_radio)
-        mode_layout.addWidget(self.interp_radio)
-
         # Save calibration frames checkbox
         self.save_frames_checkbox = QCheckBox("Save calibration frames with each scan")
 
@@ -72,7 +60,6 @@ class CalibrationConfigDialog(QDialog):
         form.addRow("Stop Frequency (GHz):", self.stop_input)
         form.addRow("Step (GHz):", self.step_input)
         form.addRow(QLabel("Reference Method:"), ref_layout)
-        form.addRow(QLabel("Mode:"), mode_layout)
         form.addRow(QLabel("Storage:"), self.save_frames_checkbox)
 
         layout.addLayout(form)
@@ -98,11 +85,6 @@ class CalibrationConfigDialog(QDialog):
             self.right_radio.setChecked(True)
         else:
             self.dist_radio.setChecked(True)
-
-        if cfg.mode == "poly":
-            self.poly_radio.setChecked(True)
-        else:
-            self.interp_radio.setChecked(True)
 
         self.save_frames_checkbox.setChecked(cfg.save_calibration_frames)
 
@@ -133,8 +115,6 @@ class CalibrationConfigDialog(QDialog):
                 "distance"
             )
 
-            mode = "poly" if self.poly_radio.isChecked() else "interp"
-
             calibration_config.update(
                 n_per_freq=int(self.n_per_freq_input.text()),
                 degree=int(self.degree_input.text()),
@@ -142,7 +122,6 @@ class CalibrationConfigDialog(QDialog):
                 stop=float(self.stop_input.text()),
                 step=float(self.step_input.text()),
                 reference=reference,
-                mode=mode,
                 save_calibration_frames=self.save_frames_checkbox.isChecked(),
             )
 

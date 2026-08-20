@@ -3,9 +3,10 @@ from PyQt5.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
+from brillouin_system.ccd_characteristics import save_ccd_section
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
-    pixel_response_config,
+    psf_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
     FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
     NA_WEIGHTINGS, ROW_SELECTIONS, FittingConfigs
@@ -32,21 +33,23 @@ class FindPeaksConfigDialog(QDialog):
         self.load_values()
 
     def field_names(self):
+        # beta is not here: it renders indented under the use_window checkbox
+        # (it is a parameter of the windowing).
         return [
             "prominence_fraction", "min_peak_width", "min_peak_height",
-            "rel_height", "wlen_pixels", "beta"  # added beta
+            "rel_height", "wlen_pixels",
         ]
 
     def pr_field_names(self):
-        # 'pixel_response' model: frozen camera pixel-response constants —
+        # 'lorentzian_x_psf' model: frozen camera PSF constants —
         # Gaussian charge diffusion and the one-sided readout tail per peak.
         # GLOBAL (one camera, one kernel, shared by sample and reference
         # fits), edited in the Global Settings group. Not fitted per frame.
-        return ["pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px"]
+        return ["psf_sigma_px", "psf_tau_left_px", "psf_tau_right_px"]
 
     def na_field_names(self):
-        # NA collection model (na_lorentzian* fitting model and the post-hoc
-        # correction), sample only: aperture-clip NA; Gaussian coupling
+        # NA collection model (post-hoc scalar correction only, never in the
+        # fit), sample only: aperture-clip NA; Gaussian coupling
         # geometry (na_weighting = uniform_gaussian: fiber-mode beam diameter
         # at pupil [session-calibrated on water] + objective focal length);
         # sample refractive index. The weighting itself is a combo box, not a
@@ -64,7 +67,7 @@ class FindPeaksConfigDialog(QDialog):
     def create_config_group(self, label, inputs, models, extra_fields=()):
         group = QGroupBox(label)
         vlayout = QVBoxLayout()
-        for field in list(self.field_names()) + list(extra_fields):
+        for field in self.field_names():
             row = QHBoxLayout()
             row.addWidget(QLabel(field.replace("_", " ").capitalize()))
             edit = QLineEdit()
@@ -85,15 +88,18 @@ class FindPeaksConfigDialog(QDialog):
         row.addWidget(combo)
         vlayout.addLayout(row)
 
-        # NA collection weight (sample group only, alongside the NA fields).
+        # NA correction (sample group only): the weighting selects the model,
+        # the indented fields below are its parameters.
         if "na_collection" in extra_fields:
             row = QHBoxLayout()
             row.addWidget(QLabel("NA weighting"))
             na_combo = QComboBox()
             na_combo.addItems(NA_WEIGHTINGS)
             na_combo.setToolTip(
-                "Collection weight over the NA cone (na_lorentzian model and "
-                "the post-hoc correction):\n"
+                "Collection weight over the NA cone (post-hoc scalar "
+                "correction):\n"
+                "none: no NA correction (ratio = 1); the fields below are "
+                "ignored.\n"
                 "uniform: hard pupil only — the NA 0.14 recipe (~ +3.5 MHz on "
                 "water, parameter-free).\n"
                 "uniform_gaussian: adds the Gaussian fiber-coupling apodization "
@@ -103,6 +109,20 @@ class FindPeaksConfigDialog(QDialog):
             inputs["na_weighting"] = na_combo
             row.addWidget(na_combo)
             vlayout.addLayout(row)
+
+            for field in extra_fields:
+                row = QHBoxLayout()
+                row.addSpacing(24)  # parameters of the weighting above
+                row.addWidget(QLabel(field.replace("_", " ").capitalize()))
+                edit = QLineEdit()
+                edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
+                inputs[field] = edit
+                row.addWidget(edit)
+                vlayout.addLayout(row)
+
+            na_combo.currentTextChanged.connect(
+                lambda _text, i=inputs: self._update_na_fields_enabled(i))
+            self._update_na_fields_enabled(inputs)
 
         # Windowing and baseline apply to any lineshape.
         row = QHBoxLayout()
@@ -116,6 +136,22 @@ class FindPeaksConfigDialog(QDialog):
         check = QCheckBox("Fit only within +-beta*width of each peak")
         inputs["use_window"] = check
         vlayout.addWidget(check)
+
+        row = QHBoxLayout()
+        row.addSpacing(24)  # parameter of the windowing above
+        row.addWidget(QLabel("Beta"))
+        beta_edit = QLineEdit()
+        beta_edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
+        beta_edit.setToolTip(
+            "Window half-width in units of the found peak width. The prm "
+            "presets pin beta = 3.0 (the width recipe is only valid there)."
+        )
+        inputs["beta"] = beta_edit
+        row.addWidget(beta_edit)
+        vlayout.addLayout(row)
+
+        check.toggled.connect(beta_edit.setEnabled)
+        beta_edit.setEnabled(check.isChecked())
 
         group.setLayout(vlayout)
         return group
@@ -172,14 +208,14 @@ class FindPeaksConfigDialog(QDialog):
 
         # Camera pixel-response constants — global: one camera, one kernel,
         # shared by the sample and reference fits.
-        layout.addWidget(QLabel("Camera pixel response (shared by both fits)"))
+        layout.addWidget(QLabel("Camera PSF (shared by both fits)"))
         for key in self.pr_field_names():
             row = QHBoxLayout()
             row.addWidget(QLabel(key.replace("_", " ").capitalize()))
             edit = QLineEdit()
             edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
             edit.setToolTip(
-                "Frozen camera constants for the 'pixel_response' model — "
+                "Frozen camera constants for the 'lorentzian_x_psf' model — "
                 "Gaussian charge-diffusion blur and the one-sided readout "
                 "tails. Not fitted per frame; measured 2026-07 on the fine "
                 "EOM sweeps: 0.25 / 0.40 / 0.20 px. Re-measure after any "
@@ -195,7 +231,7 @@ class FindPeaksConfigDialog(QDialog):
         sample = find_peaks_sample_config.get()
         reference = find_peaks_reference_config.get()
         global_cfg = sline_from_frame_config.get()
-        pr = pixel_response_config.get()
+        pr = psf_config.get()
 
         for field in self.field_names():
             self.sample_inputs[field].setText(str(getattr(sample, field)))
@@ -213,6 +249,7 @@ class FindPeaksConfigDialog(QDialog):
             inputs["fitting_model"].setCurrentText(cfg.fitting_model)
             inputs["background"].setCurrentText(cfg.background)
             inputs["use_window"].setChecked(bool(cfg.use_window))
+            inputs["beta"].setText(str(cfg.beta))
 
         # Global settings
         self.global_inputs["pixel_offset_left"].setText(str(global_cfg.pixel_offset_left))
@@ -248,13 +285,14 @@ class FindPeaksConfigDialog(QDialog):
 
             # Sample
             sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f)
-                             for f in list(self.field_names()) + list(self.na_field_names())}
+                             for f in (list(self.field_names()) + ["beta"]
+                                       + list(self.na_field_names()))}
             sample_kwargs["na_weighting"] = self.sample_inputs["na_weighting"].currentText()
             sample_kwargs.update(self._model_kwargs(self.sample_inputs))
 
             # Reference
             reference_kwargs = {f: self._parse(self.reference_inputs[f].text(), f)
-                                for f in self.field_names()}
+                                for f in list(self.field_names()) + ["beta"]}
             reference_kwargs.update(self._model_kwargs(self.reference_inputs))
 
             # Camera pixel-response constants (global, shared by both fits)
@@ -265,14 +303,14 @@ class FindPeaksConfigDialog(QDialog):
             find_peaks_sample_config.update(**sample_kwargs)
             find_peaks_reference_config.update(**reference_kwargs)
             sline_from_frame_config.update(**global_kwargs)
-            pixel_response_config.update(**pr_kwargs)
+            psf_config.update(**pr_kwargs)
 
             if self.on_apply:
                 fitting_configs = FittingConfigs(
                     sline_config=sline_from_frame_config.get(),
                     sample_config=find_peaks_sample_config.get(),
                     reference_config=find_peaks_reference_config.get(),
-                    pr_config=pixel_response_config.get(),
+                    psf_config=psf_config.get(),
                 )
                 self.on_apply(fitting_configs)
 
@@ -287,14 +325,31 @@ class FindPeaksConfigDialog(QDialog):
             save_config_section(FIND_PEAKS_TOML_PATH, "sample", find_peaks_sample_config)
             save_config_section(FIND_PEAKS_TOML_PATH, "reference", find_peaks_reference_config)
             save_config_section(FIND_PEAKS_TOML_PATH, "global", sline_from_frame_config)
-            save_config_section(FIND_PEAKS_TOML_PATH, "camera", pixel_response_config)
+            # The PSF kernel is a camera characteristic — it saves to the
+            # ccd_characteristics TOML, not the fitting config.
+            save_ccd_section("psf", psf_config)
             QMessageBox.information(self, "Saved", "Settings saved to disk.")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save config:\n{e}")
 
+    def _update_na_fields_enabled(self, inputs):
+        """Grey out the NA parameters the selected weighting does not read:
+        none -> all off; uniform -> aperture + index only (na_collection is
+        then the EFFECTIVE NA); uniform_gaussian -> all."""
+        weighting = inputs["na_weighting"].currentText()
+        gauss_only = ("na_beam_diameter_mm", "na_focal_length_mm")
+        for field in self.na_field_names():
+            if weighting == "none":
+                enabled = False
+            elif weighting == "uniform":
+                enabled = field not in gauss_only
+            else:
+                enabled = True
+            inputs[field].setEnabled(enabled)
+
     @staticmethod
     def _model_kwargs(inputs):
-        """Lineshape + the two options that apply to any lineshape."""
+        """Lineshape + the options that apply to any lineshape."""
         return {
             "fitting_model": inputs["fitting_model"].currentText(),
             "background": inputs["background"].currentText(),
@@ -306,7 +361,7 @@ class FindPeaksConfigDialog(QDialog):
         return (
             "fraction" in field or "rel" in field
             or field == "beta" or field.startswith("na_")
-            or field.startswith("pr_")
+            or field.startswith("psf_")
         )
 
     def _parse(self, value, field):

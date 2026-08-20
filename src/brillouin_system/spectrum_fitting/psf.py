@@ -71,7 +71,7 @@ def _kernel(sigma: float, tau: float, dx: float):
     return g_x0 + t_x0 + b_x0, k
 
 
-def pixel_response_profile(px, amp, cen, gamma, sigma, tau):
+def psf_profile(px, amp, cen, gamma, sigma, tau):
     """Lorentzian(gamma) through the pixel response, evaluated at px.
 
     amp is the peak height of the underlying Lorentzian, matching the plain
@@ -95,25 +95,55 @@ def pixel_response_profile(px, amp, cen, gamma, sigma, tau):
     return float(amp) * np.interp(px, conv_x, conv)
 
 
-def make_1pixel_response(sigma, tau):
-    """Single-peak model: (amp, cen, gamma, offset)."""
-    def model(x, amp, cen, gamma, offset):
-        return pixel_response_profile(x, amp, cen, gamma, sigma, tau) + offset
-    return model
+def detected_hwhm_px(gamma, sigma, tau) -> float:
+    """HWHM [px] of the peak as it lands on the detector.
 
+    The fitted gamma is the Lorentzian CORE before the camera PSF; the
+    photons, however, arrive spread by Lorentzian(gamma) (x) Gauss(sigma)
+    (x) ExpTail(tau) — this returns that profile's HWHM (half of its full
+    width at half maximum; the tail makes it asymmetric).
 
-def make_2pixel_response(sigma, tau_left, tau_right):
-    """Two-peak model with the same free parameters as the plain Lorentzian
-    pair: (amp1, cen1, wid1, amp2, cen2, wid2, offset).
+    The pixel top-hat is deliberately EXCLUDED: in the Thompson bound the
+    binning is already the separate a^2/12/N pixelation term, so folding it
+    into s as well would double-count it. With sigma = tau = 0 this reduces
+    to gamma exactly.
 
-    Each peak carries its own frozen tail (tau_left for the left/lower-px
-    peak, tau_right for the right one) — the two orders were measured to need
-    different tail lengths (0.40 vs 0.20 px).
+    Cost: the convolution runs on the fine grid (~95 us), but gamma is
+    cached at 0.001 px resolution (<< the bound's own precision) and
+    sigma/tau are frozen constants, so within a scan almost every call is a
+    cache hit. Uncached it is still ~0.4% of the curve_fit it accompanies.
     """
-    def model(x, amp1, cen1, wid1, amp2, cen2, wid2, offset):
-        return (
-            pixel_response_profile(x, amp1, cen1, wid1, sigma, tau_left)
-            + pixel_response_profile(x, amp2, cen2, wid2, sigma, tau_right)
-            + offset
-        )
-    return model
+    gamma = max(float(gamma), 1e-9)
+    sigma = float(sigma)
+    tau = float(tau)
+    if sigma <= 0.0 and tau <= 0.0:
+        return gamma
+    return _detected_hwhm_cached(int(round(gamma * 1000.0)), sigma, tau)
+
+
+@lru_cache(maxsize=4096)
+def _detected_hwhm_cached(gamma_millipx: int, sigma: float, tau: float) -> float:
+    gamma = max(gamma_millipx / 1000.0, 1e-9)
+
+    half = 10.0 * gamma + 6.0 * (sigma + tau) + 1.0
+    n = int(round(2.0 * half / DX)) + 1
+    x = -half + DX * np.arange(n)
+    prof = 1.0 / (1.0 + (x / gamma) ** 2)
+    x0 = x[0]
+
+    if sigma > 0.0:
+        m = max(int(np.ceil(4.0 * sigma / DX)), 1)
+        g = np.exp(-0.5 * ((DX * np.arange(-m, m + 1)) / sigma) ** 2)
+        prof = np.convolve(prof, g / g.sum())
+        x0 += -m * DX
+    if tau > 0.0:
+        m = max(int(np.ceil(6.0 * tau / DX)), 1)
+        t = np.exp(-(DX * np.arange(m + 1)) / tau)
+        prof = np.convolve(prof, t / t.sum())
+
+    xs = x0 + DX * np.arange(prof.size)
+    i_max = int(np.argmax(prof))
+    half_max = prof[i_max] / 2.0
+    left = np.interp(half_max, prof[: i_max + 1], xs[: i_max + 1])
+    right = np.interp(half_max, prof[i_max:][::-1], xs[i_max:][::-1])
+    return float((right - left) / 2.0)

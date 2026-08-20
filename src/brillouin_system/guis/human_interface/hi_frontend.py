@@ -53,7 +53,6 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import Ando
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
-from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestSweepScan, \
     AxialScan
@@ -95,7 +94,6 @@ class HiFrontend(QWidget):
     stop_live_requested = pyqtSignal()
     update_microwave_freq_requested = pyqtSignal(float)
     toggle_illumination_requested = pyqtSignal()
-    toggle_bg_subtraction_requested = pyqtSignal()
     toggle_reference_mode_requested = pyqtSignal()
     acquire_background_requested = pyqtSignal()
 
@@ -182,9 +180,8 @@ class HiFrontend(QWidget):
         self.stop_live_requested.connect(self.brillouin_signaller.stop_live_view)
         self.update_microwave_freq_requested.connect(self.brillouin_signaller.set_microwave_frequency)
         self.toggle_illumination_requested.connect(self.brillouin_signaller.toggle_illumination_mode)
-        self.toggle_bg_subtraction_requested.connect(self.brillouin_signaller.toggle_background_subtraction)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
-        self.acquire_background_requested.connect(self.brillouin_signaller.acquire_background_image)
+        self.acquire_background_requested.connect(self.brillouin_signaller.acquire_dark_images)
 
         self.move_zaber_eye_lens_requested.connect(self.brillouin_signaller.move_zaber_eye_lens_relative)
         self.move_zaber_stage_x_requested.connect(self.brillouin_signaller.move_zaber_stage_x_relative)
@@ -212,8 +209,6 @@ class HiFrontend(QWidget):
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
-        self.brillouin_signaller.background_subtraction_state.connect(self.update_bg_subtraction)
-        self.brillouin_signaller.background_available_state.connect(self.handle_is_bg_available)
         self.brillouin_signaller.illumination_mode_state.connect(self.update_illumination_ui)
         self.brillouin_signaller.reference_mode_state.connect(self.update_reference_ui)
         self.brillouin_signaller.camera_settings_ready.connect(self.populate_camera_ui)
@@ -354,34 +349,22 @@ class HiFrontend(QWidget):
         return group
 
     def create_background_group(self):
-        self.bg_label_off = QLabel("● No BG Subtraction")
-        self.bg_label_on = QLabel("○ With BG Subtraction")
+        # The bg-frame subtraction feature was removed 2026-08-20; this group
+        # now only manages the dark frames (always subtracted from samples).
+        self.btn_take_bg = QPushButton("Take darks")
+        self.btn_take_bg.clicked.connect(self.take_dark_images)
 
-        self.bg_label_off.setStyleSheet("color: green; font-weight: bold")
-        self.bg_label_on.setStyleSheet("color: gray")
+        self.btn_save_bg = QPushButton("Save darks")
+        self.btn_save_bg.clicked.connect(self.save_dark_images)
 
-        self.btn_take_bg = QPushButton("Take BG")
-        self.btn_take_bg.clicked.connect(self.take_background_image)
-
-        self.toggle_bg_btn = QPushButton("Switch")
-        self.toggle_bg_btn.clicked.connect(self.toggle_background_subtraction)
-
-        self.btn_save_bg = QPushButton("Save BG")
-        self.btn_save_bg.clicked.connect(self.save_background_image)
-
-        # Create horizontal layout for the three buttons
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.btn_take_bg)
-        btn_row.addWidget(self.toggle_bg_btn)
         btn_row.addWidget(self.btn_save_bg)
 
         layout = QVBoxLayout()
-        layout.addWidget(self.bg_label_off)
-        layout.addWidget(self.bg_label_on)
-        layout.addSpacing(5)
-        layout.addLayout(btn_row)  # Add button row as one horizontal layout
+        layout.addLayout(btn_row)
 
-        group = QGroupBox("Background")
+        group = QGroupBox("Dark frames")
         group.setLayout(layout)
         return group
 
@@ -1244,23 +1227,6 @@ class HiFrontend(QWidget):
         dialog.exec_()
 
 
-    def update_bg_subtraction(self, enabled: bool):
-        if enabled:
-            self.bg_label_on.setText("● With BG Subtraction")
-            self.bg_label_on.setStyleSheet("color: green; font-weight: bold")
-            self.bg_label_off.setText("○ No BG Subtraction")
-            self.bg_label_off.setStyleSheet("color: gray")
-        else:
-            self.bg_label_on.setText("○ With BG Subtraction")
-            self.bg_label_on.setStyleSheet("color: gray")
-            self.bg_label_off.setText("● No BG Subtraction")
-            self.bg_label_off.setStyleSheet("color: green; font-weight: bold")
-
-    def handle_is_bg_available(self, available: bool):
-        self.toggle_bg_btn.setEnabled(available)
-        self.btn_save_bg.setEnabled(available)
-
-
     def on_do_live_fitting_toggled(self, state: int):
         self.toggle_do_live_fitting_requested.emit()
 
@@ -1284,9 +1250,6 @@ class HiFrontend(QWidget):
 
 
     # ---------------- Toggle ---------------- #
-    def toggle_background_subtraction(self):
-        self.toggle_bg_subtraction_requested.emit()
-
     def toggle_illumination(self):
         self.toggle_illumination_requested.emit()
 
@@ -1453,10 +1416,10 @@ class HiFrontend(QWidget):
     # -------------- Functions --------------
 
 
-    def save_background_image(self):
+    def save_dark_images(self):
         def receive_data(data: BackgroundImage):
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Background Image", filter="All Files (*)"
+                self, "Save Dark Frames", filter="All Files (*)"
             )
             if not path:
                 return
@@ -1492,7 +1455,7 @@ class HiFrontend(QWidget):
         except ValueError:
             log.exception("[Brillouin Viewer] [Reference] Invalid frequency input.")
 
-    def take_background_image(self):
+    def take_dark_images(self):
         self.acquire_background_requested.emit()
 
     def receive_axial_scan_list(self, scan_list: list):
@@ -1515,11 +1478,11 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.emit(i)
 
     def handle_received_axial_scan_data(self, scan_data: AxialScan):
-        try:
-            self.axial_viewer = AxialScanViewer(scan_data)
-            self.axial_viewer.show()
-        except Exception as e:
-            log.exception(f"[AxialScanViewer] Failed to show data: {e}")
+        # The axial-scan analyzer GUI was removed 2026-08-20 and will be
+        # rebuilt from scratch; until then Show only logs the selection.
+        log.info(f"[Brillouin Viewer] Scan {scan_data.id} selected — the "
+                 f"analyzer GUI is being rebuilt; use the analysis scripts "
+                 f"meanwhile.")
 
     def run_calibration(self):
         self.run_calibration_requested.emit()
@@ -1550,7 +1513,7 @@ class HiFrontend(QWidget):
         if self._show_cali:
             try:
                 pixmap = render_calibration_to_pixmap(
-                    cali_data, cali_calculator, reference=config.reference, mode=config.mode
+                    cali_calculator, reference=config.reference
                 )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
