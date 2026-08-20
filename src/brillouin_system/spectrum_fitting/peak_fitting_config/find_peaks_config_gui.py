@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
+    pixel_response_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
     FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
     NA_WEIGHTINGS, ROW_SELECTIONS, FittingConfigs
@@ -37,9 +38,10 @@ class FindPeaksConfigDialog(QDialog):
         ]
 
     def pr_field_names(self):
-        # 'pixel_response' model only (reference peaks): frozen camera
-        # pixel-response constants — Gaussian charge diffusion and the
-        # one-sided readout tail per peak. Not fitted per frame.
+        # 'pixel_response' model: frozen camera pixel-response constants —
+        # Gaussian charge diffusion and the one-sided readout tail per peak.
+        # GLOBAL (one camera, one kernel, shared by sample and reference
+        # fits), edited in the Global Settings group. Not fitted per frame.
         return ["pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px"]
 
     def na_field_names(self):
@@ -56,8 +58,7 @@ class FindPeaksConfigDialog(QDialog):
         layout.addWidget(self.create_config_group(
             "Sample", self.sample_inputs, FITTING_MODELS_SAMPLE, extra_fields=self.na_field_names()))
         layout.addWidget(self.create_config_group(
-            "Reference", self.reference_inputs, FITTING_MODELS_REFERENCE,
-            extra_fields=self.pr_field_names()))
+            "Reference", self.reference_inputs, FITTING_MODELS_REFERENCE))
         return layout
 
     def create_config_group(self, label, inputs, models, extra_fields=()):
@@ -169,12 +170,32 @@ class FindPeaksConfigDialog(QDialog):
             row.addWidget(edit)
             layout.addLayout(row)
 
+        # Camera pixel-response constants — global: one camera, one kernel,
+        # shared by the sample and reference fits.
+        layout.addWidget(QLabel("Camera pixel response (shared by both fits)"))
+        for key in self.pr_field_names():
+            row = QHBoxLayout()
+            row.addWidget(QLabel(key.replace("_", " ").capitalize()))
+            edit = QLineEdit()
+            edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
+            edit.setToolTip(
+                "Frozen camera constants for the 'pixel_response' model — "
+                "Gaussian charge-diffusion blur and the one-sided readout "
+                "tails. Not fitted per frame; measured 2026-07 on the fine "
+                "EOM sweeps: 0.25 / 0.40 / 0.20 px. Re-measure after any "
+                "camera/ROI change."
+            )
+            self.global_inputs[key] = edit
+            row.addWidget(edit)
+            layout.addLayout(row)
+
         return layout
 
     def load_values(self):
         sample = find_peaks_sample_config.get()
         reference = find_peaks_reference_config.get()
         global_cfg = sline_from_frame_config.get()
+        pr = pixel_response_config.get()
 
         for field in self.field_names():
             self.sample_inputs[field].setText(str(getattr(sample, field)))
@@ -185,7 +206,7 @@ class FindPeaksConfigDialog(QDialog):
         self.sample_inputs["na_weighting"].setCurrentText(sample.na_weighting)
 
         for field in self.pr_field_names():
-            self.reference_inputs[field].setText(str(getattr(reference, field)))
+            self.global_inputs[field].setText(str(getattr(pr, field)))
 
         for inputs, cfg in ((self.sample_inputs, sample),
                             (self.reference_inputs, reference)):
@@ -233,19 +254,25 @@ class FindPeaksConfigDialog(QDialog):
 
             # Reference
             reference_kwargs = {f: self._parse(self.reference_inputs[f].text(), f)
-                                for f in list(self.field_names()) + list(self.pr_field_names())}
+                                for f in self.field_names()}
             reference_kwargs.update(self._model_kwargs(self.reference_inputs))
+
+            # Camera pixel-response constants (global, shared by both fits)
+            pr_kwargs = {f: self._parse(self.global_inputs[f].text(), f)
+                         for f in self.pr_field_names()}
 
             # Update all configs
             find_peaks_sample_config.update(**sample_kwargs)
             find_peaks_reference_config.update(**reference_kwargs)
             sline_from_frame_config.update(**global_kwargs)
+            pixel_response_config.update(**pr_kwargs)
 
             if self.on_apply:
                 fitting_configs = FittingConfigs(
                     sline_config=sline_from_frame_config.get(),
                     sample_config=find_peaks_sample_config.get(),
                     reference_config=find_peaks_reference_config.get(),
+                    pr_config=pixel_response_config.get(),
                 )
                 self.on_apply(fitting_configs)
 
@@ -260,6 +287,7 @@ class FindPeaksConfigDialog(QDialog):
             save_config_section(FIND_PEAKS_TOML_PATH, "sample", find_peaks_sample_config)
             save_config_section(FIND_PEAKS_TOML_PATH, "reference", find_peaks_reference_config)
             save_config_section(FIND_PEAKS_TOML_PATH, "global", sline_from_frame_config)
+            save_config_section(FIND_PEAKS_TOML_PATH, "camera", pixel_response_config)
             QMessageBox.information(self, "Saved", "Settings saved to disk.")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save config:\n{e}")

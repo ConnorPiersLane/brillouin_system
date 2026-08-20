@@ -13,7 +13,10 @@ from brillouin_system.calibration.calibration import (
 from brillouin_system.spectrum_fitting.elastic_anchors import ElasticAnchors
 from brillouin_system.spectrum_fitting.na_correction5 import gaussian_angle_width
 from brillouin_system.spectrum_fitting.na_lineshape import make_2na_lorentzian_binned
-from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig
+from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
+    FindPeaksConfig,
+    SampleFindPeaksConfig,
+)
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
     model_requires_anchors,
@@ -43,7 +46,9 @@ V0 = float(gaussian_angle_width(BEAM_D_MM, FOCAL_MM, N_SAMPLE))
 def make_config(model: str, na_collection: float = NA_EFF,
                 beam_d: float = BEAM_D_MM, focal: float = FOCAL_MM,
                 na_weighting: str = "uniform") -> FindPeaksConfig:
-    return FindPeaksConfig(
+    # na_* fields are sample-only now -> SampleFindPeaksConfig (a subclass,
+    # so it also serves as the pinned reference config in these tests)
+    return SampleFindPeaksConfig(
         prominence_fraction=0.05,
         min_peak_width=1,
         min_peak_height=50,

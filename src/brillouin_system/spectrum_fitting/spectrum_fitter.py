@@ -8,6 +8,8 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     find_peaks_reference_config,
     SlineFromFrameConfig,
     sline_from_frame_config,
+    PixelResponseConstants,
+    pixel_response_config,
     FittingConfigs,
     MODEL_PRESETS,
     NA_WEIGHTINGS,
@@ -15,6 +17,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
 from brillouin_system.spectrum_fitting.fit_util import (
     find_peak_locations,
     select_top_two_peaks,
+    select_top_n_peaks,
     sort_peaks,
     refine_fitted_spectrum,
 )
@@ -194,12 +197,19 @@ def _background_masks(x, centers):
     fit window, on the full pixel axis and on the refined grid.
     """
     x = np.asarray(x, dtype=float)
-    centers = [float(c) for c in centers]
+    centers = sorted(float(c) for c in centers)
     if len(centers) == 1:
         return [np.ones_like(x, dtype=bool)]
-    mid = 0.5 * (centers[0] + centers[1])
-    left = x <= mid
-    return [left, ~left]
+    # Boundaries at the midpoints between adjacent centers: n segments for
+    # n peaks (n_peaks = 4 gives each order its own baseline region).
+    bounds = [0.5 * (a + b) for a, b in zip(centers[:-1], centers[1:])]
+    masks = []
+    lo = None
+    for b in bounds:
+        masks.append((x <= b) if lo is None else ((x > lo) & (x <= b)))
+        lo = b
+    masks.append(x > lo)
+    return masks
 
 
 def _make_background(background: str, px_fit, centers, offset0,
@@ -309,6 +319,10 @@ class SpectrumFitter:
         self.sline_config: SlineFromFrameConfig = sline_from_frame_config.get()
         self.sample_config: FindPeaksConfig = find_peaks_sample_config.get()
         self.reference_config: FindPeaksConfig = find_peaks_reference_config.get()
+        # Camera pixel-response constants — GLOBAL, shared by sample and
+        # reference fits (one camera, one kernel; per-section constants would
+        # allow the centre-convention mismatch the model guard exists for).
+        self.pr_config: PixelResponseConstants = pixel_response_config.get()
         # Rows chosen by the automatic band selection, frozen after the first
         # use so the band cannot drift between a scan's calibration and its
         # samples (a one-row difference biases the two peaks by ~3-4 MHz in
@@ -319,6 +333,13 @@ class SpectrumFitter:
         self.update_sline_config(configs.sline_config)
         self.update_sample_config(configs.sample_config)
         self.update_reference_config(configs.reference_config)
+        if configs.pr_config is not None:
+            self.update_pr_config(configs.pr_config)
+
+    def update_pr_config(self, pr_config: PixelResponseConstants):
+        if not isinstance(pr_config, PixelResponseConstants):
+            raise TypeError("pr_config must be a PixelResponseConstants instance.")
+        self.pr_config = pr_config
 
     def update_sline_config(self, sline_config: SlineFromFrameConfig):
         if not isinstance(sline_config, SlineFromFrameConfig):
@@ -407,7 +428,7 @@ class SpectrumFitter:
     # -----------------------------
 
     def _peak_model(
-        self, model, config, n_peaks, amp, cen, wid,
+        self, model, n_peaks, amp, cen, wid,
         center_ranges, x_span, use_window, anchors, alpha, na_v0,
     ):
         """Build the peak part of the model.
@@ -424,18 +445,29 @@ class SpectrumFitter:
 
         if model in ("lorentzian", "pixel_response"):
             if model == "pixel_response":
-                sigma = float(config.pr_sigma_px)
-                tau_l = float(config.pr_tau_left_px)
-                tau_r = float(config.pr_tau_right_px)
+                sigma = float(self.pr_config.pr_sigma_px)
+                tau_l = float(self.pr_config.pr_tau_left_px)
+                tau_r = float(self.pr_config.pr_tau_right_px)
                 if sigma <= 0.0 and tau_l <= 0.0 and tau_r <= 0.0:
                     raise ValueError(
                         "Model 'pixel_response' requires the frozen camera "
                         "constants: set pr_sigma_px and/or pr_tau_left_px / "
-                        "pr_tau_right_px in the find-peaks config. Measured "
+                        "pr_tau_right_px in the [camera] section of the "
+                        "find-peaks config. Measured "
                         "2026-07: 0.25 / 0.40 / 0.20 px. With all three at 0 "
                         "this model is just 'lorentzian'."
                     )
-                taus = [tau_l, tau_r]
+                # Per-peak tails by left-to-right POSITION (the tail is a
+                # position property of the readout, falling toward higher
+                # px — measured 2026-08-20 on the outer cal lines):
+                #   2 peaks: [tau_left, tau_right] (the main pair)
+                #   4 peaks: [outer_left, tau_left, tau_right, outer_right]
+                if n_peaks == 4:
+                    taus = [float(self.pr_config.pr_tau_outer_left_px),
+                            tau_l, tau_r,
+                            float(self.pr_config.pr_tau_outer_right_px)]
+                else:
+                    taus = [tau_l, tau_r]
 
                 def peak(x, a, c, w, i):
                     return pixel_response_profile(x, a, c, w, sigma, taus[i])
@@ -451,19 +483,20 @@ class SpectrumFitter:
                         [0, center_ranges[0][0], lo_w],
                         [np.inf, center_ranges[0][1], hi_w], 3)
 
-            def func(x, a1, c1, w1, a2, c2, w2):
-                return peak(x, a1, c1, w1, 0) + peak(x, a2, c2, w2, 1)
+            def func(x, *params):
+                out = peak(x, params[0], params[1], params[2], 0)
+                for i in range(1, n_peaks):
+                    out = out + peak(x, params[3 * i], params[3 * i + 1],
+                                     params[3 * i + 2], i)
+                return out
 
-            lo0, hi0 = width_bounds(0)
-            lo1, hi1 = width_bounds(1)
-            return (
-                func,
-                [amp[0], cen[0], wid[0], amp[1], cen[1], wid[1]],
-                [0, center_ranges[0][0], lo0, 0, center_ranges[1][0], lo1],
-                [np.inf, center_ranges[0][1], hi0,
-                 np.inf, center_ranges[1][1], hi1],
-                3,
-            )
+            p0, lo, hi = [], [], []
+            for i in range(n_peaks):
+                lo_w, hi_w = width_bounds(i)
+                p0 += [amp[i], cen[i], wid[i]]
+                lo += [0, center_ranges[i][0], lo_w]
+                hi += [np.inf, center_ranges[i][1], hi_w]
+            return func, p0, lo, hi, 3
 
         if model == "voigt":
             if n_peaks == 1:
@@ -567,21 +600,9 @@ class SpectrumFitter:
                     f"samples must both use 'pixel_response' (e.g. prm0/prm1) "
                     f"or neither."
                 )
-            if requested_model == pr == reference_model:
-                ours = (config.pr_sigma_px, config.pr_tau_left_px,
-                        config.pr_tau_right_px)
-                theirs = (self.reference_config.pr_sigma_px,
-                          self.reference_config.pr_tau_left_px,
-                          self.reference_config.pr_tau_right_px)
-                if ours != theirs:
-                    raise ValueError(
-                        f"Camera-constant mismatch: sample config has "
-                        f"(sigma, tau_l, tau_r) = {ours} but reference config "
-                        f"has {theirs}. Different kernels define different "
-                        f"peak centres, so calibration and samples must use "
-                        f"identical pr_* constants — edit both sections of "
-                        f"the find-peaks config."
-                    )
+            # No camera-constant mismatch check needed: the pr_* constants are
+            # global (self.pr_config), so sample and reference fits share one
+            # kernel by construction.
 
         alpha = None
         na_v0 = None
@@ -663,11 +684,23 @@ class SpectrumFitter:
                 model=requested_model,
             )
 
-        pk_ind, pk_info = select_top_two_peaks(pk_ind, pk_info)
+        # Selection by AMPLITUDE ranking (config.n_peaks: 2 = the inner
+        # main pair, the production behaviour; 4 = all VIPA orders).
+        n_requested = int(getattr(config, "n_peaks", 2))
+        if n_requested == 4 and requested_model not in ("lorentzian",
+                                                        "pixel_response"):
+            raise ValueError(
+                f"n_peaks=4 supports the 'lorentzian' and 'pixel_response' "
+                f"lineshapes only, not '{requested_model}'."
+            )
+        pk_ind, pk_info = select_top_n_peaks(pk_ind, pk_info, n_requested)
         amp, cen, wid = self._extract_peak_params(pk_ind, pk_info, px, sline)
 
         n_peaks = len(cen)
-        if n_peaks < 1:
+        if n_peaks < 1 or (n_requested == 4 and n_peaks < 4):
+            # A 4-peak fit needs all four orders in view; fewer found means
+            # the ROI/thresholds don't support it — fail loudly, no silent
+            # fallback to a different model layout.
             return FittedSpectrum(
                 is_success=False,
                 sline=sline,
@@ -687,9 +720,10 @@ class SpectrumFitter:
 
         # Peaks are ordered left-to-right from here on: the NA anchors, the
         # per-peak pixel-response tails and the per-peak baseline all rely on
-        # it (select_top_two_peaks orders by height).
-        if n_peaks == 2 and cen[1] < cen[0]:
-            amp, cen, wid = amp[::-1], cen[::-1], wid[::-1]
+        # it (select_top_n_peaks orders by height).
+        order = np.argsort(np.asarray(cen, dtype=float))
+        amp, cen, wid = (np.asarray(amp)[order], np.asarray(cen)[order],
+                         np.asarray(wid)[order])
 
         x_min = float(np.min(px))
         x_max = float(np.max(px))
@@ -707,7 +741,7 @@ class SpectrumFitter:
         sline_fit = sline[mask]
 
         peak_func, p0_pk, lo_pk, hi_pk, n_per_peak = self._peak_model(
-            requested_model, config, n_peaks, amp, cen, wid,
+            requested_model, n_peaks, amp, cen, wid,
             center_ranges, x_span, use_window, anchors, alpha, na_v0,
         )
         bg_func, p0_bg, lo_bg, hi_bg, n_bg = _make_background(
@@ -759,7 +793,8 @@ class SpectrumFitter:
                        for i in range(n_peaks)]
         bg_params = list(popt[n_pk:])
 
-        if n_peaks == 2 and peak_params[1][1] < peak_params[0][1]:
+        fit_centers = [p[1] for p in peak_params]
+        if any(b < a for a, b in zip(fit_centers, fit_centers[1:])):
             if requested_model in NA_MODELS:
                 # Peaks are tied to their Rayleigh anchors, so they cannot be
                 # reordered; crossed centres mean the fit wandered off.
@@ -770,14 +805,18 @@ class SpectrumFitter:
                     x_pixels=px,
                     model=fit_kind,
                 )
-            peak_params = peak_params[::-1]
+            # Re-sort left-to-right and permute the per-peak baseline
+            # parameters with their peaks (the shared reflection scale, the
+            # last parameter, stays put).
+            perm = list(np.argsort(fit_centers))
+            peak_params = [peak_params[i] for i in perm]
             if background in ("flat_per_peak", "linear_per_peak"):
-                k = n_bg // 2
-                bg_params = bg_params[k:] + bg_params[:k]
+                k = n_bg // n_peaks
+                groups = [bg_params[i * k:(i + 1) * k] for i in range(n_peaks)]
+                bg_params = [v for i in perm for v in groups[i]]
             elif background == "reflection":
-                # Per-peak offsets swap with their peaks; the shared scale
-                # (last parameter) stays.
-                bg_params = bg_params[:-1][::-1] + bg_params[-1:]
+                offs = bg_params[:-1]
+                bg_params = [offs[i] for i in perm] + bg_params[-1:]
 
         centers = [p[1] for p in peak_params]
         bg_at_peaks = bg_func(np.asarray(centers, dtype=float), *bg_params)
@@ -826,9 +865,17 @@ class SpectrumFitter:
         fitted = model_func(px, *popt)
         x_fit, y_fit = refine_fitted_spectrum(model_func, px, popt, factor=10)
 
-        left = peak_params[0]
-        right = peak_params[-1]
-        two_peaks = len(peak_params) == 2
+        # The REPORTED left/right peaks are always the main pair: with a
+        # 4-peak fit that is the INNER pair (positions 2 and 3 of the
+        # left-to-right ordering — also the two brightest); the outer
+        # orders stay available in `parameters`.
+        if len(peak_params) == 4:
+            left = peak_params[1]
+            right = peak_params[2]
+        else:
+            left = peak_params[0]
+            right = peak_params[-1]
+        two_peaks = len(peak_params) >= 2
 
         return FittedSpectrum(
             is_success=True,

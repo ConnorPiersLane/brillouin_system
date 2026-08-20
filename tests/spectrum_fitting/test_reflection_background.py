@@ -10,6 +10,7 @@ import pytest
 
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
+    PixelResponseConstants,
 )
 from brillouin_system.spectrum_fitting.pixel_response import pixel_response_profile
 from brillouin_system.spectrum_fitting.reflection_background import (
@@ -186,14 +187,14 @@ def make_config(model: str) -> FindPeaksConfig:
         rel_height=0.5,
         wlen_pixels=20,
         fitting_model=model,
-        pr_sigma_px=SIGMA,
-        pr_tau_left_px=TAU_L,
-        pr_tau_right_px=TAU_R,
     )
 
 
 def make_fitter(sample_model="prmr", reference_model="pixel_response"):
     fitter = SpectrumFitter()
+    fitter.pr_config = PixelResponseConstants(
+        pr_sigma_px=SIGMA, pr_tau_left_px=TAU_L,
+        pr_tau_right_px=TAU_R)
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))
     return fitter

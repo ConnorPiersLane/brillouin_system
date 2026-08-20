@@ -1,5 +1,5 @@
 # config/find_peaks_config.py
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 import tomli
 import tomli_w
@@ -124,6 +124,36 @@ _LEGACY_BACKGROUND_MODELS = {
 
 
 @dataclass
+class PixelResponseConstants:
+    """Frozen camera pixel-response constants ('pixel_response' model).
+
+    GLOBAL — one camera, one kernel, shared by the sample and reference fits
+    (different kernels would define different peak-centre conventions, which
+    is exactly the model-mixing artifact the fitter guards against). Lives in
+    the [camera] section of the find-peaks TOML. NOT fitted per frame:
+      pr_sigma_px    Gaussian charge-diffusion blur.
+      pr_tau_*_px    one-sided exponential readout smear, per peak, toward
+                     higher pixel numbers (the charge-transfer direction).
+    Measured 2026-07 on the fine EOM sweeps: 0.25 / 0.40 / 0.20 px, stable
+    across 6 calibrations over 7 weeks. Re-measure after any camera/ROI
+    change; the model refuses to run while all three are 0.
+    """
+    pr_sigma_px: float = 0.0
+    pr_tau_left_px: float = 0.0
+    pr_tau_right_px: float = 0.0
+    # Outer-order tails (n_peaks = 4 only). The tail is a POSITION property
+    # falling ~linearly toward the readout side — measured 2026-08-20 from
+    # the outer calibration lines of four 4-peak-ROI sessions (256 lines per
+    # position, Data/Figure3/fit_outer_kernel.py): tau ≈ +0.50 (S_outer,
+    # px ~35) / +0.40 / +0.20 / +0.00 (AS_outer, px ~148). PROVISIONAL
+    # (per-frame sigma/tau/gamma are degenerate; sweep medians only): fine
+    # for display and intensity work, do not hang width claims on
+    # outer-peak lineshapes.
+    pr_tau_outer_left_px: float = 0.50
+    pr_tau_outer_right_px: float = 0.0
+
+
+@dataclass
 class FindPeaksConfig:
     prominence_fraction: float
     min_peak_width: int
@@ -138,38 +168,15 @@ class FindPeaksConfig:
     # Baseline model, independent of the lineshape — see BACKGROUNDS above.
     background: str = "flat"
     beta: float = 4.0
-    # NA collection model (na_lorentzian fitting model and the post-hoc
-    # correction; 0.0 = unset -> those refuse to run).
-    # na_weighting: collection weight over the cone — see NA_WEIGHTINGS above.
-    #   "uniform" (NA 0.14 recipe): hard pupil only; na_collection is then the
-    #     EFFECTIVE NA (it absorbs any apodization).
-    #   "uniform_gaussian" (NA 0.42 recipe): na_collection is the NOMINAL
-    #     objective NA (physical pupil edge); the apodization is modeled
-    #     explicitly via the two geometry fields below.
-    # na_collection: hard aperture clip as an NA (alpha = arcsin(NA/n)).
-    # "uniform_gaussian" only — Gaussian fiber-coupling weight
-    # exp(-2 (v/v0)^2), v0 = arcsin(sin(arctan((D/2)/f))/n):
-    #   na_beam_diameter_mm: D, 1/e^2 diameter of the collection-fiber mode at
-    #     the objective pupil (collimator output beam; F810APC-780 nominal
-    #     7.5 mm). The session-calibration knob: tune on water (effective < nominal).
-    #   na_focal_length_mm: f, focal length of the OBJECTIVE (20X: 10, 5X: 40).
-    # na_n_sample: refractive index of the sample medium.
-    na_weighting: str = "uniform"
-    na_collection: float = 0.0
-    na_beam_diameter_mm: float = 0.0
-    na_focal_length_mm: float = 0.0
-    na_n_sample: float = 1.33
-    # 'pixel_response' model only (reference/calibration peaks). Frozen camera
-    # pixel-response constants, NOT fitted per frame:
-    #   pr_sigma_px    Gaussian charge-diffusion blur.
-    #   pr_tau_*_px    one-sided exponential readout smear, per peak, toward
-    #                  higher pixel numbers (the charge-transfer direction).
-    # Measured 2026-07 on the fine EOM sweeps: 0.25 / 0.40 / 0.20 px, stable
-    # across 6 calibrations over 7 weeks. Re-measure after any camera/ROI
-    # change; the model refuses to run while all three are 0.
-    pr_sigma_px: float = 0.0
-    pr_tau_left_px: float = 0.0
-    pr_tau_right_px: float = 0.0
+    # How many peaks to select and fit, by AMPLITUDE ranking (strongest
+    # first — the inner main pair is always the brightest, so 2 is exactly
+    # the production behaviour). 4 additionally fits the outer VIPA orders
+    # on a four-peak ROI: peaks are then ordered left-to-right, per-peak
+    # tails come from PixelResponseConstants (incl. the pr_tau_outer_*
+    # constants), and the REPORTED left/right peak fields stay the inner
+    # main pair. Supported for the lorentzian and pixel_response
+    # lineshapes only (not voigt/na_*).
+    n_peaks: int = 2
 
     def __post_init__(self):
         model = str(self.fitting_model)
@@ -181,10 +188,11 @@ class FindPeaksConfig:
         if model in _LEGACY_BACKGROUND_MODELS:
             model, self.background = _LEGACY_BACKGROUND_MODELS[model]
         # Legacy name that folded the NA collection weight into the lineshape
-        # name — now a separate toggle (na_weighting).
+        # name — now a separate toggle (na_weighting, sample configs only).
         if model == _LEGACY_NA_GAUSS_MODEL:
             model = "na_lorentzian"
-            self.na_weighting = "uniform_gaussian"
+            if hasattr(self, "na_weighting"):
+                self.na_weighting = "uniform_gaussian"
         # Preset names pin the validated combination (see MODEL_PRESETS):
         # they override background, use_window and beta.
         if model in MODEL_PRESETS:
@@ -203,12 +211,54 @@ class FindPeaksConfig:
                 f"Unknown background '{self.background}'. "
                 f"Choose one of {BACKGROUNDS}."
             )
+        if int(self.n_peaks) not in (2, 4):
+            raise ValueError(
+                f"n_peaks must be 2 (production inner pair) or 4 (all "
+                f"VIPA orders), got {self.n_peaks}."
+            )
+        self.n_peaks = int(self.n_peaks)
+        self.fitting_model = model
+
+
+@dataclass
+class SampleFindPeaksConfig(FindPeaksConfig):
+    """Sample-fit config: FindPeaksConfig plus the NA collection model.
+
+    The NA fields describe the collection cone of the SAMPLE illumination and
+    drive the na_lorentzian fitting model and the post-hoc scalar correction
+    (na_lineshape.na_mean_shift_ratio). They have no meaning for reference
+    (calibration) fits — the EOM sidebands are elastic light, no cone model —
+    which is why the reference section uses the plain FindPeaksConfig.
+
+    # na_weighting: collection weight over the cone — see NA_WEIGHTINGS above.
+    #   "uniform" (NA 0.14 recipe): hard pupil only; na_collection is then the
+    #     EFFECTIVE NA (it absorbs any apodization).
+    #   "uniform_gaussian" (NA 0.42 recipe): na_collection is the NOMINAL
+    #     objective NA (physical pupil edge); the apodization is modeled
+    #     explicitly via the two geometry fields below.
+    # na_collection: hard aperture clip as an NA (alpha = arcsin(NA/n));
+    #   0.0 = unset -> the NA routes refuse to run.
+    # "uniform_gaussian" only — Gaussian fiber-coupling weight
+    # exp(-2 (v/v0)^2), v0 = arcsin(sin(arctan((D/2)/f))/n):
+    #   na_beam_diameter_mm: D, 1/e^2 diameter of the collection-fiber mode at
+    #     the objective pupil (collimator output beam; F810APC-780 nominal
+    #     7.5 mm). The session-calibration knob: tune on water (effective < nominal).
+    #   na_focal_length_mm: f, focal length of the OBJECTIVE (20X: 10, 5X: 40).
+    # na_n_sample: refractive index of the sample medium.
+    """
+    na_weighting: str = "uniform"
+    na_collection: float = 0.0
+    na_beam_diameter_mm: float = 0.0
+    na_focal_length_mm: float = 0.0
+    na_n_sample: float = 1.33
+
+    def __post_init__(self):
+        super().__post_init__()
         if self.na_weighting not in NA_WEIGHTINGS:
             raise ValueError(
                 f"Unknown na_weighting '{self.na_weighting}'. "
                 f"Choose one of {NA_WEIGHTINGS}."
             )
-        self.fitting_model = model
 
 
 ROW_SELECTIONS = ["manual", "auto"]
@@ -237,16 +287,45 @@ class SlineFromFrameConfig:
 
 @dataclass
 class FittingConfigs:
-    sample_config: FindPeaksConfig
+    sample_config: SampleFindPeaksConfig
     reference_config: FindPeaksConfig
     sline_config: SlineFromFrameConfig
+    # Camera pixel-response constants. None = keep the fitter's current ones
+    # (default so older callers that build a FittingConfigs keep working).
+    pr_config: PixelResponseConstants | None = None
 
 FIND_PEAKS_TOML_PATH = Path(__file__).parent / "find_peaks_config.toml"
 
+# Keys that used to live duplicated in the [sample]/[reference] sections:
+# pr_* moved to the global [camera] section, na_* is sample-only now. Dropped
+# silently when an older TOML still carries them so those files keep loading;
+# any other unknown key still raises.
+_MOVED_SECTION_KEYS = {
+    "pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px",
+    "na_weighting", "na_collection", "na_beam_diameter_mm",
+    "na_focal_length_mm", "na_n_sample",
+}
+
 def load_config_section(path: Path, section: str) -> FindPeaksConfig:
+    cls = SampleFindPeaksConfig if section == "sample" else FindPeaksConfig
     with path.open("rb") as f:
         raw = tomli.load(f)[section]
-    return FindPeaksConfig(**raw)
+    names = {f.name for f in fields(cls)}
+    kwargs = {k: v for k, v in raw.items()
+              if k in names or k not in _MOVED_SECTION_KEYS}
+    return cls(**kwargs)
+
+def load_pixel_response_constants(path: Path) -> PixelResponseConstants:
+    with path.open("rb") as f:
+        data = tomli.load(f)
+    raw = data.get("camera")
+    if raw is None:
+        # Older file: the constants lived (duplicated) in the fit sections.
+        legacy = data.get("sample", {})
+        raw = {k: legacy[k]
+               for k in ("pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px")
+               if k in legacy}
+    return PixelResponseConstants(**raw)
 
 def load_sline_from_frame_config(path: Path) -> SlineFromFrameConfig:
     with path.open("rb") as f:
@@ -264,3 +343,4 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig):
 find_peaks_sample_config = ThreadSafeConfig(load_config_section(FIND_PEAKS_TOML_PATH, "sample"))
 find_peaks_reference_config = ThreadSafeConfig(load_config_section(FIND_PEAKS_TOML_PATH, "reference"))
 sline_from_frame_config = ThreadSafeConfig(load_sline_from_frame_config(FIND_PEAKS_TOML_PATH))
+pixel_response_config = ThreadSafeConfig(load_pixel_response_constants(FIND_PEAKS_TOML_PATH))

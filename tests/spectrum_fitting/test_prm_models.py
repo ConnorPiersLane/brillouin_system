@@ -8,6 +8,7 @@ import pytest
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
     MODEL_PRESETS,
+    PixelResponseConstants,
 )
 from brillouin_system.spectrum_fitting.pixel_response import pixel_response_profile
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
@@ -36,9 +37,6 @@ def make_config(model: str) -> FindPeaksConfig:
         rel_height=0.5,
         wlen_pixels=20,
         fitting_model=model,
-        pr_sigma_px=SIGMA,
-        pr_tau_left_px=TAU_LEFT,
-        pr_tau_right_px=TAU_RIGHT,
     )
 
 
@@ -46,6 +44,11 @@ def make_fitter(sample_model: str, reference_model: str) -> SpectrumFitter:
     fitter = SpectrumFitter()
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))
+    # camera kernel constants are GLOBAL now ([camera] section); pin the
+    # test values on the fitter directly
+    fitter.pr_config = PixelResponseConstants(
+        pr_sigma_px=SIGMA, pr_tau_left_px=TAU_LEFT,
+        pr_tau_right_px=TAU_RIGHT)
     return fitter
 
 
@@ -144,12 +147,13 @@ def test_mixing_lorentzian_sample_with_pr_reference_raises():
         fitter.fit(px, sline, is_reference_mode=False)
 
 
-def test_mismatched_camera_constants_raise():
+def test_camera_constants_are_global():
+    # The old per-section camera constants (and their mismatch guard) are
+    # gone: one camera, one kernel, shared by sample and reference fits.
     fitter = make_fitter("prm1", "prm1")
-    fitter.reference_config.pr_tau_left_px = 0.35  # differs from sample's 0.4
-    px, sline = make_spectrum()
-    with pytest.raises(ValueError, match="[Cc]amera-constant mismatch"):
-        fitter.fit(px, sline, is_reference_mode=False)
+    assert fitter.pr_config.pr_tau_left_px == TAU_LEFT
+    assert not hasattr(fitter.sample_config, "pr_sigma_px")
+    assert not hasattr(fitter.reference_config, "pr_sigma_px")
 
 
 def test_reference_mode_never_blocked():

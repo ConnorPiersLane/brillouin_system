@@ -36,6 +36,23 @@ def find_peak_locations(sline: np.ndarray, config: FindPeaksConfig):
     return pk_ind, pk_info
 
 
+def select_top_n_peaks(pk_ind, pk_info, n: int):
+    """Select the n strongest peaks by height (amplitude ranking).
+
+    n = 2 keeps the production behaviour (the inner main pair is always
+    the brightest); n = 4 keeps the outer VIPA orders as well. Returns
+    the selected (indices, properties); fewer than n detected peaks are
+    returned as-is.
+    """
+    if len(pk_ind) <= n:
+        return pk_ind, pk_info
+    pk_hts = np.asarray(pk_info['peak_heights'])
+    top = np.argsort(pk_hts)[-n:]
+    return (pk_ind[top],
+            {prop: np.asarray(values)[top]
+             for prop, values in pk_info.items()})
+
+
 def select_top_two_peaks(pk_ind, pk_info):
     """
     Select the two strongest peaks based on peak height (not area).
