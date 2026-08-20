@@ -57,8 +57,11 @@ import numpy as np
 
 from brillouin_peak_fitting.spectrum_fitting.row_selection import select_rows
 
-# Track validity beyond the swept EOM range: the 4-8 GHz sweeps tolerate this
-# much extrapolation of the quadratic tracks.
+# How far beyond the swept EOM range the quadratic g<->px tracks may be
+# extrapolated when rendering (outside, render() returns 0 rather than an
+# extrapolated guess). 0.7 GHz is validated, not guessed: the template-build
+# run measured tracks over 3.3-8.7 GHz, so this much extrapolation of a
+# 4-8 GHz fit was checked against measured positions.
 G_MARGIN_GHZ = 0.7
 
 LEFT, RIGHT = 0, 1
