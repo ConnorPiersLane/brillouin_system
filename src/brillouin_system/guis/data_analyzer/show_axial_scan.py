@@ -301,22 +301,26 @@ class AxialScanViewer(QWidget):
             for a in self.list_analyzed_spectras
         ], dtype=float)
 
-        # Measured axis: the lens position, with the Thompson bound of each
-        # point as an error bar (the floor, not the expected scatter).
+        # X axis: the frame index (user decision 2026-08-21 — the quick-look
+        # axis; a reference scan sits at one Z anyway, and the per-frame Z
+        # stays visible in the info line and the spectrum title). The
+        # Thompson bound of each point is the error bar (the floor, not the
+        # expected scatter).
+        frame_idx = np.arange(len(shifts))
         self.ax_axial.errorbar(
-            self.z_positions, shifts, yerr=theo_mhz / 1000.0,
+            frame_idx, shifts, yerr=theo_mhz / 1000.0,
             fmt="o-", ms=4, lw=1, color="#1f77b4", ecolor="#1f77b4",
             elinewidth=0.8, capsize=2, alpha=0.85,
             label=f"Shift ({self.peak_reference}) ± Thompson bound")
 
         y_val = shifts[self.current_index]
         if np.isfinite(y_val):
-            self.ax_axial.plot(self.z_positions[self.current_index], y_val,
+            self.ax_axial.plot(self.current_index, y_val,
                                "o", ms=10, mfc="none", mec="#d62728", mew=2,
                                label="Current")
             self.ax_axial.set_title(f"Freq (GHz): {y_val:.4f}", fontsize=10)
 
-        self.ax_axial.set_xlabel("Lens Z position (µm)")
+        self.ax_axial.set_xlabel("Measurement #")
         self.ax_axial.set_ylabel("Frequency Shift (GHz)")
         self.ax_axial.grid(True, alpha=0.3)
         self.ax_axial.legend(fontsize=8)

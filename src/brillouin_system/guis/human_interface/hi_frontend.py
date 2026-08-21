@@ -1416,11 +1416,32 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.emit(i)
 
     def handle_received_axial_scan_data(self, scan_data: AxialScan):
-        # The axial-scan analyzer GUI was removed 2026-08-20 and will be
-        # rebuilt from scratch; until then Show only logs the selection.
-        log.info(f"[Brillouin Viewer] Scan {scan_data.id} selected — the "
-                 f"analyzer GUI is being rebuilt; use the analysis scripts "
-                 f"meanwhile.")
+        """Open the scan in the analyzer viewer — the same viewer the data
+        analyzer uses: the scan is re-fitted against its own re-fitted
+        calibration under the LIVE configs, frame browser + spectrum fit +
+        shift-vs-frame-index profile."""
+        log.info(f"[Brillouin Viewer] Opening scan {scan_data.id} "
+                 f"({len(scan_data.measurements)} frames) — re-fitting with "
+                 f"the live configs...")
+        try:
+            from brillouin_system.guis.data_analyzer.show_axial_scan import (
+                AxialScanViewer,
+            )
+            viewer = AxialScanViewer(scan_data)
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to open scan "
+                          f"{scan_data.id}: {e}")
+            QMessageBox.critical(
+                self, "Cannot Show Scan",
+                f"Failed to open scan {scan_data.id}:\n\n"
+                f"{type(e).__name__}: {e}")
+            return
+        # Keep a reference so the window survives; drop closed ones.
+        self._open_scan_viewers = [
+            v for v in getattr(self, "_open_scan_viewers", [])
+            if v.isVisible()]
+        self._open_scan_viewers.append(viewer)
+        viewer.show()
 
     def run_calibration(self):
         self.run_calibration_requested.emit()
