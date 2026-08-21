@@ -15,7 +15,7 @@ Conventions baked in (the hard-won rules):
   (drift-immune) — the number the Thompson bound is compared against;
   the plain sd is reported alongside.
 * ONE Thompson bound per scan, at the scan-mean amplitude/width/position/
-  pedestal — never an average of per-frame bounds.
+  background — never an average of per-frame bounds.
 * frames are fitted RAW; the dark/bias level enters only the bound
   (scan's own dark stack, else the ccd_characteristics reference).
 * error bars on a scan's MEAN belong to scan-to-scan scatter, not the

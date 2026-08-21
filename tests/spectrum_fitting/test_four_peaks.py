@@ -103,7 +103,7 @@ def test_four_peak_fit_recovers_all_orders():
               result.outer_left_peak_width_px,
               result.outer_right_peak_width_px):
         assert abs(w - GAMMA) < 0.05
-    # per-peak backgrounds map with their peaks (all pedestals equal here)
+    # per-peak backgrounds map with their peaks (all background offsets equal here)
     for bg in (result.left_peak_bg_counts, result.right_peak_bg_counts,
                result.outer_left_peak_bg_counts,
                result.outer_right_peak_bg_counts):

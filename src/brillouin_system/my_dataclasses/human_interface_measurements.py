@@ -214,8 +214,8 @@ def fit_axial_scan(scan: AxialScan,
     list_analyzed_spectras: list[AnalyzedSpectrum] = []
 
     # Frames are fitted RAW (user rule 2026-08-20): nothing is subtracted
-    # from the data. The fit's background parameters absorb the dark/bias
-    # pedestal, and the Thompson bound removes that level analytically
+    # from the data. The fit's background parameters absorb the dark
+    # level, and the Thompson bound removes that level analytically
     # using the ccd_characteristics reference (an electronic offset carries
     # no shot noise). This also matches calibrate(), which always fit the
     # calibration frames raw — sample and reference frames go through the
@@ -227,10 +227,10 @@ def fit_axial_scan(scan: AxialScan,
         px, sline = spectrum_fitter.get_px_sline_from_image(frame)
 
         # Fit spectrum
-        measured_bg = (reflection_mapper.render(px)
+        reflection_bg = (reflection_mapper.render(px)
                        if reflection_mapper is not None else None)
         fitting = spectrum_fitter.fit(px=px, sline=sline, is_reference_mode=is_reference_mode,
-                                      measured_background=measured_bg)
+                                      reflection_background=reflection_bg)
 
         analyzed_shift = calibration_calculator.analyze(fitting)
 

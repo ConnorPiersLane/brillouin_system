@@ -156,7 +156,7 @@ def four_peak_shift(fs: FittedSpectrum,
     with w the fitted width [px], a the track's local dispersion [GHz/px]
     and amp the fitted amplitude (N ∝ amp*w, the exact peak area). The
     photon term dominates the per-peak budget, so richer weights (read
-    noise, pedestal) would move the combination negligibly while dragging
+    noise, background) would move the combination negligibly while dragging
     in the camera gain.
     """
     if not fs.is_success or fs.outer_left_peak_center_px is None:

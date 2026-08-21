@@ -5,7 +5,7 @@ of synthetic frames.
 
 SNR methodology (user-confirmed 2026-08-20, thompson-scan-series recipe):
 * Thompson: ONE bound per scan, evaluated at the scan-MEAN fit parameters
-  (mean amplitude/width/position/pedestal) — never an average of per-frame
+  (mean amplitude/width/position/background) — never an average of per-frame
   bounds. Intensity/common-mode noise stays out of the shift bound (it is
   multiplicative and moves no centre), which is why N uses the Poisson
   gain, never a linear-PTC slope.
@@ -13,13 +13,13 @@ SNR methodology (user-confirmed 2026-08-20, thompson-scan-series recipe):
   next to the plain sd.
 * Monte Carlo: truth = the SCAN-MEAN frame with the dark level removed
   (the Figure-3 recipe), so real-frame structure the model misses —
-  pedestal, side-order tails — is in the synthetic frames; noise is
+  background light, side-order tails — is in the synthetic frames; noise is
   Poisson in electrons at the measured gain plus per-pixel read noise,
   re-fit through the untouched production pipeline.
 
 Frames are never dark-subtracted for fitting or display (user rule
 2026-08-20): the fit's background absorbs the dark level, and the
-Thompson bound removes it analytically (pedestal_bias_counts).
+Thompson bound removes it analytically (dark_counts).
 """
 from __future__ import annotations
 
@@ -334,7 +334,7 @@ class AxialScanViewer(QWidget):
         """ONE Thompson bound for the scan, at the scan-MEAN fit parameters.
 
         The thompson-scan-series recipe: average the fitted amplitude,
-        width, position and pedestal over the frames first, then evaluate
+        width, position and background over the frames first, then evaluate
         the bound once — never average per-frame bounds.
         """
         fits = [a.fitted_spectrum for a in self.list_analyzed_spectras
@@ -369,7 +369,7 @@ class AxialScanViewer(QWidget):
             fs=mean_fs, photons=photons, calibration_calculator=self.calc,
             preamp_gain=info.preamp_gain, emccd_gain=info.gain)
 
-    def _measured_background_for_fit(self, px: np.ndarray) -> np.ndarray | None:
+    def _reflection_background_for_fit(self, px: np.ndarray) -> np.ndarray | None:
         """The reflection background rendered for this scan, when the live
         sample config asks for it (prmr) — same construction as
         fit_axial_scan."""
@@ -389,7 +389,7 @@ class AxialScanViewer(QWidget):
         level taken out.
 
         The DATA are fitted raw, but the MC truth must be light-only — the
-        dark/bias pedestal carries no shot noise (only read noise, which
+        dark level carries no shot noise (only read noise, which
         the generator adds separately). The level is the
         ccd_characteristics reference (dark stacks are not part of the
         workflow — user rule 2026-08-20).
@@ -421,7 +421,7 @@ class AxialScanViewer(QWidget):
         resulting reference-frequency samples (GHz).
 
         The Figure-3 MC recipe: truth = the measured scan-mean frame (so
-        real-frame structure the model misses — pedestal, side-order tails —
+        real-frame structure the model misses — background light, side-order tails —
         is in the synthetic data), shot noise Poisson in electrons at the
         measured gain, per-pixel read noise, then the untouched production
         pipeline (row sum -> fit -> calibration).
@@ -453,15 +453,15 @@ class AxialScanViewer(QWidget):
 
         samples = []
         n_failed = 0
-        measured_bg = None
+        reflection_bg = None
         for i, noisy in enumerate(mc.frames()):
             try:
                 px, sline = self.fitter.get_px_sline_from_image(noisy)
-                if measured_bg is None:
-                    measured_bg = self._measured_background_for_fit(px)
+                if reflection_bg is None:
+                    reflection_bg = self._reflection_background_for_fit(px)
                 fit = self.fitter.fit(px=px, sline=sline,
                                       is_reference_mode=is_ref,
-                                      measured_background=measured_bg)
+                                      reflection_background=reflection_bg)
             except Exception:
                 n_failed += 1
                 continue

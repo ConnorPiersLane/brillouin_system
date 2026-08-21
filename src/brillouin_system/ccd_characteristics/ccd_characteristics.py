@@ -58,9 +58,9 @@ class CcdCharacteristics:
     # it is exposure-independent but readout-mode-dependent.
     read_noise_counts: float = 1.10
     # Median pixel count of a closed-shutter frame [counts/px] — the
-    # electronic dark/bias pedestal. It carries NO shot noise (offset, not
+    # electronic dark level. It carries NO shot noise (offset, not
     # light): the Thompson bound subtracts it from the fitted background
-    # before the pedestal Poisson term (pedestal_bias_counts).
+    # before the background-light Poisson term (dark_counts).
     dark_median_counts: float = 200.2
     # EM register excess noise factor F^2 on the variance (stochastic
     # multiplication) — theory, not measured; unused until EM sensitivity is.

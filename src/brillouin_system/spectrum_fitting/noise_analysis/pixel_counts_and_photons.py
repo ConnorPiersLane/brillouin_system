@@ -6,7 +6,7 @@ Everything here exists to answer one question: how many counts and how many
 photoelectrons produced each peak? The photon numbers feed the shot-noise
 bound in noise_analysis.thompson, so an error here moves every theoretical
 uncertainty we quote. Inputs are the FIT and the camera gain settings — never
-the frame: summing the frame would fold in background, stray pedestal and the
+the frame: summing the frame would fold in background, stray background and the
 neighbour peak's tails, exactly the contaminations the fit decomposes away.
 The peak area in counts is exact from the fit parameters (see from_fit).
 
@@ -149,7 +149,7 @@ class PixelCountsAndPhotons:
         with a unit-area kernel conserves the integral. A window sum would be
         WORSE: a +-beta*width window holds only (2/pi)*arctan(beta) of a
         Lorentzian's area (79.5% at beta=3), plus neighbour tails and
-        pedestal residue. No frame input on purpose.
+        background residue. No frame input on purpose.
         """
         if not fs.is_success:
             return cls(None, None, None, None, None, None)

@@ -239,7 +239,7 @@ def test_reflection_fit_recovers_truth_and_shared_scale():
     px, sline, (cen_l, cen_r) = make_sample(R, s_true=0.05)
     fitter = make_fitter()
     result = fitter.fit(px, sline, is_reference_mode=False,
-                        measured_background=R)
+                        reflection_background=R)
     assert result.is_success
     assert "reflection" in result.model
     assert abs(result.left_peak_center_px - cen_l) < 0.05
@@ -270,4 +270,4 @@ def test_reflection_fit_rejects_mismatched_axis():
     fitter = make_fitter()
     with pytest.raises(ValueError, match="same pixel axis"):
         fitter.fit(px, sline, is_reference_mode=False,
-                   measured_background=R[:-5])
+                   reflection_background=R[:-5])

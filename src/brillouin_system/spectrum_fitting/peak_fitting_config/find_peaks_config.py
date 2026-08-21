@@ -49,7 +49,7 @@ FITTING_MODELS_REFERENCE = [
 #         background model that replaces prm1's linear slope with the
 #         instrument's actual stray pattern, registered onto the session
 #         through the calibrations (frequency-anchored, so it survives VIPA
-#         realignment). Needs measured_background passed to fit() — see
+#         realignment). Needs reflection_background passed to fit() — see
 #         spectrum_fitting/reflection_background.py. Closure-validated
 #         2026-08-19/20 (raw template 9/12, calibration-mapped 10/12 cells
 #         |split| < 2 MHz at beta 3+4, no per-dataset beta rule; a per-peak
@@ -84,7 +84,7 @@ MODEL_PRESETS = {
 #               comb imaged by the VIPA — the structure the linear slope was
 #               absorbing). The template is registered onto the session's
 #               pixel axis through the calibrations; fits then need
-#               measured_background (see
+#               reflection_background (see
 #               spectrum_fitting/reflection_background.py). One parameter
 #               fewer than linear, a shaped basis instead of a free slope;
 #               deliberately NO shift parameter (a fitted shift trades

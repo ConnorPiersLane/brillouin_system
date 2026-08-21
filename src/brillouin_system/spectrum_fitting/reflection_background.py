@@ -223,7 +223,7 @@ class ReflectionBackgroundMapper:
     CalibrationPolyfitParameters, or a (freq_left, freq_right) coefficient
     pair) and the row count of the session's sline. render(px) then returns
     the background on that pixel axis, ready to pass to SpectrumFitter.fit
-    as measured_background (background='reflection' / the 'prmr'
+    as reflection_background (background='reflection' / the 'prmr'
     preset).
 
     Each order is rendered through its own track and confined to its own side

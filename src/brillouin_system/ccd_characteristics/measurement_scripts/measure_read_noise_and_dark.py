@@ -20,7 +20,7 @@ THE METHOD
 * Dark median: the median pixel value of the same frames — the electronic
   offset (bias + any dark signal, ~200 counts/px). It carries NO shot
   noise (it is not light), which is exactly why the Thompson bound
-  subtracts it from the fitted pedestal (pedestal_bias_counts) instead of
+  subtracts it from the fitted background (dark_counts) instead of
   anyone ever subtracting it from the DATA — frames are always fitted raw
   (user rule 2026-08-20).
 

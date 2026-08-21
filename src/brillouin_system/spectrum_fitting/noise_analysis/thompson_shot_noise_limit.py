@@ -19,7 +19,7 @@ THIS IS A LOWER BOUND, NOT A PREDICTION of a pipeline's per-frame scatter.
 It assumes an ideal (maximum-likelihood) estimator and the noise terms
 listed above, nothing else. A real least-squares pipeline sits above it:
 x1.14 from the exact Cramer-Rao bound of the full multi-parameter model with
-the real noise (read noise, stray-light pedestal), and x1.28 because an
+the real noise (read noise, stray-light background), and x1.28 because an
 unweighted least-squares fit does not reach the bound -- about x1.45
 combined, verified 2026-08-12 by Monte Carlo with exactly known noise
 (noise_analysis.monte_carlo_noise_simulation is that tool; scripts in
@@ -99,7 +99,7 @@ def peak_precision(
     n_photons     photons (photoelectrons) in the peak, background-free --
                   see PixelCountsAndPhotons.
     bg_rms        rms background noise per pixel, same quantum as n_photons
-                  (shot noise of any pedestal + read noise, in quadrature).
+                  (shot noise of any background light + read noise, in quadrature).
                   0 drops the background term.
     pixel_size    a, in the same length unit as width (1.0 in pixel domain).
     photon_factor 2.0 for Lorentzian peaks (default), 1.0 for Gaussian.
@@ -164,7 +164,7 @@ def _n_summed_rows(fs: FittedSpectrum) -> int:
     band, so the result carries its own acquisition geometry); the live
     sline config is only the fallback for legacy fit objects. The count
     sets the sline's per-pixel read noise, rn*sqrt(n), and scales the
-    dark level under the fitted pedestal.
+    dark level under the fitted background.
     """
     rows = getattr(fs, "sline_rows", None)
     if rows is not None and len(rows) > 0:
@@ -202,14 +202,14 @@ def theoretical_precision(fs: FittedSpectrum,
       s  detected HWHM, through the calibration at each peak's own pixel;
       a  the local dispersion there;
       N  background-free peak photons (PixelCountsAndPhotons: the fit
-         separates peak from pedestal, and the PSF kernel is unit-area, so
+         separates peak from background, and the PSF kernel is unit-area, so
          pi*amp*width is exact);
       b  background NOISE per summed sline pixel, in electrons, from two
          parts in quadrature:
            * read noise — ccd read_noise_counts * sqrt(n_rows): the sline
              sums n_rows camera rows, each carrying the per-pixel read
              noise rms.
-           * shot noise of the stray-light pedestal — Poisson on the FITTED
+           * shot noise of the stray-light background — Poisson on the FITTED
              background level under each peak (fs.*_peak_bg_counts), MINUS
              the dark/bias level (ccd dark_median_counts * n_rows):
              production fits RAW frames, so the fitted background always
@@ -224,7 +224,7 @@ def theoretical_precision(fs: FittedSpectrum,
 
     n_rows = _n_summed_rows(fs)
     ccd = ccd_config.get()
-    pedestal_bias_counts = ccd.dark_median_counts * n_rows
+    dark_counts = ccd.dark_median_counts * n_rows
 
     calc = calibration_calculator
 
@@ -252,17 +252,17 @@ def theoretical_precision(fs: FittedSpectrum,
     read_per_sline_px = ccd.read_noise_counts * math.sqrt(n_rows)
     read_counts_l = read_counts_r = read_per_sline_px
 
-    def b_electrons(read_counts, pedestal_counts):
+    def b_electrons(read_counts, fitted_bg_counts):
         read_e = count_to_electrons(read_counts or 0.0,
                                     preamp_gain=preamp_gain,
                                     emccd_gain=emccd_gain)
-        # Poisson: the pedestal's variance in electrons equals its level —
+        # Poisson: the background light's variance in electrons equals its level —
         # counting only the LIGHT part (bias is an offset, no shot noise).
-        light_counts = max((pedestal_counts or 0.0) - pedestal_bias_counts, 0.0)
-        pedestal_var_e = count_to_electrons(light_counts,
+        light_counts = max((fitted_bg_counts or 0.0) - dark_counts, 0.0)
+        bg_light_var_e = count_to_electrons(light_counts,
                                             preamp_gain=preamp_gain,
                                             emccd_gain=emccd_gain)
-        return math.sqrt(read_e ** 2 + pedestal_var_e)
+        return math.sqrt(read_e ** 2 + bg_light_var_e)
 
     b_l = b_electrons(read_counts_l, fs.left_peak_bg_counts)
     b_r = b_electrons(read_counts_r, fs.right_peak_bg_counts)

@@ -8,7 +8,7 @@ dummy mode shows real signals:
 - reference mode (reference shutter open) -> serves the stored calibration
   frame nearest to the dummy microwave's current frequency, re-noised with
   fresh shot noise so repeated snaps at one frequency are not identical
-- camera shutter closed (dark acquisition) -> pedestal + read noise
+- camera shutter closed (dark acquisition) -> dark level + read noise
 
 The frames are served at their stored ROI regardless of the configured
 ROI (the stored calibration only makes sense on the stored pixel axis).
@@ -88,7 +88,7 @@ class ReplayCamera(DummyCamera):
         self._cal_freqs = freqs
         self._cal_frames = np.stack([freq_to_frame[f] for f in freqs])
 
-        # pedestal estimate for dark frames: low percentile of a real frame
+        # dark-level estimate for dark frames: low percentile of a real frame
         self._dark_level = float(np.percentile(self._sample_frames[0], 10))
 
         h, w = self._sample_frames.shape[1:]

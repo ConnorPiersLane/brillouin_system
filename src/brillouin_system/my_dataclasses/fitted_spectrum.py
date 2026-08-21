@@ -28,7 +28,7 @@ class FittedSpectrum:
     offset: float = None
     # Fitted background level under each peak centre [counts per summed
     # sline pixel]. Feeds the shot-noise term of the precision bound (the
-    # pedestal's Poisson noise); None on failed fits and legacy data.
+    # background light's Poisson noise); None on failed fits and legacy data.
     left_peak_bg_counts: float = None
     right_peak_bg_counts: float = None
     # Outer VIPA orders — filled only by the opt-in 4-peak fit

@@ -172,32 +172,32 @@ def test_anticorrelation_widens_the_distance_uncertainty():
     assert anti > indep > pos
 
 
-def test_pedestal_shot_noise_widens_the_bound():
+def test_background_light_shot_noise_widens_the_bound():
     """The fitted background level under a peak feeds the b term (Poisson),
-    so a brighter stray pedestal must widen the bound — from the fit alone.
+    so a brighter stray background must widen the bound — from the fit alone.
     Raw-frame fits: the fitted background contains the camera dark level
     (ccd dark_median_counts * n_rows), which the bound subtracts before
-    the Poisson term, so the pedestal here sits ON TOP of that level."""
+    the Poisson term, so the background light here sits ON TOP of that level."""
     from brillouin_system.ccd_characteristics import ccd_config
 
     calc = _linear_calculator()
     fs_clean = _fitted_two_peaks()
     from dataclasses import replace
     dark_level = ccd_config.get().dark_median_counts * len(fs_clean.sline_rows)
-    fs_pedestal = replace(fs_clean,
+    fs_bg = replace(fs_clean,
                           left_peak_bg_counts=dark_level + 500.0,
                           right_peak_bg_counts=dark_level + 500.0)
     photons = PixelCountsAndPhotons.from_fit(fs_clean, preamp_gain=1.0,
                                              emccd_gain=0)
     clean = _bound(fs_clean, photons, calc)
-    pedestal = _bound(fs_pedestal, photons, calc)
-    assert pedestal.left_peak_bg_mhz > clean.left_peak_bg_mhz
-    assert pedestal.distance_total_mhz > clean.distance_total_mhz
+    bg = _bound(fs_bg, photons, calc)
+    assert bg.left_peak_bg_mhz > clean.left_peak_bg_mhz
+    assert bg.distance_total_mhz > clean.distance_total_mhz
 
 
 def test_dark_level_carries_no_shot_noise():
     """A fitted background at exactly the camera dark level is an
-    electronic offset, not light: the bound must treat it like no pedestal
+    electronic offset, not light: the bound must treat it like no background light
     at all (read noise only)."""
     from brillouin_system.ccd_characteristics import ccd_config
     from dataclasses import replace

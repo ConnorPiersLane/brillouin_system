@@ -53,7 +53,7 @@ def make_fitter(sample_model: str, reference_model: str) -> SpectrumFitter:
 
 
 def make_spectrum(seed=0):
-    """Two pixel-response peaks on different per-peak pedestals."""
+    """Two pixel-response peaks on different per-peak background offsets."""
     px = np.arange(0, 86, dtype=float)
     mid = 0.5 * (CEN_LEFT + CEN_RIGHT)
     true = (
@@ -137,14 +137,14 @@ def test_prm_fits_recover_truth(model):
     assert "lorentzian_x_psf" in result.model
 
 
-def test_flat_per_peak_recovers_both_pedestals():
+def test_flat_per_peak_recovers_both_backgrounds():
     fitter = make_fitter("prm0", "prm0")
     px, sline = make_spectrum()
     result = fitter.fit(px, sline, is_reference_mode=False)
     assert result.is_success
     # The reported offset is the mean background under the two peaks.
     assert abs(result.offset - 0.5 * (OFF_LEFT + OFF_RIGHT)) < 5.0
-    # And the per-peak levels travel with the fit (they feed the pedestal
+    # And the per-peak levels travel with the fit (they feed the background-light
     # shot-noise term of the precision bound).
     assert abs(result.left_peak_bg_counts - OFF_LEFT) < 5.0
     assert abs(result.right_peak_bg_counts - OFF_RIGHT) < 5.0

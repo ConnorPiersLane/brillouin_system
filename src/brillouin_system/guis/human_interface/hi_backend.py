@@ -395,9 +395,9 @@ class HiBackend:
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
         try:
-            measured_bg = self._reflection_background_if_required(px)
+            reflection_bg = self._reflection_background_if_required(px)
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode,
-                                            measured_background=measured_bg)
+                                            reflection_background=reflection_bg)
         except Exception as e:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)

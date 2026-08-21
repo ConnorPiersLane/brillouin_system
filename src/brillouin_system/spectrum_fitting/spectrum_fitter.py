@@ -71,7 +71,7 @@ def config_requires_reflection_background(config) -> bool:
 
     Callers then build it per scan: ReflectionBackgroundMapper(
     ReflectionBackground.load_default(), calibration, n_rows).render(px)
-    and pass the result to fit() as measured_background.
+    and pass the result to fit() as reflection_background.
     """
     return resolved_background(config) == "reflection"
 
@@ -176,7 +176,7 @@ def _background_masks(x, centers):
 
 
 def _make_background(background: str, px_fit, centers, offset0, use_window,
-                     measured_bg=None):
+                     reflection_bg=None):
     """Return (func(x, *bg_params), p0, lo, hi, n_params).
 
     The baseline SCOPE follows the fit scope (decision 2026-08-20): a windowed
@@ -185,7 +185,7 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
     which is what removes the L-R split; a global fit (no window) gets ONE
     shared baseline over the whole domain. Segment membership is recomputed
     from x on every call, so the same function evaluates on the fit window,
-    the full pixel axis and the refined grid. measured_bg is the (px, R) pair
+    the full pixel axis and the refined grid. reflection_bg is the (px, R) pair
     for the 'reflection' background.
     """
     def segments(x):
@@ -199,7 +199,7 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
         # Constant offset per segment, no slope: the width-safe baseline (a
         # freed slope is odd-symmetric and leaks into the fitted width via
         # covariance — see BACKGROUNDS in find_peaks_config). Lower bound 0:
-        # the sline is clipped to >= 0, so a negative pedestal is not physical.
+        # the sline is clipped to >= 0, so a negative background is not physical.
         def func(x, *params):
             x = np.asarray(x, dtype=float)
             out = np.zeros_like(x)
@@ -243,14 +243,14 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
         #     trade (splits +3..+4 MHz on wide glycerol). Envelope changes
         #     after a realignment are an instrument-state property: verify or
         #     retake the TEMPLATE, do not free the fit.
-        if measured_bg is None:
+        if reflection_bg is None:
             raise ValueError(
                 "Background 'reflection' needs the mapped reflection "
-                "background: pass measured_background to fit() — build it "
+                "background: pass reflection_background to fit() — build it "
                 "with ReflectionBackgroundMapper(...).render(px) (see "
                 "spectrum_fitting/reflection_background.py)."
             )
-        px_ref, r_ref = measured_bg
+        px_ref, r_ref = reflection_bg
 
         def func(x, *params):
             x = np.asarray(x, dtype=float)
@@ -474,10 +474,10 @@ class SpectrumFitter:
         px: np.ndarray,
         sline: np.ndarray,
         is_reference_mode: bool,
-        measured_background: np.ndarray | None = None,
+        reflection_background: np.ndarray | None = None,
         n_peaks: int = 2,
     ) -> FittedSpectrum:
-        """Fit the sline. measured_background is the reflection background
+        """Fit the sline. reflection_background is the reflection background
         mapped onto this px axis (ReflectionBackgroundMapper.render(px));
         required by (and only used with) background='reflection'
         (the 'prmr' preset).
@@ -541,27 +541,27 @@ class SpectrumFitter:
         sline = np.asarray(sline, dtype=np.float64)
 
         if background == "reflection":
-            if measured_background is None:
+            if reflection_background is None:
                 raise ValueError(
                     "Background 'reflection' needs the mapped "
-                    "reflection background: pass measured_background = "
+                    "reflection background: pass reflection_background = "
                     "ReflectionBackgroundMapper(...).render(px) (see "
                     "spectrum_fitting/reflection_background.py)."
                 )
-            measured_background = np.asarray(measured_background,
+            reflection_background = np.asarray(reflection_background,
                                              dtype=np.float64)
-            if measured_background.shape != px.shape:
+            if reflection_background.shape != px.shape:
                 raise ValueError(
-                    f"measured_background must be sampled on the same pixel "
-                    f"axis as the sline (got {measured_background.shape} vs "
+                    f"reflection_background must be sampled on the same pixel "
+                    f"axis as the sline (got {reflection_background.shape} vs "
                     f"px {px.shape})."
                 )
 
         finite_mask = np.isfinite(px) & np.isfinite(sline)
         px = px[finite_mask]
         sline = sline[finite_mask]
-        if measured_background is not None:
-            measured_background = measured_background[finite_mask]
+        if reflection_background is not None:
+            reflection_background = reflection_background[finite_mask]
 
         # Keep this if your peak finder expects non-negative data. Remove if you want
         # the offset/background model to handle negative baseline excursions.
@@ -630,8 +630,8 @@ class SpectrumFitter:
         )
         bg_func, p0_bg, lo_bg, hi_bg, n_bg = _make_background(
             background, px_fit, cen, offset0, use_window,
-            measured_bg=(None if measured_background is None
-                         else (px, measured_background)),
+            reflection_bg=(None if reflection_background is None
+                         else (px, reflection_background)),
         )
 
         n_pk = len(p0_pk)
