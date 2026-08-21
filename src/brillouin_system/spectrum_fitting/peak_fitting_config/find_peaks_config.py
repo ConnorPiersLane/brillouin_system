@@ -150,15 +150,12 @@ _LEGACY_BACKGROUND_MODELS = {
 }
 
 
-# The camera PSF constants MOVED to the ccd_characteristics package
-# (2026-08-20): they are measured camera properties, not fitting
-# configuration — one home for every obtained instrument number, next to
-# the scripts that measure them. Re-exported here so existing imports
-# (spectrum_fitter, GUI, tests) keep working.
-from brillouin_system.ccd_characteristics.ccd_characteristics import (  # noqa: E402
-    PsfConstants,
-    psf_config,
-)
+# The camera PSF working values live in the [global] section below
+# (SlineFromFrameConfig) — ONE fitting config, no nested sub-config (user
+# decision 2026-08-20: "a config in a config is not a good design"). The
+# MEASURED kernel record (values + date + method) stays in
+# ccd_characteristics [psf], next to measure_psf_kernel.py; the GUI shows
+# it in brackets and never writes it.
 
 
 @dataclass
@@ -262,12 +259,28 @@ class SlineFromFrameConfig:
     # Rows summed into the spectral line. With row_selection = "manual" this
     # list is used as given. With "auto" the band is located automatically:
     # n_rows contiguous rows centred on the line's intensity centroid, chosen
-    # ONCE and then frozen (see spectrum_fitting/row_selection.py — which rows
-    # are summed shifts the fitted peaks by ~3-4 MHz per row, so the band must
-    # not move between a scan's calibration and its samples).
+    # ONCE and then frozen (see spectrum_fitting/row_selection.py — a
+    # calibration-vs-sample band mismatch biases the peaks ~3-4 MHz per row;
+    # one shared fitter rules that out).
     selected_rows: list[int]
     row_selection: str = "manual"
     n_rows: int = 13
+    # Camera PSF working values (the 'lorentzian_x_psf' kernel): Gaussian
+    # charge-diffusion blur and the one-sided readout tails, per peak, toward
+    # higher pixel numbers. GLOBAL — one camera, one kernel, shared by the
+    # sample and reference fits (different kernels would define different
+    # peak-centre conventions = the model-mixing artifact). Not fitted per
+    # frame. Defaults = the MEASURED kernel; the measurement record
+    # (values + date + method) lives in ccd_characteristics [psf], next to
+    # measure_psf_kernel.py — re-measure after any camera/ROI change, and
+    # update both files. The outer taus serve the opt-in n_peaks=4 fit only
+    # (tail is a POSITION property, falling toward the readout side;
+    # provisional — fine for positions/intensities, not width claims).
+    psf_sigma_px: float = 0.25
+    psf_tau_left_px: float = 0.40
+    psf_tau_right_px: float = 0.20
+    psf_tau_outer_left_px: float = 0.50
+    psf_tau_outer_right_px: float = 0.0
 
     def __post_init__(self):
         if self.row_selection not in ROW_SELECTIONS:
@@ -281,15 +294,12 @@ class FittingConfigs:
     sample_config: SampleFindPeaksConfig
     reference_config: FindPeaksConfig
     sline_config: SlineFromFrameConfig
-    # Camera pixel-response constants. None = keep the fitter's current ones
-    # (default so older callers that build a FittingConfigs keep working).
-    psf_config: PsfConstants | None = None
 
 FIND_PEAKS_TOML_PATH = Path(__file__).parent / "find_peaks_config.toml"
 
 # Keys that used to live duplicated in the [sample]/[reference] sections
 # (under their OLD pr_* names): the camera constants moved to the global
-# [camera] section (now psf_*), na_* is sample-only, n_peaks was removed with
+# [global] section (now psf_*), na_* is sample-only, n_peaks was removed with
 # the 4-peak mode. Dropped silently when an older TOML still carries them so
 # those files keep loading; any other unknown key still raises.
 _MOVED_SECTION_KEYS = {
@@ -319,8 +329,7 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig):
     with path.open("wb") as f:
         tomli_w.dump(data, f)
 
-# Global configuration instances. psf_config lives in ccd_characteristics
-# (re-exported above) — the fitting TOML holds fit settings only.
+# Global configuration instances
 find_peaks_sample_config = ThreadSafeConfig(load_config_section(FIND_PEAKS_TOML_PATH, "sample"))
 find_peaks_reference_config = ThreadSafeConfig(load_config_section(FIND_PEAKS_TOML_PATH, "reference"))
 sline_from_frame_config = ThreadSafeConfig(load_sline_from_frame_config(FIND_PEAKS_TOML_PATH))

@@ -6,10 +6,11 @@ model-mixing guard.
 import numpy as np
 import pytest
 
+from dataclasses import replace
+
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
     MODEL_PRESETS,
-    PsfConstants,
 )
 from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
@@ -44,11 +45,11 @@ def make_fitter(sample_model: str, reference_model: str) -> SpectrumFitter:
     fitter = SpectrumFitter()
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))
-    # camera kernel constants are GLOBAL now ([camera] section); pin the
+    # camera kernel working values live in the [global] sline config; pin the
     # test values on the fitter directly
-    fitter.psf_config = PsfConstants(
-        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_LEFT,
-        psf_tau_right_px=TAU_RIGHT)
+    fitter.update_sline_config(replace(
+        fitter.sline_config, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_LEFT,
+        psf_tau_right_px=TAU_RIGHT))
     return fitter
 
 
@@ -182,7 +183,7 @@ def test_camera_constants_are_global():
     # The old per-section camera constants (and their mismatch guard) are
     # gone: one camera, one kernel, shared by sample and reference fits.
     fitter = make_fitter("prm1", "prm1")
-    assert fitter.psf_config.psf_tau_left_px == TAU_LEFT
+    assert fitter.sline_config.psf_tau_left_px == TAU_LEFT
     assert not hasattr(fitter.sample_config, "psf_sigma_px")
     assert not hasattr(fitter.reference_config, "psf_sigma_px")
 

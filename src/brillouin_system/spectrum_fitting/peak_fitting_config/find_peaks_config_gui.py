@@ -3,10 +3,9 @@ from PyQt5.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
-from brillouin_system.ccd_characteristics import save_ccd_section
+from brillouin_system.ccd_characteristics import psf_measurement_config
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
-    psf_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
     FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
     NA_WEIGHTINGS, ROW_SELECTIONS, FittingConfigs
@@ -41,10 +40,11 @@ class FindPeaksConfigDialog(QDialog):
         ]
 
     def pr_field_names(self):
-        # 'lorentzian_x_psf' model: frozen camera PSF constants —
-        # Gaussian charge diffusion and the one-sided readout tail per peak.
-        # GLOBAL (one camera, one kernel, shared by sample and reference
-        # fits), edited in the Global Settings group. Not fitted per frame.
+        # 'lorentzian_x_psf' model: camera PSF working values — Gaussian
+        # charge diffusion and the one-sided readout tail per peak. Part of
+        # the [global] fitting config (one camera, one kernel, shared by
+        # sample and reference fits). Not fitted per frame; the MEASURED
+        # record lives in ccd_characteristics [psf] (shown in brackets).
         return ["psf_sigma_px", "psf_tau_left_px", "psf_tau_right_px"]
 
     def na_field_names(self):
@@ -206,30 +206,29 @@ class FindPeaksConfigDialog(QDialog):
             row.addWidget(edit)
             layout.addLayout(row)
 
-        # Camera pixel-response constants — global: one camera, one kernel,
+        # Camera PSF working values — part of the [global] fitting config,
         # shared by the sample and reference fits. The label shows the
-        # MEASURED reference value in brackets: the working value here is
-        # editable and saved to ccd_characteristics.toml, but the measured
-        # reference in that file is never touched by the GUI, so the
-        # measurement cannot be lost by experimentation.
+        # MEASURED value from ccd_characteristics [psf] in brackets: that
+        # record is never touched by the GUI, so the measurement cannot be
+        # lost by experimentation here.
         layout.addWidget(QLabel("Camera PSF (shared by both fits)"))
-        psf = psf_config.get()
+        measured = psf_measurement_config.get()
         for key in self.pr_field_names():
             row = QHBoxLayout()
-            measured = getattr(psf, f"{key}_measured", None)
+            ref = getattr(measured, key, None)
             label = key.replace("_", " ").capitalize()
-            if measured is not None:
-                label += f"  (measured: {measured:g})"
+            if ref is not None:
+                label += f"  (measured: {ref:g})"
             row.addWidget(QLabel(label))
             edit = QLineEdit()
             edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
             edit.setToolTip(
                 "Camera constants for the 'lorentzian_x_psf' model — "
                 "Gaussian charge-diffusion blur and the one-sided readout "
-                "tails. Not fitted per frame. The bracketed value is the "
-                "MEASURED reference stored in ccd_characteristics.toml "
-                "(fine EOM sweeps; see measure_psf_kernel.py) — Save "
-                "writes only the working value, never the reference."
+                "tails. Not fitted per frame; saved with the [global] "
+                "fitting config. The bracketed value is the MEASURED record "
+                "in ccd_characteristics.toml (fine EOM sweeps; see "
+                "measure_psf_kernel.py) — the GUI never writes it."
             )
             self.global_inputs[key] = edit
             row.addWidget(edit)
@@ -241,7 +240,6 @@ class FindPeaksConfigDialog(QDialog):
         sample = find_peaks_sample_config.get()
         reference = find_peaks_reference_config.get()
         global_cfg = sline_from_frame_config.get()
-        pr = psf_config.get()
 
         for field in self.field_names():
             self.sample_inputs[field].setText(str(getattr(sample, field)))
@@ -252,7 +250,7 @@ class FindPeaksConfigDialog(QDialog):
         self.sample_inputs["na_weighting"].setCurrentText(sample.na_weighting)
 
         for field in self.pr_field_names():
-            self.global_inputs[field].setText(str(getattr(pr, field)))
+            self.global_inputs[field].setText(str(getattr(global_cfg, field)))
 
         for inputs, cfg in ((self.sample_inputs, sample),
                             (self.reference_inputs, reference)):
@@ -292,6 +290,9 @@ class FindPeaksConfigDialog(QDialog):
                 "row_selection": self.global_inputs["row_selection"].currentText(),
                 "n_rows": max(self._parse(self.global_inputs["n_rows"].text(), "int"), 1),
             }
+            # Camera PSF working values ride in the same [global] config.
+            global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
+                                  for f in self.pr_field_names()})
 
             # Sample
             sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f)
@@ -305,22 +306,16 @@ class FindPeaksConfigDialog(QDialog):
                                 for f in list(self.field_names()) + ["beta"]}
             reference_kwargs.update(self._model_kwargs(self.reference_inputs))
 
-            # Camera pixel-response constants (global, shared by both fits)
-            pr_kwargs = {f: self._parse(self.global_inputs[f].text(), f)
-                         for f in self.pr_field_names()}
-
             # Update all configs
             find_peaks_sample_config.update(**sample_kwargs)
             find_peaks_reference_config.update(**reference_kwargs)
             sline_from_frame_config.update(**global_kwargs)
-            psf_config.update(**pr_kwargs)
 
             if self.on_apply:
                 fitting_configs = FittingConfigs(
                     sline_config=sline_from_frame_config.get(),
                     sample_config=find_peaks_sample_config.get(),
                     reference_config=find_peaks_reference_config.get(),
-                    psf_config=psf_config.get(),
                 )
                 self.on_apply(fitting_configs)
 
@@ -335,9 +330,6 @@ class FindPeaksConfigDialog(QDialog):
             save_config_section(FIND_PEAKS_TOML_PATH, "sample", find_peaks_sample_config)
             save_config_section(FIND_PEAKS_TOML_PATH, "reference", find_peaks_reference_config)
             save_config_section(FIND_PEAKS_TOML_PATH, "global", sline_from_frame_config)
-            # The PSF kernel is a camera characteristic — it saves to the
-            # ccd_characteristics TOML, not the fitting config.
-            save_ccd_section("psf", psf_config)
             QMessageBox.information(self, "Saved", "Settings saved to disk.")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save config:\n{e}")

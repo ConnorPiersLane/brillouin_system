@@ -17,7 +17,7 @@ Layout:
         measure_psf_kernel.py             PSF sigma / tau [px]
 
 Consumers read the ThreadSafeConfig instances below (`ccd_config`,
-`psf_config`) — noise_analysis for g / read noise / dark level, the
+`psf_measurement_config`) — noise_analysis for g / read noise / dark level, the
 spectrum fitter for the PSF kernel. Scan-local measurements still take
 precedence where they exist (a scan's own dark stack beats the TOML dark
 median / read noise — same philosophy everywhere: per-scan at live
@@ -79,45 +79,35 @@ class CcdCharacteristics:
 
 
 @dataclass
-class PsfConstants:
-    """[psf] section: the frozen camera PSF (the 'lorentzian_x_psf' model).
+class PsfMeasurement:
+    """[psf] section: the MEASURED camera PSF kernel — a measurement record.
 
-    GLOBAL — one camera, one kernel, shared by the sample and reference fits
-    (different kernels would define different peak-centre conventions, which
-    is exactly the model-mixing artifact the fitter guards against). These
-    ENTER the fit but are never fitted per frame: they are properties of the
-    camera, not of the data.
+    The WORKING kernel the fitter uses lives in the fitting config's
+    [global] section (SlineFromFrameConfig.psf_* — one fitting config, no
+    nested sub-config; user decision 2026-08-20). This record keeps the
+    measured values + provenance so experimentation over there can never
+    lose the measurement; the config GUI shows these in brackets and never
+    writes them. A re-measurement (measurement_scripts/measure_psf_kernel
+    .py) updates BOTH files.
+
       psf_sigma_px     Gaussian charge-diffusion blur.
       psf_tau_*_px     one-sided exponential readout smear, per peak, toward
                        higher pixel numbers (the charge-transfer direction).
-    Measured 2026-07 on the fine EOM sweeps (see
-    measurement_scripts/measure_psf_kernel.py): 0.25 / 0.40 / 0.20 px,
-    stable across 6 calibrations over 7 weeks. Re-measure after any
-    camera/ROI change; the model refuses to run while all three are 0.
+    Measured 2026-07 on the fine EOM sweeps: 0.25 / 0.40 / 0.20 px, stable
+    across 6 calibrations over 7 weeks. The outer taus (opt-in n_peaks=4
+    fit only) were measured 2026-08-20 from the outer calibration lines of
+    four 4-peak-ROI sessions — PROVISIONAL (per-frame sigma/tau/gamma are
+    degenerate; sweep medians only): fine for positions and intensities,
+    do not hang width claims on outer-peak lineshapes. Re-measure after
+    any camera/ROI change.
     """
-    psf_sigma_px: float = 0.0
-    psf_tau_left_px: float = 0.0
-    psf_tau_right_px: float = 0.0
-    # MEASURED reference values of the kernel, kept separately so they can
-    # never be lost: the working psf_* fields above may be tuned in the
-    # config GUI and saved, but the GUI never writes these — they change
-    # only on a re-measurement (measurement_scripts/measure_psf_kernel.py).
-    # The GUI shows them in brackets next to each working field.
-    psf_sigma_px_measured: float = 0.25
-    psf_tau_left_px_measured: float = 0.40
-    psf_tau_right_px_measured: float = 0.20
-    psf_measured: str = ""
-    psf_method: str = ""
-    # Outer-order tails (the opt-in n_peaks=4 fit only). The tail is a
-    # POSITION property falling ~linearly toward the readout side — measured
-    # 2026-08-20 from the outer calibration lines of four 4-peak-ROI sessions
-    # (256 lines per position, Data/Figure3/fit_outer_kernel.py): tau ≈ +0.50
-    # (outer left, px ~35) / +0.40 / +0.20 / +0.00 (outer right, px ~148).
-    # PROVISIONAL (per-frame sigma/tau/gamma are degenerate; sweep medians
-    # only): fine for positions and intensities, do not hang width claims on
-    # outer-peak lineshapes.
+    psf_sigma_px: float = 0.25
+    psf_tau_left_px: float = 0.40
+    psf_tau_right_px: float = 0.20
     psf_tau_outer_left_px: float = 0.50
     psf_tau_outer_right_px: float = 0.0
+    psf_measured: str = ""
+    psf_method: str = ""
 
 
 def _load_section(path: Path, section: str, cls):
@@ -132,8 +122,8 @@ def load_ccd_characteristics(path: Path = CCD_TOML_PATH) -> CcdCharacteristics:
     return _load_section(path, "ccd", CcdCharacteristics)
 
 
-def load_psf_constants(path: Path = CCD_TOML_PATH) -> PsfConstants:
-    return _load_section(path, "psf", PsfConstants)
+def load_psf_measurement(path: Path = CCD_TOML_PATH) -> PsfMeasurement:
+    return _load_section(path, "psf", PsfMeasurement)
 
 
 def save_ccd_section(section: str, config: ThreadSafeConfig,
@@ -148,4 +138,4 @@ def save_ccd_section(section: str, config: ThreadSafeConfig,
 
 # Global instances
 ccd_config = ThreadSafeConfig(load_ccd_characteristics(CCD_TOML_PATH))
-psf_config = ThreadSafeConfig(load_psf_constants(CCD_TOML_PATH))
+psf_measurement_config = ThreadSafeConfig(load_psf_measurement(CCD_TOML_PATH))

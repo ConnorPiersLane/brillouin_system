@@ -17,9 +17,10 @@ from brillouin_system.calibration.outer_order_tracks import (
     build_outer_order_tracks,
     four_peak_shift,
 )
+from dataclasses import replace
+
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
-    PsfConstants,
     SlineFromFrameConfig,
 )
 from brillouin_system.spectrum_fitting.psf import psf_profile
@@ -48,9 +49,11 @@ def make_config(model="prm0") -> FindPeaksConfig:
 
 def make_fitter(model="prm0") -> SpectrumFitter:
     fitter = SpectrumFitter()
-    fitter.psf_config = PsfConstants(
+    # kernel working values live in the [global] sline config
+    fitter.update_sline_config(replace(
+        fitter.sline_config,
         psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
-        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR)
+        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR))
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config("lorentzian_x_psf"))
     return fitter
@@ -137,9 +140,10 @@ def test_four_peak_wrong_outer_tau_biases_outer_centre():
     # sanity that the per-position tails matter: fitting with the outer
     # tails swapped moves the outer centres by the tail convention
     fitter = make_fitter()
-    fitter.psf_config = PsfConstants(
+    fitter.update_sline_config(replace(
+        fitter.sline_config,
         psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
-        psf_tau_outer_left_px=TAU_OR, psf_tau_outer_right_px=TAU_OL)
+        psf_tau_outer_left_px=TAU_OR, psf_tau_outer_right_px=TAU_OL))
     px, sline = make_spectrum()
     result = fitter.fit(px, sline, is_reference_mode=False, n_peaks=4)
     assert result.is_success
@@ -153,7 +157,8 @@ def _reference_fitter() -> SpectrumFitter:
     """A fitter whose sline is one frame row, for synthetic calibration
     frames (frame = the spectrum stacked over 3 rows)."""
     fitter = make_fitter()
-    fitter.update_sline_config(SlineFromFrameConfig(
+    fitter.update_sline_config(replace(
+        fitter.sline_config,
         pixel_offset_left=0, pixel_offset_right=0,
         selected_rows=[0, 1, 2], row_selection="manual"))
     return fitter

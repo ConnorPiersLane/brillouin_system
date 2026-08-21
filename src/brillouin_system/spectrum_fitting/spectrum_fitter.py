@@ -8,8 +8,6 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     find_peaks_reference_config,
     SlineFromFrameConfig,
     sline_from_frame_config,
-    PsfConstants,
-    psf_config,
     FittingConfigs,
     MODEL_PRESETS,
     _LEGACY_BACKGROUNDS,
@@ -274,13 +272,14 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
 
 class SpectrumFitter:
     def __init__(self):
+        # The PSF kernel working values ride inside sline_config (the
+        # [global] section) — one fitting config, shared by sample and
+        # reference fits (one camera, one kernel; per-section constants
+        # would allow the centre-convention mismatch the model guard
+        # exists for).
         self.sline_config: SlineFromFrameConfig = sline_from_frame_config.get()
         self.sample_config: FindPeaksConfig = find_peaks_sample_config.get()
         self.reference_config: FindPeaksConfig = find_peaks_reference_config.get()
-        # Camera pixel-response constants — GLOBAL, shared by sample and
-        # reference fits (one camera, one kernel; per-section constants would
-        # allow the centre-convention mismatch the model guard exists for).
-        self.psf_config: PsfConstants = psf_config.get()
         # Rows chosen by the automatic band selection, frozen after the first
         # use so the band cannot drift between a scan's calibration and its
         # samples (a one-row difference biases the two peaks by ~3-4 MHz in
@@ -291,13 +290,6 @@ class SpectrumFitter:
         self.update_sline_config(configs.sline_config)
         self.update_sample_config(configs.sample_config)
         self.update_reference_config(configs.reference_config)
-        if configs.psf_config is not None:
-            self.update_psf_config(configs.psf_config)
-
-    def update_psf_config(self, psf_config: PsfConstants):
-        if not isinstance(psf_config, PsfConstants):
-            raise TypeError("psf_config must be a PsfConstants instance.")
-        self.psf_config = psf_config
 
     def update_sline_config(self, sline_config: SlineFromFrameConfig):
         if not isinstance(sline_config, SlineFromFrameConfig):
@@ -414,16 +406,17 @@ class SpectrumFitter:
 
         if model in ("lorentzian", "lorentzian_x_psf"):
             if model == "lorentzian_x_psf":
-                sigma = float(self.psf_config.psf_sigma_px)
-                tau_l = float(self.psf_config.psf_tau_left_px)
-                tau_r = float(self.psf_config.psf_tau_right_px)
+                sigma = float(self.sline_config.psf_sigma_px)
+                tau_l = float(self.sline_config.psf_tau_left_px)
+                tau_r = float(self.sline_config.psf_tau_right_px)
                 if sigma <= 0.0 and tau_l <= 0.0 and tau_r <= 0.0:
                     raise ValueError(
                         "Model 'lorentzian_x_psf' requires the frozen camera "
                         "constants: set psf_sigma_px and/or psf_tau_left_px / "
-                        "psf_tau_right_px in the [camera] section of the "
+                        "psf_tau_right_px in the [global] section of the "
                         "find-peaks config. Measured "
-                        "2026-07: 0.25 / 0.40 / 0.20 px. With all three at 0 "
+                        "2026-07: 0.25 / 0.40 / 0.20 px (record in "
+                        "ccd_characteristics [psf]). With all three at 0 "
                         "this model is just 'lorentzian'."
                     )
                 # Per-peak tails by left-to-right POSITION (the tail is a
@@ -432,9 +425,9 @@ class SpectrumFitter:
                 #   2 peaks: [tau_left, tau_right] (the main pair)
                 #   4 peaks: [outer_left, tau_left, tau_right, outer_right]
                 if n_peaks == 4:
-                    taus = [float(self.psf_config.psf_tau_outer_left_px),
+                    taus = [float(self.sline_config.psf_tau_outer_left_px),
                             tau_l, tau_r,
-                            float(self.psf_config.psf_tau_outer_right_px)]
+                            float(self.sline_config.psf_tau_outer_right_px)]
                 else:
                     taus = [tau_l, tau_r]
 
@@ -534,7 +527,7 @@ class SpectrumFitter:
                     f"prm0/prm1) or neither."
                 )
             # No camera-constant mismatch check needed: the pr_* constants are
-            # global (self.psf_config), so sample and reference fits share one
+            # global (sline_config.psf_*), so sample and reference fits share one
             # kernel by construction.
 
         px = np.asarray(px, dtype=np.float64)

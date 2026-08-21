@@ -8,9 +8,10 @@ to lower px, different dispersions per order.
 import numpy as np
 import pytest
 
+from dataclasses import replace
+
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
-    PsfConstants,
 )
 from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.reflection_background import (
@@ -192,9 +193,9 @@ def make_config(model: str) -> FindPeaksConfig:
 
 def make_fitter(sample_model="prmr", reference_model="lorentzian_x_psf"):
     fitter = SpectrumFitter()
-    fitter.psf_config = PsfConstants(
-        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
-        psf_tau_right_px=TAU_R)
+    fitter.update_sline_config(replace(
+        fitter.sline_config, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
+        psf_tau_right_px=TAU_R))
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))
     return fitter

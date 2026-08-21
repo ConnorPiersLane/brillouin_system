@@ -18,6 +18,11 @@ selected_rows = [
 ]
 row_selection = "manual"
 n_rows = 13
+psf_sigma_px = 0.25
+psf_tau_left_px = 0.4
+psf_tau_right_px = 0.2
+psf_tau_outer_left_px = 0.5
+psf_tau_outer_right_px = 0.0
 
 [sample]
 prominence_fraction = 0.001

@@ -30,9 +30,5 @@ psf_tau_left_px = 0.4
 psf_tau_right_px = 0.2
 psf_tau_outer_left_px = 0.5
 psf_tau_outer_right_px = 0.0
-
-psf_sigma_px_measured = 0.25
-psf_tau_left_px_measured = 0.4
-psf_tau_right_px_measured = 0.2
 psf_measured = "2026-07"
-psf_method = "Fine EOM sweeps: grid over (sigma, tau_l, tau_r) minimizing the per-pixel residual sine of the calibration tracks (from ~7 MHz to ~2 MHz rms); stable across 6 calibrations over 7 weeks. The psf_* working values above are GUI-editable; these _measured references are written only by a re-measurement. See measure_psf_kernel.py."
+psf_method = "MEASUREMENT RECORD (the working kernel the fitter uses lives in find_peaks_config.toml [global]; the GUI shows these values in brackets and never writes them). Fine EOM sweeps: grid over (sigma, tau_l, tau_r) minimizing the per-pixel residual sine of the calibration tracks (from ~7 MHz to ~2 MHz rms); stable across 6 calibrations over 7 weeks. A re-measurement updates BOTH files. See measure_psf_kernel.py."

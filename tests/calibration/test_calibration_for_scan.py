@@ -19,7 +19,6 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
-    PsfConstants,
     SlineFromFrameConfig,
 )
 from brillouin_system.spectrum_fitting.psf import psf_profile
@@ -43,14 +42,13 @@ def make_config(model: str) -> FindPeaksConfig:
 
 def make_fitter(model: str) -> SpectrumFitter:
     fitter = SpectrumFitter()
-    fitter.psf_config = PsfConstants(
-        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
-        psf_tau_right_px=TAU_R)
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config(model))
+    # kernel working values ride in the [global] sline config
     fitter.update_sline_config(SlineFromFrameConfig(
         pixel_offset_left=0, pixel_offset_right=0,
         selected_rows=list(range(N_ROWS)), row_selection="manual",
+        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
     ))
     return fitter
 

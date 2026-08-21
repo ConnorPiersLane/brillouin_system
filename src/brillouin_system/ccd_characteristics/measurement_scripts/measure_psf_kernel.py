@@ -58,14 +58,15 @@ def residual_rms_mhz(data, degree: int, sigma: float, tau_l: float,
                      tau_r: float) -> float:
     """rms of the left+right track residuals [MHz] at one kernel triple."""
     from brillouin_system.calibration.calibration import calibrate
-    from brillouin_system.ccd_characteristics import PsfConstants
     from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
     fitter = SpectrumFitter()
     fitter.update_reference_config(
         replace(fitter.reference_config, fitting_model="lorentzian_x_psf"))
-    fitter.update_psf_config(PsfConstants(
-        psf_sigma_px=sigma, psf_tau_left_px=tau_l, psf_tau_right_px=tau_r))
+    # The kernel working values ride in the [global] sline config.
+    fitter.update_sline_config(replace(
+        fitter.sline_config, psf_sigma_px=sigma,
+        psf_tau_left_px=tau_l, psf_tau_right_px=tau_r))
 
     p = calibrate(data=data, poyfit_degree=degree, fitter=fitter)
 
@@ -133,15 +134,17 @@ def main(argv=None):
     print(f"\n==== Best kernel ====")
     print(f"sigma {sigma:.3f} px, tau_left {tl:.3f} px, tau_right {tr:.3f} px "
           f"-> rms {rms:.2f} MHz (baseline {base:.2f})")
-    print("\nPaste into ccd_characteristics.toml [psf] — a re-measurement "
-          "updates BOTH the working values and the _measured references:")
+    print("\nA re-measurement updates BOTH files:")
+    print("ccd_characteristics.toml [psf] (the measurement record):")
     print(f"psf_sigma_px = {sigma:.3g}")
     print(f"psf_tau_left_px = {tl:.3g}")
     print(f"psf_tau_right_px = {tr:.3g}")
-    print(f"psf_sigma_px_measured = {sigma:.3g}")
-    print(f"psf_tau_left_px_measured = {tl:.3g}")
-    print(f"psf_tau_right_px_measured = {tr:.3g}")
     print('psf_measured = "<date>"')
+    print("find_peaks_config.toml [global] (the working values the fitter "
+          "uses):")
+    print(f"psf_sigma_px = {sigma:.3g}")
+    print(f"psf_tau_left_px = {tl:.3g}")
+    print(f"psf_tau_right_px = {tr:.3g}")
     return 0
 
 

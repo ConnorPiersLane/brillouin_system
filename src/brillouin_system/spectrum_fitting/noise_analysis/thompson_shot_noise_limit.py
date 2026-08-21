@@ -41,7 +41,6 @@ from brillouin_system.spectrum_fitting.noise_analysis.pixel_counts_and_photons i
     count_to_electrons,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
-    psf_config,
     sline_from_frame_config,
 )
 from brillouin_system.spectrum_fitting.psf import detected_hwhm_px
@@ -239,7 +238,7 @@ def theoretical_precision(fs: FittedSpectrum,
     # separate a^2/12 pixelation term). For a plain-Lorentzian fit the
     # fitted width already IS the detected width.
     if is_psf_fit(fs.model):
-        k = psf_config.get()
+        k = sline_from_frame_config.get()
         w_l = detected_hwhm_px(fs.left_peak_width_px,
                                k.psf_sigma_px, k.psf_tau_left_px)
         w_r = detected_hwhm_px(fs.right_peak_width_px,
