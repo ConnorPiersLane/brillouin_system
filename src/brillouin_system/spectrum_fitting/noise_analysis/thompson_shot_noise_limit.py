@@ -157,61 +157,18 @@ class TheoreticalPeakStdError:
     distance_total_mhz: float | None = None
 
 
-def get_b_values(std_img, fit, k: float = 2.0,
-                 ) -> tuple[float | None, float | None] | None:
-    """Per-sline-pixel noise std near the left/right peaks, from a std frame.
+def _n_summed_rows(fs: FittedSpectrum) -> int:
+    """How many camera rows were summed into this fit's sline.
 
-    std_img is a per-pixel std image (production: the scan's closed-shutter
-    dark stack, whose std is the read noise); it is combined across the
-    summed rows in quadrature, median inside a window of +-k*width around
-    each fitted peak.
-
-    The rows come from the live sline config — which IS the band every fit
-    uses (row-band rule 2026-08-20: nothing stored overrides the config).
+    From the fit itself (FittedSpectrum.sline_rows — the fitter records the
+    band, so the result carries its own acquisition geometry); the live
+    sline config is only the fallback for legacy fit objects. The count
+    sets the sline's per-pixel read noise, rn*sqrt(n), and scales the
+    dark level under the fitted pedestal.
     """
-    if std_img is None:
-        return None
-    if not fit.is_success:
-        return None, None
-
-    H, W = std_img.shape
-
-    # Select rows (same as in get_px_sline_from_image)
-    rows = sline_from_frame_config.get().selected_rows
-    if not rows or not all(0 <= r < H for r in rows):
-        print("[get_b_values] Warning: Invalid or empty row list — using full image height.")
-        rows = list(range(H))
-
-    # The signal sums rows, so the noise combines in quadrature.
-    binned_std_full = np.sqrt(np.sum(std_img[rows, :] ** 2, axis=0))
-    px_full = np.arange(W)
-
-    def side_median_b(center: float, width: float) -> float | None:
-        if center is None or width is None:
-            return None
-        center = int(round(center))
-        halfwin = int(math.ceil(k * float(width)))
-        lo_idx = max(0, center - halfwin)
-        hi_idx = min(len(px_full), center + halfwin)
-        mask = np.zeros_like(binned_std_full, dtype=bool)
-        mask[lo_idx:hi_idx] = True
-        if not np.any(mask):
-            return None
-        return float(np.median(binned_std_full[mask]))
-
-    left_b = side_median_b(fit.left_peak_center_px, fit.left_peak_width_px)
-    right_b = side_median_b(fit.right_peak_center_px, fit.right_peak_width_px)
-    return left_b, right_b
-
-
-def _n_summed_rows() -> int:
-    """Rows summed into the sline, for the read-noise fallback.
-
-    From the live sline config — the single source of truth for the band
-    (row-band rule 2026-08-20). The row count is the one acquisition-
-    geometry fact the bound needs that a 1-D fit cannot carry: the sline is
-    a sum of n camera rows, so its per-pixel read noise is rn*sqrt(n).
-    """
+    rows = getattr(fs, "sline_rows", None)
+    if rows is not None and len(rows) > 0:
+        return len(rows)
     cfg = sline_from_frame_config.get()
     if cfg.row_selection == "auto":
         return int(cfg.n_rows)
@@ -221,13 +178,18 @@ def _n_summed_rows() -> int:
 def theoretical_precision(fs: FittedSpectrum,
                           photons: PixelCountsAndPhotons,
                           calibration_calculator: CalibrationCalculator,
-                          dark_frame_std: np.ndarray | None,
                           preamp_gain: int | float,
                           emccd_gain: int | float,
                           corr_left_right: float = 0.0,
-                          pedestal_bias_counts: float = 0.0,
                           ) -> TheoreticalPeakStdError:
     """The Thompson bound of a production fit, in MHz — from ONE frame.
+
+    Inputs are minimal on purpose (user rule 2026-08-20): the FIT — which
+    carries its own row band in fs.sline_rows — the calibration, and the
+    camera gain settings. Every camera number (read noise, dark level)
+    comes from ccd_characteristics; there are no dark-frame inputs — dark
+    stacks are not part of the workflow, the measured TOML reference IS
+    the dark model.
 
     NOTE the s convention changed 2026-08-20: s is now the DETECTED photon
     distribution width (fitted core convolved with the camera PSF, pixel
@@ -244,28 +206,25 @@ def theoretical_precision(fs: FittedSpectrum,
          pi*amp*width is exact);
       b  background NOISE per summed sline pixel, in electrons, from two
          parts in quadrature:
-           * read noise — the scan's closed-shutter dark stack: its
-             per-pixel std IS the read noise (no dark current), summed over
-             the rows in quadrature by get_b_values. Falls back to the
-             measured READ_NOISE_COUNTS * sqrt(n_rows) when no dark stack
-             travels with the data (dark_frame_std=None).
+           * read noise — ccd read_noise_counts * sqrt(n_rows): the sline
+             sums n_rows camera rows, each carrying the per-pixel read
+             noise rms.
            * shot noise of the stray-light pedestal — Poisson on the FITTED
-             background level under each peak (fs.*_peak_bg_counts).
-
-    pedestal_bias_counts: the camera dark/bias level per summed sline pixel.
-    Production fits RAW frames (nothing subtracted from the data, user rule
-    2026-08-20), so the fitted background always contains this level
-    (~200 counts/px x n rows on this camera). It is an electronic offset,
-    not light — it carries no shot noise — so it is removed from the
-    pedestal HERE, analytically, before the Poisson term. Callers pass the
-    scan's own dark-stack median x summed rows (or a frame-median estimate
-    when no darks were taken). Without it the bound is inflated ABOVE the
-    measured scatter (verified on 2026-8-13 300ms_i5: AS bg term
-    2.66 -> 0.38 MHz, total 3.58 -> 2.43 vs measured diff-sd 2.49).
+             background level under each peak (fs.*_peak_bg_counts), MINUS
+             the dark/bias level (ccd dark_median_counts * n_rows):
+             production fits RAW frames, so the fitted background always
+             contains that electronic offset, which carries no shot noise.
+             Skipping the subtraction inflates the bound ABOVE the measured
+             scatter (2026-8-13 300ms_i5: AS bg term 2.66 -> 0.38 MHz,
+             total 3.58 -> 2.43 vs measured diff-sd 2.49).
     See the module docstring for what this bound is and is not.
     """
     if not fs.is_success:
         return TheoreticalPeakStdError()
+
+    n_rows = _n_summed_rows(fs)
+    ccd = ccd_config.get()
+    pedestal_bias_counts = ccd.dark_median_counts * n_rows
 
     calc = calibration_calculator
 
@@ -290,13 +249,8 @@ def theoretical_precision(fs: FittedSpectrum,
     s_l = a_l * float(w_l)
     s_r = a_r * float(w_r)
 
-    if dark_frame_std is None:
-        fallback = (ccd_config.get().read_noise_counts
-                    * math.sqrt(_n_summed_rows()))
-        read_counts_l, read_counts_r = fallback, fallback
-    else:
-        read_counts_l, read_counts_r = get_b_values(std_img=dark_frame_std,
-                                                    fit=fs)
+    read_per_sline_px = ccd.read_noise_counts * math.sqrt(n_rows)
+    read_counts_l = read_counts_r = read_per_sline_px
 
     def b_electrons(read_counts, pedestal_counts):
         read_e = count_to_electrons(read_counts or 0.0,

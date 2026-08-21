@@ -363,25 +363,11 @@ class AxialScanViewer(QWidget):
         info = self.axial_scan.system_state.andor_camera_info
         photons = PixelCountsAndPhotons.from_fit(
             fs=mean_fs, preamp_gain=info.preamp_gain, emccd_gain=info.gain)
-        dark = self.axial_scan.system_state.dark_image
-        # Raw-frame fits: the fitted pedestal contains the dark/bias level,
-        # which carries no shot noise (same handling as fit_axial_scan) —
-        # the scan's own dark stack wins, the ccd_characteristics reference
-        # value is the fallback, a frame median only if even that is unset.
-        first_frame = np.asarray(
-            self.axial_scan.measurements[0].frame_andor, dtype=float)
-        if dark is not None:
-            level = float(np.median(dark.mean_image))
-        else:
-            level = (ccd_config.get().dark_median_counts
-                     or float(np.median(first_frame)))
-        rows = self.fitter.get_selected_rows(first_frame)
-        bias_counts = level * len(rows)
+        # mean_fs carries the row band (sline_rows); read noise and dark
+        # level come from ccd_characteristics inside theoretical_precision.
         return theoretical_precision(
             fs=mean_fs, photons=photons, calibration_calculator=self.calc,
-            dark_frame_std=dark.std_image if dark is not None else None,
-            preamp_gain=info.preamp_gain, emccd_gain=info.gain,
-            pedestal_bias_counts=bias_counts)
+            preamp_gain=info.preamp_gain, emccd_gain=info.gain)
 
     def _measured_background_for_fit(self, px: np.ndarray) -> np.ndarray | None:
         """The reflection background rendered for this scan, when the live
@@ -404,21 +390,16 @@ class AxialScanViewer(QWidget):
 
         The DATA are fitted raw, but the MC truth must be light-only — the
         dark/bias pedestal carries no shot noise (only read noise, which
-        the generator adds separately). Per-pixel dark-stack mean when
-        darks were taken; a scalar median otherwise.
+        the generator adds separately). The level is the
+        ccd_characteristics reference (dark stacks are not part of the
+        workflow — user rule 2026-08-20).
         """
-        dark = self.axial_scan.system_state.dark_image
         mean_frame = np.mean([np.asarray(m.frame_andor, dtype=float)
                               for m in self.axial_scan.measurements], axis=0)
-        if dark is not None:
-            mean_frame = mean_frame - dark.mean_image
-        else:
-            bias = (ccd_config.get().dark_median_counts
-                    or float(np.median(mean_frame)))
-            log.info(f"[MC] no dark stack — subtracting the reference dark "
-                     f"level {bias:.1f} counts/px (ccd_characteristics)")
-            mean_frame = mean_frame - bias
-        return np.clip(mean_frame, 0.0, None)
+        bias = ccd_config.get().dark_median_counts
+        log.info(f"[MC] subtracting the reference dark level {bias:.1f} "
+                 f"counts/px (ccd_characteristics) from the truth")
+        return np.clip(mean_frame - bias, 0.0, None)
 
     def _warn_if_scan_moves(self):
         """Mean-frame truth assumes repeated measurements of ONE spectrum."""
@@ -455,11 +436,7 @@ class AxialScanViewer(QWidget):
         e_per_count = electrons_per_count(
             preamp_gain=info.preamp_gain, emccd_gain=info.gain)
 
-        dark = self.axial_scan.system_state.dark_image
-        if dark is not None:
-            read_rms = float(np.median(dark.std_image))
-        else:
-            read_rms = ccd_config.get().read_noise_counts
+        read_rms = ccd_config.get().read_noise_counts
 
         truth = self._scan_mean_frame()
         is_ref = self.axial_scan.system_state.is_reference_mode

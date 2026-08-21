@@ -124,14 +124,16 @@ def _fitted_two_peaks():
         right_peak_width_px=1.0,
         right_peak_amplitude=520.0,
         inter_peak_distance=33.0,
+        # The fit carries its own row band (single-source rule): the bound
+        # reads n_rows from here for read noise and the dark-level offset.
+        sline_rows=list(range(13)),
     )
 
 
 def _bound(fs, photons, calc, corr=0.0):
     return theoretical_precision(
         fs=fs, photons=photons, calibration_calculator=calc,
-        dark_frame_std=None, preamp_gain=1.0, emccd_gain=0,
-        corr_left_right=corr)
+        preamp_gain=1.0, emccd_gain=0, corr_left_right=corr)
 
 
 def test_distance_precision_combines_the_two_orders_in_quadrature():
@@ -172,13 +174,19 @@ def test_anticorrelation_widens_the_distance_uncertainty():
 
 def test_pedestal_shot_noise_widens_the_bound():
     """The fitted background level under a peak feeds the b term (Poisson),
-    so a brighter stray pedestal must widen the bound — from the fit alone,
-    no background-frame stack."""
+    so a brighter stray pedestal must widen the bound — from the fit alone.
+    Raw-frame fits: the fitted background contains the camera dark level
+    (ccd dark_median_counts * n_rows), which the bound subtracts before
+    the Poisson term, so the pedestal here sits ON TOP of that level."""
+    from brillouin_system.ccd_characteristics import ccd_config
+
     calc = _linear_calculator()
     fs_clean = _fitted_two_peaks()
     from dataclasses import replace
-    fs_pedestal = replace(fs_clean, left_peak_bg_counts=500.0,
-                          right_peak_bg_counts=500.0)
+    dark_level = ccd_config.get().dark_median_counts * len(fs_clean.sline_rows)
+    fs_pedestal = replace(fs_clean,
+                          left_peak_bg_counts=dark_level + 500.0,
+                          right_peak_bg_counts=dark_level + 500.0)
     photons = PixelCountsAndPhotons.from_fit(fs_clean, preamp_gain=1.0,
                                              emccd_gain=0)
     clean = _bound(fs_clean, photons, calc)
@@ -187,22 +195,38 @@ def test_pedestal_shot_noise_widens_the_bound():
     assert pedestal.distance_total_mhz > clean.distance_total_mhz
 
 
-def test_dark_stack_std_feeds_the_read_noise_term():
-    """A per-pixel dark std frame (the scan's closed-shutter stack) replaces
-    the read-noise fallback; a noisier camera widens the bound."""
+def test_dark_level_carries_no_shot_noise():
+    """A fitted background at exactly the camera dark level is an
+    electronic offset, not light: the bound must treat it like no pedestal
+    at all (read noise only)."""
+    from brillouin_system.ccd_characteristics import ccd_config
+    from dataclasses import replace
+
     calc = _linear_calculator()
-    fs = _fitted_two_peaks()
-    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
-    quiet = np.full((15, 84), 0.1)
-    noisy = np.full((15, 84), 5.0)
-    t_quiet = theoretical_precision(
-        fs=fs, photons=photons, calibration_calculator=calc,
-        dark_frame_std=quiet, preamp_gain=1.0, emccd_gain=0)
-    t_noisy = theoretical_precision(
-        fs=fs, photons=photons, calibration_calculator=calc,
-        dark_frame_std=noisy, preamp_gain=1.0, emccd_gain=0)
-    assert t_noisy.left_peak_bg_mhz > t_quiet.left_peak_bg_mhz
-    assert t_noisy.distance_total_mhz > t_quiet.distance_total_mhz
+    fs_clean = _fitted_two_peaks()
+    dark_level = ccd_config.get().dark_median_counts * len(fs_clean.sline_rows)
+    fs_dark = replace(fs_clean, left_peak_bg_counts=dark_level,
+                      right_peak_bg_counts=dark_level)
+    photons = PixelCountsAndPhotons.from_fit(fs_clean, preamp_gain=1.0,
+                                             emccd_gain=0)
+    clean = _bound(fs_clean, photons, calc)
+    dark = _bound(fs_dark, photons, calc)
+    assert dark.left_peak_bg_mhz == pytest.approx(clean.left_peak_bg_mhz)
+
+
+def test_fit_row_band_scales_the_read_noise():
+    """The bound reads the row count from the fit itself: four times the
+    rows means twice the per-sline-pixel read noise (rn*sqrt(n))."""
+    from dataclasses import replace
+
+    calc = _linear_calculator()
+    fs4 = replace(_fitted_two_peaks(), sline_rows=list(range(4)))
+    fs16 = replace(_fitted_two_peaks(), sline_rows=list(range(16)))
+    photons = PixelCountsAndPhotons.from_fit(fs4, preamp_gain=1.0,
+                                             emccd_gain=0)
+    t4 = _bound(fs4, photons, calc)
+    t16 = _bound(fs16, photons, calc)
+    assert t16.left_peak_bg_mhz == pytest.approx(2.0 * t4.left_peak_bg_mhz)
 
 
 def test_detected_width_reduces_to_gamma_without_psf():

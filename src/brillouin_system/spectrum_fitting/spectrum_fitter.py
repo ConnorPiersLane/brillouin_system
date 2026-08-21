@@ -374,7 +374,18 @@ class SpectrumFitter:
             is_success=False,
             x_pixels=px,
             sline=sline,
+            sline_rows=self._rows_or_none(),
         )
+
+    def _rows_or_none(self) -> list[int] | None:
+        """The row band this fitter sums, for recording on fit results.
+
+        None only when it cannot be known yet (auto mode, band not located).
+        """
+        try:
+            return list(self.get_selected_rows())
+        except Exception:
+            return None
 
     def get_total_sline_value(self, sline) -> float:
         if sline is None:
@@ -771,6 +782,7 @@ class SpectrumFitter:
             outer_right_peak_amplitude=float(outer_r[0]) if four_peaks else None,
             outer_left_peak_bg_counts=float(bg_at_peaks[0]) if four_peaks else None,
             outer_right_peak_bg_counts=float(bg_at_peaks[-1]) if four_peaks else None,
+            sline_rows=self._rows_or_none(),
         )
 
     @staticmethod

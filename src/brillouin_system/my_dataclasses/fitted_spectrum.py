@@ -43,4 +43,11 @@ class FittedSpectrum:
     outer_right_peak_amplitude: float = None
     outer_left_peak_bg_counts: float = None
     outer_right_peak_bg_counts: float = None
+    # Camera rows that were summed into this sline — recorded by the fitter
+    # at fit time, so the result carries its own acquisition geometry
+    # (single-source rule 2026-08-20: the Thompson bound reads the row count
+    # from HERE, not from config or extra arguments; the sline's per-pixel
+    # read noise is rn*sqrt(n_rows)). None on legacy data and when the
+    # fitter could not determine the band.
+    sline_rows: list = None
 

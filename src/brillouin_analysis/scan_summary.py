@@ -28,7 +28,6 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AnalyzedSpectrum,
     AxialScan,
@@ -177,23 +176,12 @@ def summarize_axial_scan(
         )
         photons = PixelCountsAndPhotons.from_fit(
             fs=mean_fs, preamp_gain=info.preamp_gain, emccd_gain=info.gain)
-
-        dark = scan.system_state.dark_image
-        if dark is not None:
-            level = float(np.median(dark.mean_image))
-        else:
-            level = (ccd_config.get().dark_median_counts
-                     or float(np.median(np.asarray(
-                         scan.measurements[0].frame_andor, dtype=float))))
-        # The band the analysis actually used — the live config, always.
-        rows = fitter.get_selected_rows(np.asarray(
-            scan.measurements[0].frame_andor, dtype=float))
-
+        # mean_fs carries the row band (sline_rows, inherited from the
+        # fits); the camera numbers (read noise, dark level) come from
+        # ccd_characteristics inside theoretical_precision.
         theo = theoretical_precision(
             fs=mean_fs, photons=photons, calibration_calculator=calc,
-            dark_frame_std=dark.std_image if dark is not None else None,
-            preamp_gain=info.preamp_gain, emccd_gain=info.gain,
-            pedestal_bias_counts=level * len(rows))
+            preamp_gain=info.preamp_gain, emccd_gain=info.gain)
         out.thompson_left_mhz = theo.left_peak_total_mhz
         out.thompson_right_mhz = theo.right_peak_total_mhz
         out.thompson_distance_mhz = theo.distance_total_mhz

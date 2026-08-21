@@ -132,8 +132,6 @@ def fit_scan(scan: AxialScan, sf: SpectrumFitter) -> list[AnalyzedSpectrum]:
             fs=fit, preamp_gain=cam.preamp_gain, emccd_gain=cam.gain)
         theo = theoretical_precision(
             fs=fit, photons=photons, calibration_calculator=calc,
-            dark_frame_std=(ss.dark_image.std_image
-                            if ss.dark_image is not None else None),
             preamp_gain=cam.preamp_gain, emccd_gain=cam.gain)
         out.append(AnalyzedSpectrum(fitted_spectrum=fit,
                                     analyzed_shifts=na_corrected(calc.analyze(fit), ratio),

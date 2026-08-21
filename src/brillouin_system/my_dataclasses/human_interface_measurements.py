@@ -216,18 +216,10 @@ def fit_axial_scan(scan: AxialScan,
     # Frames are fitted RAW (user rule 2026-08-20): nothing is subtracted
     # from the data. The fit's background parameters absorb the dark/bias
     # pedestal, and the Thompson bound removes that level analytically
-    # (an electronic offset carries no shot noise). This also matches
-    # calibrate(), which always fit the calibration frames raw — sample and
-    # reference frames now go through the identical treatment.
-    # Dark/bias level per pixel for the bound: the scan's own dark stack
-    # wins; the ccd_characteristics reference value is the fallback; a
-    # frame median only if even that is unset.
-    dark = scan.system_state.dark_image
-    if dark is not None:
-        dark_level_per_px = float(np.median(dark.mean_image))
-    else:
-        dark_level_per_px = ccd_config.get().dark_median_counts or None
-
+    # using the ccd_characteristics reference (an electronic offset carries
+    # no shot noise). This also matches calibrate(), which always fit the
+    # calibration frames raw — sample and reference frames go through the
+    # identical treatment.
     for measurement in scan.measurements:
         frame = measurement.frame_andor.copy()
 
@@ -248,20 +240,11 @@ def fit_axial_scan(scan: AxialScan,
             preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
             emccd_gain=scan.system_state.andor_camera_info.gain)
 
-        # The fitted pedestal of a raw-frame fit contains the dark/bias
-        # level; pass it (per summed sline pixel) so the bound's pedestal
-        # shot-noise term only sees the light part. Source: the scan's own
-        # dark stack median, or the frame median when no darks were taken.
-        level = (dark_level_per_px if dark_level_per_px is not None
-                 else float(np.median(frame)))
-        bias_counts = level * len(rows_used)
         theoretical_std: TheoreticalPeakStdError = theoretical_precision(
             fs=fitting, photons=photons,
             calibration_calculator=calibration_calculator,
-            dark_frame_std=dark.std_image if dark is not None else None,
             preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
-            emccd_gain=scan.system_state.andor_camera_info.gain,
-            pedestal_bias_counts=bias_counts)
+            emccd_gain=scan.system_state.andor_camera_info.gain)
 
         # Append
         anaylzed_spectra = AnalyzedSpectrum(
