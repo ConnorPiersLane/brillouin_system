@@ -34,12 +34,16 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 log = get_logger(__name__)
 
-REFERENCES = ("left", "right", "distance")
+# outer_* tracks exist only on four-peak calibrations; their views show
+# "No calibration model for this reference" on two-peak data.
+REFERENCES = ("left", "right", "distance", "outer_left", "outer_right")
 
 _AXIS_LABELS = {
     "left": "Left peak center (px)",
     "right": "Right peak center (px)",
     "distance": "Inter-peak distance (px)",
+    "outer_left": "Outer-left peak center (px)",
+    "outer_right": "Outer-right peak center (px)",
 }
 
 
@@ -50,6 +54,8 @@ def calibration_points(calc: CalibrationCalculator, reference: str):
         "left": (p.left_px_points, p.left_freq_points),
         "right": (p.right_px_points, p.right_freq_points),
         "distance": (p.dist_px_points, p.dist_freq_points),
+        "outer_left": (p.outer_left_px_points, p.outer_left_freq_points),
+        "outer_right": (p.outer_right_px_points, p.outer_right_freq_points),
     }[reference]
     if px is None or freqs is None or len(np.atleast_1d(px)) == 0:
         return None
@@ -66,6 +72,8 @@ def poly_for_reference(calc: CalibrationCalculator, reference: str):
         "left": calc.p.freq_left_peak,
         "right": calc.p.freq_right_peak,
         "distance": calc.p.freq_peak_distance,
+        "outer_left": calc.p.freq_outer_left_peak,
+        "outer_right": calc.p.freq_outer_right_peak,
     }[reference]
 
 
@@ -230,13 +238,19 @@ class CalibrationViewer(QWidget):
             "left": fit.left_peak_center_px,
             "right": fit.right_peak_center_px,
             "distance": fit.inter_peak_distance,
+            "outer_left": fit.outer_left_peak_center_px,
+            "outer_right": fit.outer_right_peak_center_px,
         }[reference]
         if px is None or not np.isfinite(px):
+            return None
+        if reference.startswith("outer") and not self.calc.has_outer_tracks():
             return None
         freq = {
             "left": self.calc.freq_left_peak,
             "right": self.calc.freq_right_peak,
             "distance": self.calc.freq_peak_distance,
+            "outer_left": self.calc.freq_outer_left_peak,
+            "outer_right": self.calc.freq_outer_right_peak,
         }[reference](px)
         if freq is None or not np.isfinite(freq):
             return None
@@ -253,6 +267,8 @@ class CalibrationViewer(QWidget):
             "left": entry.fit.left_peak_center_px,
             "right": entry.fit.right_peak_center_px,
             "distance": entry.fit.inter_peak_distance,
+            "outer_left": entry.fit.outer_left_peak_center_px,
+            "outer_right": entry.fit.outer_right_peak_center_px,
         }[reference]
         if px is None or not np.isfinite(px):
             return None

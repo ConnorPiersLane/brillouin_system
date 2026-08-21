@@ -49,7 +49,11 @@ class CalibrationConfig:
     start: float
     stop: float
     step: float
-    reference: str  # "left", "right", or "distance"
+    # Which observable the live display / analyzer reports: "left", "right",
+    # "distance" (inner pair — the absolute anchor), or "combined" (the
+    # inverse-variance combination of all four orders; needs n_peaks = 4 in
+    # BOTH fitting sections, shows N/A otherwise).
+    reference: str
     # Whether to store the raw calibration reference frames on each axial
     # scan (AxialScan.calibration_data). Adds frames to every saved scan, but
     # re-fitting a scan against its OWN calibration (the production

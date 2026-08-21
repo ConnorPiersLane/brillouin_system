@@ -1450,8 +1450,12 @@ class HiFrontend(QWidget):
 
         if self._show_cali:
             try:
+                # The calibration plot shows one px->GHz track; "combined"
+                # has no single track, so its plot shows the distance one.
+                plot_reference = ("distance" if config.reference == "combined"
+                                  else config.reference)
                 pixmap = render_calibration_to_pixmap(
-                    cali_calculator, reference=config.reference
+                    cali_calculator, reference=plot_reference
                 )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()

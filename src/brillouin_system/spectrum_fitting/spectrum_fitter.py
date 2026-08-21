@@ -457,17 +457,18 @@ class SpectrumFitter:
         sline: np.ndarray,
         is_reference_mode: bool,
         reflection_background: np.ndarray | None = None,
-        n_peaks: int = 2,
+        n_peaks: int | None = None,
     ) -> FittedSpectrum:
         """Fit the sline. reflection_background is the reflection background
         mapped onto this px axis (ReflectionBackgroundMapper.render(px));
         required by (and only used with) background='reflection'
         (the 'prmr' preset).
 
-        n_peaks is an explicit ARGUMENT, not config, so production (which
-        never passes it) is two-peak by construction. n_peaks=4 jointly fits
-        all four VIPA orders — each peak identical (amplitude/centre/width
-        free) through the frozen kernel with its own per-position tau; the
+        n_peaks comes from the CONFIG (per section, [sample]/[reference] —
+        the four-peak standard since 2026-08-21); the argument overrides it
+        for analysis scripts and tests. n_peaks=4 jointly fits all four
+        VIPA orders — each peak identical (amplitude/centre/width free)
+        through the frozen kernel with its own per-position tau; the
         reported left/right peaks stay the INNER main pair, so every
         downstream consumer is unchanged, and the outer pair is reported in
         the outer_* fields.
@@ -550,19 +551,18 @@ class SpectrumFitter:
         # the offset/background model to handle negative baseline excursions.
         sline = np.clip(sline, 0, None)
 
-        if n_peaks not in (2, 4):
-            raise ValueError(f"n_peaks must be 2 or 4, got {n_peaks!r}.")
-        n_requested = n_peaks
+        n_requested = n_peaks if n_peaks is not None else opts.n_peaks
+        if n_requested not in (2, 4):
+            raise ValueError(f"n_peaks must be 2 or 4, got {n_requested!r}.")
 
         pk_ind, pk_info = find_peak_locations(sline, config=config)
         if len(pk_ind) < 1:
             return self._failed_fit(px, sline, self._fit_kind(
                 n_requested, requested_model, use_window, background))
 
-        # Selection by amplitude ranking. n_peaks=2 (the default — production
-        # never passes anything else) keeps the two strongest, which are
-        # always the inner main pair (VIPA side orders are dimmer); the
-        # opt-in n_peaks=4 keeps the outer orders as well.
+        # Selection by amplitude ranking. n_peaks=2 keeps the two strongest,
+        # which are always the inner main pair (VIPA side orders are
+        # dimmer); n_peaks=4 keeps the outer orders as well.
         pk_ind, pk_info = select_top_n_peaks(pk_ind, pk_info, n_requested)
         amp, cen, wid = self._extract_peak_params(pk_ind, pk_info, px, sline)
 

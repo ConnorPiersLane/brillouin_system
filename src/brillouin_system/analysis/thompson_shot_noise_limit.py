@@ -145,6 +145,13 @@ class TheoreticalPeakStdError:
     right_peak_total_mhz: float | None = None
     # Precision of the peak-distance observable (the one normally reported).
     distance_total_mhz: float | None = None
+    # Four-peak standard: per-outer-order totals and the bound of the
+    # inverse-variance combined estimator (the variance of the ACTUAL
+    # weighted average, using the same photon-term weights combined_shift
+    # uses). None unless the fit and the calibration are four-peak.
+    outer_left_total_mhz: float | None = None
+    outer_right_total_mhz: float | None = None
+    combined_total_mhz: float | None = None
 
 
 def _n_summed_rows(fs: FittedSpectrum) -> int:
@@ -267,6 +274,37 @@ def theoretical_precision(fs: FittedSpectrum,
     dx_d_total = a_d * distance_precision(
         left.total / a_l, right.total / a_r, correlation=corr_left_right)
 
+    # Four-peak standard: bounds for the outer orders through their own
+    # tracks, and the variance of the ACTUAL combined estimator — the
+    # weighted average with combined_shift's photon-term weights:
+    # var = sum(w_i^2 sigma_i^2) with sum(w_i) = 1.
+    outer_left = outer_right = None
+    combined_total = None
+    four_peak = calc.combined_shift(fs)
+    if four_peak is not None and photons.outer_left_peak_photons:
+        a_ol = abs(calc.df_outer_left_peak(px=fs.outer_left_peak_center_px, dpx=1))
+        a_or = abs(calc.df_outer_right_peak(px=fs.outer_right_peak_center_px, dpx=1))
+        if is_psf_fit(fs.model):
+            k = sline_from_frame_config.get()
+            w_ol = detected_hwhm_px(fs.outer_left_peak_width_px,
+                                    k.psf_sigma_px, k.psf_tau_outer_left_px)
+            w_or = detected_hwhm_px(fs.outer_right_peak_width_px,
+                                    k.psf_sigma_px, k.psf_tau_outer_right_px)
+        else:
+            w_ol = fs.outer_left_peak_width_px
+            w_or = fs.outer_right_peak_width_px
+        outer_left = peak_precision(
+            width=a_ol * float(w_ol), n_photons=photons.outer_left_peak_photons,
+            bg_rms=b_electrons(read_per_sline_px, fs.outer_left_peak_bg_counts),
+            pixel_size=a_ol)
+        outer_right = peak_precision(
+            width=a_or * float(w_or), n_photons=photons.outer_right_peak_photons,
+            bg_rms=b_electrons(read_per_sline_px, fs.outer_right_peak_bg_counts),
+            pixel_size=a_or)
+        sigmas = (outer_left.total, left.total, right.total, outer_right.total)
+        combined_total = math.sqrt(sum(
+            w * w * s * s for w, s in zip(four_peak.weights, sigmas)))
+
     return TheoreticalPeakStdError(
         left_peak_photons_mhz=left.photons * 1000,
         left_peak_pixelation_mhz=left.pixelation * 1000,
@@ -277,4 +315,10 @@ def theoretical_precision(fs: FittedSpectrum,
         right_peak_bg_mhz=right.background * 1000,
         right_peak_total_mhz=right.total * 1000,
         distance_total_mhz=dx_d_total * 1000,
+        outer_left_total_mhz=(outer_left.total * 1000
+                              if outer_left is not None else None),
+        outer_right_total_mhz=(outer_right.total * 1000
+                               if outer_right is not None else None),
+        combined_total_mhz=(combined_total * 1000
+                            if combined_total is not None else None),
     )

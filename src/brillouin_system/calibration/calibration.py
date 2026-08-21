@@ -51,6 +51,15 @@ class CalibrationPolyfitParameters:
     freq_peak_distance: Optional[np.ndarray] = field(default=None)
     calibration_width_left_peak: Optional[np.ndarray] = field(default=None)
     calibration_width_right_peak: Optional[np.ndarray] = field(default=None)
+    # px -> GHz tracks of the two OUTER VIPA orders, filled when the
+    # reference fit is four-peak (n_peaks = 4 in the [reference] config —
+    # the standard since 2026-08-21). Every order gets its own track from
+    # the same sideband frames and the same fitting pass as the inner pair.
+    # None on two-peak calibrations and on data saved before the field
+    # existed. No outer WIDTH tracks: the outer taus are provisional
+    # (positions yes, width claims no — 2026-08-20).
+    freq_outer_left_peak: Optional[np.ndarray] = field(default=None)
+    freq_outer_right_peak: Optional[np.ndarray] = field(default=None)
 
     # The measured sideband points behind the polynomials (one entry per
     # fitted calibration frame, sorted by px) — kept for calibration plots
@@ -62,6 +71,20 @@ class CalibrationPolyfitParameters:
     right_freq_points: Optional[np.ndarray] = field(default=None)
     dist_px_points: Optional[np.ndarray] = field(default=None)
     dist_freq_points: Optional[np.ndarray] = field(default=None)
+    outer_left_px_points: Optional[np.ndarray] = field(default=None)
+    outer_left_freq_points: Optional[np.ndarray] = field(default=None)
+    outer_right_px_points: Optional[np.ndarray] = field(default=None)
+    outer_right_freq_points: Optional[np.ndarray] = field(default=None)
+
+
+@dataclass
+class FourPeakShift:
+    """The four per-order frequency estimates of one fit and their
+    inverse-variance combination. Frequencies in GHz, ordered left to
+    right on the detector: outer_left, left, right, outer_right."""
+    freqs_ghz: tuple[float, float, float, float]
+    weights: tuple[float, float, float, float]
+    combined_ghz: float
 
 
 @dataclass
@@ -84,6 +107,17 @@ class AnalyzedFreqShifts:
     instrument_hwhm_right_peak_ghz: float | None = None
     linewidth_left_peak_ghz: float | None = None
     linewidth_right_peak_ghz: float | None = None
+    # Four-peak standard (2026-08-21): each outer order's shift through its
+    # OWN calibration track, and the inverse-variance combination of all
+    # four per-order estimates (Thompson photon-term weights — the
+    # brightest orders dominate). None unless BOTH the fit and the
+    # calibration are four-peak. The combination is the precision
+    # observable (validated 2026-08-13: 1.84 MHz diff-sd vs 2.07 for the
+    # distance); for ABSOLUTE nu_B the inner-pair distance stays the
+    # anchor (outer-order medians spread ~14 MHz absolute).
+    freq_shift_outer_left_peak_ghz: float | None = None
+    freq_shift_outer_right_peak_ghz: float | None = None
+    freq_shift_combined_ghz: float | None = None
 
 
 class CalibrationCalculator:
@@ -123,6 +157,94 @@ class CalibrationCalculator:
     def freq_peak_distance(self, px):
         """Frequency distance between left and right peaks [GHz] at pixel position px."""
         return np.polyval(self.p.freq_peak_distance, px)
+
+    # --- Outer-order tracks (four-peak calibrations only) ---
+
+    def has_outer_tracks(self) -> bool:
+        """True when this calibration carries the outer-order tracks."""
+        return (self.p.freq_outer_left_peak is not None
+                and self.p.freq_outer_right_peak is not None
+                and np.all(np.isfinite(np.asarray(self.p.freq_outer_left_peak, dtype=float)))
+                and np.all(np.isfinite(np.asarray(self.p.freq_outer_right_peak, dtype=float))))
+
+    def freq_outer_left_peak(self, px):
+        """Frequency of the outer-left VIPA order [GHz] at pixel position px."""
+        return np.polyval(self.p.freq_outer_left_peak, px)
+
+    def dfreq_dpx_outer_left_peak(self, px):
+        """Slope d(freq)/d(px) for the outer-left order [GHz/pixel]."""
+        return np.polyval(np.polyder(self.p.freq_outer_left_peak, m=1), px)
+
+    def freq_outer_right_peak(self, px):
+        """Frequency of the outer-right VIPA order [GHz] at pixel position px."""
+        return np.polyval(self.p.freq_outer_right_peak, px)
+
+    def dfreq_dpx_outer_right_peak(self, px):
+        """Slope d(freq)/d(px) for the outer-right order [GHz/pixel]."""
+        return np.polyval(np.polyder(self.p.freq_outer_right_peak, m=1), px)
+
+    def df_outer_left_peak(self, px, dpx):
+        """Convert dpx to GHz using the outer-left order's local slope."""
+        return self.dfreq_dpx_outer_left_peak(px) * dpx
+
+    def df_outer_right_peak(self, px, dpx):
+        """Convert dpx to GHz using the outer-right order's local slope."""
+        return self.dfreq_dpx_outer_right_peak(px) * dpx
+
+    def combined_shift(self, fitting: FittedSpectrum) -> FourPeakShift | None:
+        """ONE frequency measurement from the position estimates of all four
+        peaks, or None when the fit or the calibration is not four-peak.
+
+        Each order's fitted centre maps to the Brillouin shift through its
+        own track, giving four estimates of the same quantity; they are
+        combined by inverse-variance weighting. The weights are the Thompson
+        photon terms, which only need RELATIVE variances, so the gain and
+        all shared constants cancel:
+
+            var_i  ∝  s_i^2 / N_i  ∝  (w_i a_i)^2 / (amp_i w_i)  =  a_i^2 w_i / amp_i
+
+        with w the fitted width [px], a the track's local dispersion [GHz/px]
+        and amp the fitted amplitude (N ∝ amp*w, the exact peak area). The
+        photon term dominates the per-peak budget, so richer weights (read
+        noise, background) would move the combination negligibly while
+        dragging in the camera gain.
+        """
+        if (not fitting.is_success
+                or fitting.outer_left_peak_center_px is None
+                or not self.has_outer_tracks()):
+            return None
+
+        peaks = [
+            (fitting.outer_left_peak_center_px, fitting.outer_left_peak_width_px,
+             fitting.outer_left_peak_amplitude,
+             self.freq_outer_left_peak, self.dfreq_dpx_outer_left_peak),
+            (fitting.left_peak_center_px, fitting.left_peak_width_px,
+             fitting.left_peak_amplitude,
+             self.freq_left_peak, self.dfreq_dpx_left_peak),
+            (fitting.right_peak_center_px, fitting.right_peak_width_px,
+             fitting.right_peak_amplitude,
+             self.freq_right_peak, self.dfreq_dpx_right_peak),
+            (fitting.outer_right_peak_center_px, fitting.outer_right_peak_width_px,
+             fitting.outer_right_peak_amplitude,
+             self.freq_outer_right_peak, self.dfreq_dpx_outer_right_peak),
+        ]
+
+        freqs, weights = [], []
+        for cen, wid, amp, freq_of_px, slope_of_px in peaks:
+            freqs.append(float(freq_of_px(cen)))
+            a = float(slope_of_px(cen))
+            var = a * a * float(wid) / max(float(amp), 1e-12)
+            weights.append(1.0 / var)
+
+        w = np.asarray(weights, dtype=float)
+        f = np.asarray(freqs, dtype=float)
+        combined = float(np.sum(w * f) / np.sum(w))
+
+        return FourPeakShift(
+            freqs_ghz=tuple(f.tolist()),
+            weights=tuple((w / np.sum(w)).tolist()),
+            combined_ghz=combined,
+        )
 
     def dfreq_dpx_peak_distance(self, px):
         """Slope d(distance)/d(px) of peak separation in GHz/pixel at pixel position px."""
@@ -268,6 +390,7 @@ class CalibrationCalculator:
         inst_left, inst_right = self.instrument_hwhm_ghz(
             fitting.left_peak_center_px, fitting.right_peak_center_px)
         width_left, width_right = self.sample_linewidth_ghz(fitting)
+        combined = self.combined_shift(fitting)
 
         return AnalyzedFreqShifts(
             freq_shift_left_peak_ghz=self.freq_left_peak(fitting.left_peak_center_px),
@@ -279,6 +402,12 @@ class CalibrationCalculator:
             instrument_hwhm_right_peak_ghz=inst_right,
             linewidth_left_peak_ghz=width_left,
             linewidth_right_peak_ghz=width_right,
+            freq_shift_outer_left_peak_ghz=(combined.freqs_ghz[0]
+                                            if combined is not None else None),
+            freq_shift_outer_right_peak_ghz=(combined.freqs_ghz[3]
+                                             if combined is not None else None),
+            freq_shift_combined_ghz=(combined.combined_ghz
+                                     if combined is not None else None),
         )
 
     def print_all_models(self):
@@ -399,7 +528,13 @@ def calibrate(data: CalibrationData, polyfit_degree,
                 freqs_all.append(point.microwave_freq)
 
     if not all_fits:
-        raise ValueError("No successful fits found in calibration data.")
+        n_ref = resolve_fit_options(sf.reference_config).n_peaks
+        hint = ("" if n_ref != 4 else
+                " The reference config asks for n_peaks=4: a four-peak "
+                "calibration needs frames whose ROI contains all four VIPA "
+                "orders (and thresholds that find them) — set n_peaks=2 for "
+                "a main-pair-only ROI.")
+        raise ValueError("No successful fits found in calibration data." + hint)
 
     freqs_all = np.asarray(freqs_all, dtype=float)
     left_px = np.asarray([fs.left_peak_center_px for fs in all_fits], dtype=float)
@@ -420,7 +555,7 @@ def calibrate(data: CalibrationData, polyfit_degree,
     right_px_sorted, right_freq_sorted = sort_xy(right_px, freqs_all)
     dist_px_sorted, dist_freq_sorted = sort_xy(inter_px, freqs_all)
 
-    return CalibrationPolyfitParameters(
+    params = CalibrationPolyfitParameters(
         degree=degree,
         freq_left_peak=safe_polyfit(left_px, freqs_all, degree),
         freq_right_peak=safe_polyfit(right_px, freqs_all, degree),
@@ -434,3 +569,20 @@ def calibrate(data: CalibrationData, polyfit_degree,
         dist_px_points=dist_px_sorted,
         dist_freq_points=dist_freq_sorted,
     )
+
+    # Four-peak calibration (the standard where the ROI allows it): the SAME
+    # fits carry the outer-order sideband positions, so every order gets its
+    # own track from the one fitting pass — nothing is refitted.
+    if all(fs.outer_left_peak_center_px is not None for fs in all_fits):
+        outer_left_px = np.asarray(
+            [fs.outer_left_peak_center_px for fs in all_fits], dtype=float)
+        outer_right_px = np.asarray(
+            [fs.outer_right_peak_center_px for fs in all_fits], dtype=float)
+        params.freq_outer_left_peak = safe_polyfit(outer_left_px, freqs_all, degree)
+        params.freq_outer_right_peak = safe_polyfit(outer_right_px, freqs_all, degree)
+        (params.outer_left_px_points,
+         params.outer_left_freq_points) = sort_xy(outer_left_px, freqs_all)
+        (params.outer_right_px_points,
+         params.outer_right_freq_points) = sort_xy(outer_right_px, freqs_all)
+
+    return params

@@ -419,6 +419,9 @@ class HiBackend:
             return float(calc.freq_left_peak(fitting.left_peak_center_px))
         if reference == "right":
             return float(calc.freq_right_peak(fitting.right_peak_center_px))
+        if reference == "combined":
+            combined = calc.combined_shift(fitting)
+            return combined.combined_ghz if combined is not None else None
         return float(calc.freq_peak_distance(fitting.inter_peak_distance))
 
     def get_hwhm_shift(self, fitting: FittedSpectrum) -> tuple:

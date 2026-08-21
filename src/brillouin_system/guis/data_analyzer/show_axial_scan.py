@@ -79,8 +79,11 @@ def reference_freq(shifts: AnalyzedFreqShifts, reference: str) -> float | None:
         return shifts.freq_shift_right_peak_ghz
     if reference == "distance":
         return shifts.freq_shift_peak_distance_ghz
+    if reference == "combined":
+        return shifts.freq_shift_combined_ghz
     raise ValueError(
-        f"Unknown reference '{reference}'. Use 'left', 'right', or 'distance'.")
+        f"Unknown reference '{reference}'. Use 'left', 'right', 'distance', "
+        f"or 'combined'.")
 
 
 def reference_theo_total_mhz(theo, reference: str) -> float | None:
@@ -91,6 +94,8 @@ def reference_theo_total_mhz(theo, reference: str) -> float | None:
         return theo.right_peak_total_mhz
     if reference == "distance":
         return theo.distance_total_mhz
+    if reference == "combined":
+        return theo.combined_total_mhz
     return None
 
 

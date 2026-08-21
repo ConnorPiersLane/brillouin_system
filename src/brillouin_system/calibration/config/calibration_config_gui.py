@@ -40,15 +40,24 @@ class CalibrationConfigDialog(QDialog):
         self.left_radio = QRadioButton("Left Peak")
         self.right_radio = QRadioButton("Right Peak")
         self.dist_radio = QRadioButton("Peak Distance")
+        self.combined_radio = QRadioButton("Combined (4 peaks)")
+        self.combined_radio.setToolTip(
+            "Inverse-variance combination of all four orders' shifts — "
+            "needs n_peaks = 4 in both fitting sections; shows N/A "
+            "otherwise. Precision observable; the inner-pair distance "
+            "stays the absolute anchor."
+        )
 
         self.ref_group.addButton(self.left_radio)
         self.ref_group.addButton(self.right_radio)
         self.ref_group.addButton(self.dist_radio)
+        self.ref_group.addButton(self.combined_radio)
 
         ref_layout = QVBoxLayout()
         ref_layout.addWidget(self.left_radio)
         ref_layout.addWidget(self.right_radio)
         ref_layout.addWidget(self.dist_radio)
+        ref_layout.addWidget(self.combined_radio)
 
         # Save calibration frames checkbox
         self.save_frames_checkbox = QCheckBox("Save calibration frames with each scan")
@@ -83,6 +92,8 @@ class CalibrationConfigDialog(QDialog):
             self.left_radio.setChecked(True)
         elif cfg.reference == "right":
             self.right_radio.setChecked(True)
+        elif cfg.reference == "combined":
+            self.combined_radio.setChecked(True)
         else:
             self.dist_radio.setChecked(True)
 
@@ -112,6 +123,7 @@ class CalibrationConfigDialog(QDialog):
             reference = (
                 "left" if self.left_radio.isChecked() else
                 "right" if self.right_radio.isChecked() else
+                "combined" if self.combined_radio.isChecked() else
                 "distance"
             )
 

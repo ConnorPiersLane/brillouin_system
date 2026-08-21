@@ -158,6 +158,7 @@ class ResolvedFitOptions:
     background: str
     use_window: bool
     beta: float
+    n_peaks: int
 
 
 def resolve_fit_options(config) -> ResolvedFitOptions:
@@ -174,6 +175,7 @@ def resolve_fit_options(config) -> ResolvedFitOptions:
     use_window = bool(getattr(config, "use_window", True))
     background = str(getattr(config, "background", "flat"))
     beta = float(getattr(config, "beta", 4.0))
+    n_peaks = int(getattr(config, "n_peaks", 2))
     if model.endswith("_window"):
         model = model[: -len("_window")]
         use_window = True
@@ -187,7 +189,8 @@ def resolve_fit_options(config) -> ResolvedFitOptions:
         use_window = preset["use_window"]
         beta = preset["beta"]
     return ResolvedFitOptions(model=model, background=background,
-                              use_window=use_window, beta=beta)
+                              use_window=use_window, beta=beta,
+                              n_peaks=n_peaks)
 
 
 # The camera PSF working values live in the [global] section below
@@ -213,6 +216,14 @@ class FindPeaksConfig:
     # Baseline model, independent of the lineshape — see BACKGROUNDS above.
     background: str = "flat"
     beta: float = 4.0
+    # How many VIPA orders to fit: 2 = the inner main pair, 4 = all four
+    # orders jointly (each with its own per-position readout tail). The
+    # STANDARD since 2026-08-21 is 4 wherever the ROI contains the outer
+    # orders: the calibration then builds a track per order and analyze()
+    # reports per-order shifts plus their inverse-variance combination.
+    # Use the SAME n_peaks for [sample] and [reference] so calibration and
+    # samples share the fit convention.
+    n_peaks: int = 2
 
     def __post_init__(self):
         # All legacy-name and preset rules live in resolve_fit_options —
@@ -228,10 +239,15 @@ class FindPeaksConfig:
                 f"Unknown background '{resolved.background}'. "
                 f"Choose one of {BACKGROUNDS}."
             )
+        if resolved.n_peaks not in (2, 4):
+            raise ValueError(
+                f"n_peaks must be 2 or 4, got {resolved.n_peaks!r}."
+            )
         self.fitting_model = resolved.model
         self.background = resolved.background
         self.use_window = resolved.use_window
         self.beta = resolved.beta
+        self.n_peaks = resolved.n_peaks
 
 
 @dataclass
@@ -325,13 +341,14 @@ FIND_PEAKS_TOML_PATH = CONFIG_DIR / "find_peaks_config.toml"
 
 # Keys that used to live duplicated in the [sample]/[reference] sections
 # (under their OLD pr_* names): the camera constants moved to the global
-# [global] section (now psf_*), na_* is sample-only, n_peaks was removed with
-# the 4-peak mode. Dropped silently when an older TOML still carries them so
-# those files keep loading; any other unknown key still raises.
+# [global] section (now psf_*), na_* is sample-only. Dropped silently when
+# an older TOML still carries them so those files keep loading; any other
+# unknown key still raises. (n_peaks was in this set 2026-08-20/21 while
+# the 4-peak mode was argument-only; it is a real per-section field again.)
 _MOVED_SECTION_KEYS = {
     "pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px",
     "na_weighting", "na_collection", "na_beam_diameter_mm",
-    "na_focal_length_mm", "na_n_sample", "n_peaks",
+    "na_focal_length_mm", "na_n_sample",
 }
 
 def load_config_section(path: Path, section: str) -> FindPeaksConfig:

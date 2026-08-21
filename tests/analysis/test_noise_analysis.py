@@ -140,6 +140,61 @@ def _bound(fs, photons, calc, corr=0.0):
         preamp_gain=1.0, emccd_gain=0, corr_left_right=corr)
 
 
+def _four_peak_calculator():
+    """The linear calculator plus outer-order tracks."""
+    from dataclasses import replace as dc_replace
+    calc = _linear_calculator()
+    calc.p = dc_replace(
+        calc.p,
+        freq_outer_left_peak=np.array([0.30, -2.0]),
+        freq_outer_right_peak=np.array([-0.32, 55.0]),
+    )
+    return calc
+
+
+def _fitted_four_peaks():
+    from dataclasses import replace as dc_replace
+    return dc_replace(
+        _fitted_two_peaks(),
+        model="4lorentzian_x_psf_window",
+        outer_left_peak_center_px=8.0,
+        outer_left_peak_width_px=1.3,
+        outer_left_peak_amplitude=300.0,
+        outer_right_peak_center_px=78.0,
+        outer_right_peak_width_px=1.1,
+        outer_right_peak_amplitude=310.0,
+    )
+
+
+def test_four_peak_bound_covers_the_outer_orders_and_the_combination():
+    """With four peaks the bound reports per-outer-order totals and the
+    variance of the ACTUAL combined estimator, which must beat every
+    single order (four independent measurements of the same shift)."""
+    calc = _four_peak_calculator()
+    fs = _fitted_four_peaks()
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    assert photons.outer_left_peak_photons is not None
+
+    t = _bound(fs, photons, calc)
+    assert t.outer_left_total_mhz is not None
+    assert t.outer_right_total_mhz is not None
+    assert t.combined_total_mhz < t.left_peak_total_mhz
+    assert t.combined_total_mhz < t.right_peak_total_mhz
+    assert t.combined_total_mhz < t.outer_left_total_mhz
+    # the dim outer orders are individually worse than the bright inner pair
+    assert t.outer_left_total_mhz > t.left_peak_total_mhz
+
+
+def test_two_peak_fit_has_no_combined_bound():
+    calc = _four_peak_calculator()
+    fs = _fitted_two_peaks()
+    photons = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    t = _bound(fs, photons, calc)
+    assert t.combined_total_mhz is None
+    assert t.outer_left_total_mhz is None
+    assert photons.outer_left_peak_photons is None
+
+
 def test_distance_precision_combines_the_two_orders_in_quadrature():
     """With uncorrelated peaks, var(c_R - c_L) = var(c_R) + var(c_L)."""
     calc = _linear_calculator()

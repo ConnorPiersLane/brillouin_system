@@ -50,18 +50,32 @@ class AxialScanSummary:
     preamp_gain: float
 
     # Shift observables: mean over frames, plain sd, diff-sd, Thompson bound.
+    # The outer_*/combined rows are None unless the scan was fitted and
+    # calibrated four-peak (the standard since 2026-08-21); combined is the
+    # inverse-variance combination of all four orders — the precision
+    # observable (the inner-pair distance stays the absolute anchor).
     shift_left_ghz: float | None = None
     shift_right_ghz: float | None = None
     shift_distance_ghz: float | None = None
+    shift_outer_left_ghz: float | None = None
+    shift_outer_right_ghz: float | None = None
+    shift_combined_ghz: float | None = None
     sd_left_mhz: float | None = None
     sd_right_mhz: float | None = None
     sd_distance_mhz: float | None = None
+    sd_outer_left_mhz: float | None = None
+    sd_outer_right_mhz: float | None = None
+    sd_combined_mhz: float | None = None
     diff_sd_left_mhz: float | None = None
     diff_sd_right_mhz: float | None = None
     diff_sd_distance_mhz: float | None = None
+    diff_sd_outer_left_mhz: float | None = None
+    diff_sd_outer_right_mhz: float | None = None
+    diff_sd_combined_mhz: float | None = None
     thompson_left_mhz: float | None = None
     thompson_right_mhz: float | None = None
     thompson_distance_mhz: float | None = None
+    thompson_combined_mhz: float | None = None
 
     # Widths, mean over frames (GHz, HWHM as everywhere in the chain).
     hwhm_left_ghz: float | None = None
@@ -127,7 +141,12 @@ def summarize_axial_scan(
     for name, get in (
             ("left", lambda a: a.analyzed_shifts.freq_shift_left_peak_ghz),
             ("right", lambda a: a.analyzed_shifts.freq_shift_right_peak_ghz),
-            ("distance", lambda a: a.analyzed_shifts.freq_shift_peak_distance_ghz)):
+            ("distance", lambda a: a.analyzed_shifts.freq_shift_peak_distance_ghz),
+            ("outer_left",
+             lambda a: a.analyzed_shifts.freq_shift_outer_left_peak_ghz),
+            ("outer_right",
+             lambda a: a.analyzed_shifts.freq_shift_outer_right_peak_ghz),
+            ("combined", lambda a: a.analyzed_shifts.freq_shift_combined_ghz)):
         mean, sd, dsd = _stats(_series(analyzed, get))
         setattr(out, f"shift_{name}_ghz", mean)
         setattr(out, f"sd_{name}_mhz", sd)
@@ -169,6 +188,16 @@ def summarize_axial_scan(
             inter_peak_distance=mean_of("inter_peak_distance"),
             left_peak_bg_counts=mean_of("left_peak_bg_counts"),
             right_peak_bg_counts=mean_of("right_peak_bg_counts"),
+            # Four-peak scans: the outer orders enter the one bound at
+            # their scan means too (None on two-peak scans).
+            outer_left_peak_center_px=mean_of("outer_left_peak_center_px"),
+            outer_left_peak_width_px=mean_of("outer_left_peak_width_px"),
+            outer_left_peak_amplitude=mean_of("outer_left_peak_amplitude"),
+            outer_left_peak_bg_counts=mean_of("outer_left_peak_bg_counts"),
+            outer_right_peak_center_px=mean_of("outer_right_peak_center_px"),
+            outer_right_peak_width_px=mean_of("outer_right_peak_width_px"),
+            outer_right_peak_amplitude=mean_of("outer_right_peak_amplitude"),
+            outer_right_peak_bg_counts=mean_of("outer_right_peak_bg_counts"),
         )
         photons = PixelCountsAndPhotons.from_fit(
             fs=mean_fs, preamp_gain=info.preamp_gain, emccd_gain=info.gain)
@@ -181,6 +210,7 @@ def summarize_axial_scan(
         out.thompson_left_mhz = theo.left_peak_total_mhz
         out.thompson_right_mhz = theo.right_peak_total_mhz
         out.thompson_distance_mhz = theo.distance_total_mhz
+        out.thompson_combined_mhz = theo.combined_total_mhz
 
     # --- NA cone factor (post-hoc; never inside the fit) ---
     try:

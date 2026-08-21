@@ -112,8 +112,10 @@ def count_to_electrons(counts: int | float,
 class PixelCountsAndPhotons:
     """Per-peak signal behind a fit: counts (ADU) and photons (photoelectrons).
 
-    The production chain is two peaks: with a 4-peak fit the reported
-    left/right peaks are the inner main pair, so this stays pair-based.
+    left/right are the INNER main pair (with a 4-peak fit too, so every
+    existing consumer is unchanged); total_counts/total_photons stay the
+    INNER-PAIR sums for the same reason. The outer_* fields are filled
+    only by 4-peak fits (the standard since 2026-08-21), None otherwise.
     """
     left_peak_counts: float | None
     right_peak_counts: float | None
@@ -121,6 +123,10 @@ class PixelCountsAndPhotons:
     right_peak_photons: float | None
     total_counts: float | None
     total_photons: float | None
+    outer_left_peak_counts: float | None = None
+    outer_right_peak_counts: float | None = None
+    outer_left_peak_photons: float | None = None
+    outer_right_peak_photons: float | None = None
 
     @classmethod
     def from_fit(cls, fs: FittedSpectrum,
@@ -153,6 +159,13 @@ class PixelCountsAndPhotons:
             preamp_gain=preamp_gain, emccd_gain=emccd_gain,
             sensitivity_e_per_count=sensitivity_e_per_count)
 
+        outer_left_counts = outer_right_counts = None
+        if fs.outer_left_peak_center_px is not None:
+            outer_left_counts = float(
+                np.pi * fs.outer_left_peak_amplitude * fs.outer_left_peak_width_px)
+            outer_right_counts = float(
+                np.pi * fs.outer_right_peak_amplitude * fs.outer_right_peak_width_px)
+
         return cls(
             left_peak_counts=left_counts,
             right_peak_counts=right_counts,
@@ -160,4 +173,10 @@ class PixelCountsAndPhotons:
             right_peak_photons=right_counts * e_per_count,
             total_counts=left_counts + right_counts,
             total_photons=(left_counts + right_counts) * e_per_count,
+            outer_left_peak_counts=outer_left_counts,
+            outer_right_peak_counts=outer_right_counts,
+            outer_left_peak_photons=(outer_left_counts * e_per_count
+                                     if outer_left_counts is not None else None),
+            outer_right_peak_photons=(outer_right_counts * e_per_count
+                                      if outer_right_counts is not None else None),
         )

@@ -1,7 +1,8 @@
-"""Tests for the opt-in 4-peak fit (SpectrumFitter.fit(..., n_peaks=4)):
-selection by amplitude ranking, per-position tails (psf_tau_outer_* for the
-outer orders), reported left/right = the inner main pair, the outer_* result
-fields, and the outer-order frequency tracks + four-peak combination.
+"""Tests for the 4-peak fit (config n_peaks, or the fit(n_peaks=...)
+override): selection by amplitude ranking, per-position tails
+(psf_tau_outer_* for the outer orders), reported left/right = the inner
+main pair, the outer_* result fields, the per-order calibration tracks
+built by calibrate() in one pass, and the combined estimator.
 """
 import numpy as np
 import pytest
@@ -10,12 +11,8 @@ from brillouin_system.calibration.calibration import (
     CalibrationCalculator,
     CalibrationData,
     CalibrationMeasurementPoint,
-    CalibrationPolyfitParameters,
     MeasurementsPerFreq,
-)
-from brillouin_system.calibration.outer_order_tracks import (
-    build_outer_order_tracks,
-    four_peak_shift,
+    calibrate,
 )
 from dataclasses import replace
 
@@ -36,7 +33,7 @@ GAMMA = 1.0
 OFFSET = 80.0
 
 
-def make_config(model="prm0") -> FindPeaksConfig:
+def make_config(model="prm0", n_peaks=2) -> FindPeaksConfig:
     return FindPeaksConfig(
         prominence_fraction=0.05,
         min_peak_width=1,
@@ -44,6 +41,7 @@ def make_config(model="prm0") -> FindPeaksConfig:
         rel_height=0.5,
         wlen_pixels=20,
         fitting_model=model,
+        n_peaks=n_peaks,
     )
 
 
@@ -150,13 +148,31 @@ def test_four_peak_wrong_outer_tau_biases_outer_centre():
     assert abs(result.outer_left_peak_center_px - CENTERS[0]) > 0.15
 
 
-# ---------------- outer-order tracks + the four-peak combination ----------
+def test_config_driven_n_peaks():
+    """n_peaks=4 in the config makes fit() four-peak without the argument."""
+    fitter = make_fitter()
+    fitter.update_sample_config(make_config("prm0", n_peaks=4))
+    px, sline = make_spectrum()
+    result = fitter.fit(px, sline, is_reference_mode=False)
+    assert result.is_success
+    assert result.model.startswith("4")
+    assert result.outer_left_peak_center_px is not None
 
 
-def _reference_fitter() -> SpectrumFitter:
+def test_config_n_peaks_validation():
+    with pytest.raises(ValueError, match="n_peaks"):
+        make_config("prm0", n_peaks=3)
+
+
+# ---------------- per-order tracks + the four-peak combination ----------
+
+
+def _reference_fitter(n_peaks=4) -> SpectrumFitter:
     """A fitter whose sline is one frame row, for synthetic calibration
     frames (frame = the spectrum stacked over 3 rows)."""
     fitter = make_fitter()
+    fitter.update_reference_config(
+        make_config("lorentzian_x_psf", n_peaks=n_peaks))
     fitter.update_sline_config(replace(
         fitter.sline_config,
         pixel_offset_left=0, pixel_offset_right=0,
@@ -184,22 +200,35 @@ def _calibration_data(freqs_ghz, px_per_ghz=8.0):
     return CalibrationData(measured_freqs=blocks)
 
 
-def test_outer_tracks_recover_the_synthetic_dispersion():
+def test_four_peak_calibration_builds_a_track_per_order():
     freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
     data = _calibration_data(freqs)
-    tracks = build_outer_order_tracks(data, polyfit_degree=1,
-                                      fitter=_reference_fitter())
+    calc = CalibrationCalculator(calibrate(
+        data, polyfit_degree=1, fitter=_reference_fitter()))
+    assert calc.has_outer_tracks()
     # slope: 1 GHz per 8 px, sign per side
-    assert abs(tracks.dfreq_dpx_outer_left(30.0) - (-1.0 / 8.0)) < 0.01
-    assert abs(tracks.dfreq_dpx_outer_right(150.0) - (1.0 / 8.0)) < 0.01
+    assert abs(calc.dfreq_dpx_outer_left_peak(30.0) - (-1.0 / 8.0)) < 0.01
+    assert abs(calc.dfreq_dpx_outer_right_peak(150.0) - (1.0 / 8.0)) < 0.01
     # the track evaluates back to the set frequency at the fitted positions
-    assert abs(float(tracks.freq_outer_left_ghz(
-        tracks.outer_left_px_points[-1]))
-        - tracks.outer_left_freq_points[-1]) < 0.02
+    assert abs(float(calc.freq_outer_left_peak(
+        calc.p.outer_left_px_points[-1]))
+        - calc.p.outer_left_freq_points[-1]) < 0.02
+    # the inner tracks are built from the SAME four-peak fitting pass
+    assert abs(calc.dfreq_dpx_left_peak(80.0) - (-1.0 / 8.0)) < 0.01
 
 
-def test_outer_tracks_refuse_a_main_pair_only_calibration():
-    # frames holding only the main pair: the guard must raise, not fit junk
+def test_two_peak_calibration_carries_no_outer_tracks():
+    freqs = [4.0, 5.0, 6.0]
+    data = _calibration_data(freqs)
+    calc = CalibrationCalculator(calibrate(
+        data, polyfit_degree=1, fitter=_reference_fitter(n_peaks=2)))
+    assert not calc.has_outer_tracks()
+    assert calc.p.freq_outer_left_peak is None
+
+
+def test_four_peak_calibration_refuses_a_main_pair_only_roi():
+    # frames holding only the main pair: every 4-peak fit fails, and the
+    # raise names the n_peaks=4 requirement instead of fitting junk
     freqs = [4.0, 5.0, 6.0]
     blocks = []
     px = np.arange(0.0, 200.0)
@@ -214,28 +243,18 @@ def test_outer_tracks_refuse_a_main_pair_only_calibration():
             set_freq_ghz=f,
             cali_meas_points=[CalibrationMeasurementPoint(
                 frame=frame, microwave_freq=f)]))
-    with pytest.raises(ValueError, match="outer"):
-        build_outer_order_tracks(CalibrationData(measured_freqs=blocks),
-                                 polyfit_degree=1,
-                                 fitter=_reference_fitter())
+    with pytest.raises(ValueError, match="n_peaks=4"):
+        calibrate(CalibrationData(measured_freqs=blocks),
+                  polyfit_degree=1, fitter=_reference_fitter())
 
 
-def test_four_peak_shift_combines_the_orders():
+def test_combined_shift_combines_the_orders():
     freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
     data = _calibration_data(freqs)
     fitter = _reference_fitter()
-    tracks = build_outer_order_tracks(data, polyfit_degree=1, fitter=fitter)
-
-    # inner-pair calculator from the same synthetic sweep geometry
-    inner_left_px = [CENTERS[1] - 8.0 * (f - freqs[0]) for f in freqs]
-    inner_right_px = [CENTERS[2] + 8.0 * (f - freqs[0]) for f in freqs]
-    calc = CalibrationCalculator(CalibrationPolyfitParameters(
-        degree=1,
-        freq_left_peak=np.polyfit(inner_left_px, freqs, 1),
-        freq_right_peak=np.polyfit(inner_right_px, freqs, 1),
-        freq_peak_distance=np.polyfit(
-            np.subtract(inner_right_px, inner_left_px), freqs, 1),
-    ))
+    # ONE calibration pass yields the inner AND outer tracks
+    calc = CalibrationCalculator(calibrate(data, polyfit_degree=1,
+                                           fitter=fitter))
 
     # a "sample" frame at 5.0 GHz: all four orders agree by construction
     shift = 8.0 * (5.0 - freqs[0])
@@ -245,7 +264,7 @@ def test_four_peak_shift_combines_the_orders():
     fs = fitter.fit(px, sline, is_reference_mode=False, n_peaks=4)
     assert fs.is_success
 
-    result = four_peak_shift(fs, calc, tracks)
+    result = calc.combined_shift(fs)
     # every order and the combination agree with the truth
     for f in result.freqs_ghz:
         assert abs(f - 5.0) < 0.02
@@ -255,9 +274,23 @@ def test_four_peak_shift_combines_the_orders():
     assert result.weights[1] > result.weights[0]
     assert result.weights[2] > result.weights[3]
 
+    # analyze() carries the per-order shifts and the combination
+    shifts = calc.analyze(fs)
+    assert shifts.freq_shift_combined_ghz == pytest.approx(result.combined_ghz)
+    assert abs(shifts.freq_shift_outer_left_peak_ghz - 5.0) < 0.02
+    assert abs(shifts.freq_shift_outer_right_peak_ghz - 5.0) < 0.02
 
-def test_four_peak_shift_requires_a_four_peak_fit():
+
+def test_combined_shift_is_none_without_four_peaks():
+    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    calc = CalibrationCalculator(calibrate(
+        _calibration_data(freqs), polyfit_degree=1,
+        fitter=_reference_fitter()))
     px, sline = make_spectrum()
     fs = make_fitter().fit(px, sline, is_reference_mode=False)  # two-peak
-    with pytest.raises(ValueError, match="n_peaks=4"):
-        four_peak_shift(fs, None, None)
+    assert calc.combined_shift(fs) is None
+    shifts = calc.analyze(fs)
+    assert shifts.freq_shift_combined_ghz is None
+    assert shifts.freq_shift_outer_left_peak_ghz is None
+    # the inner-pair observables are untouched by the missing combination
+    assert shifts.freq_shift_peak_distance_ghz is not None
