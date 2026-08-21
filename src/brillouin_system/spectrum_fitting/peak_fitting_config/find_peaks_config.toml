@@ -2,6 +2,7 @@
 pixel_offset_left = 0
 pixel_offset_right = 0
 selected_rows = [
+    7,
     8,
     9,
     10,
@@ -13,9 +14,10 @@ selected_rows = [
     16,
     17,
     18,
+    19,
 ]
-row_selection = "auto"
-n_rows = 11
+row_selection = "manual"
+n_rows = 13
 
 [sample]
 prominence_fraction = 0.001

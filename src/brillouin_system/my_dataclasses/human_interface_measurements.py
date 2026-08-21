@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -107,11 +107,14 @@ class AxialScan:
     # (approach_um is otherwise only recoverable from the raw Zaber logs).
     sweep_config: SweepScanConfig | None = None
     scanning_config: ScanningConfig | None = None
-    # Camera rows summed into the spectral line for this scan. Recorded so a
-    # re-fit reproduces the acquisition exactly: which rows are summed shifts
-    # the individual peaks by ~3-4 MHz per row (the line is tilted), so a
-    # re-analysis on a different band would not reproduce the stored shifts.
-    # fit_axial_scan() applies these when present.
+    # Camera rows summed into the spectral line AT ACQUISITION — provenance
+    # only (user rule 2026-08-20): re-analysis always uses the LIVE fitter
+    # config, never these. Safe, because calibration and samples share one
+    # fitter and hence one band: a common band move is common-mode in pixel
+    # space and changes calibrated shifts by only ~0.1-0.8 MHz per peak /
+    # <0.4 MHz on the distance per 2 rows (measured 2026-08-20, 3 sessions).
+    # The ~3-4 MHz/row danger is a calibration-vs-sample band MISMATCH,
+    # which the shared fitter rules out.
     sline_rows: list[int] | None = None
 
 # -------------- Scan Fitting --------------
@@ -171,6 +174,10 @@ def calibration_for_scan(scan: AxialScan, fitter: SpectrumFitter) -> Calibration
 def stored_sline_rows(scan: AxialScan) -> list[int] | None:
     """The scan's stored acquisition row band as a plain int list, or None.
 
+    PROVENANCE ONLY (user rule 2026-08-20): the analysis never applies these
+    — the fitter always follows the live config. Kept for display and for
+    documenting how a scan was taken.
+
     Scans loaded from HDF5 carry sline_rows as a numpy array, whose truth
     value is ambiguous — `if scan.sline_rows:` raises ValueError on them.
     Always go through this helper.
@@ -182,22 +189,19 @@ def stored_sline_rows(scan: AxialScan) -> list[int] | None:
 
 
 def fitter_for_scan(scan: AxialScan) -> SpectrumFitter:
-    """A SpectrumFitter pinned to the scan's stored acquisition row band.
+    """A SpectrumFitter for re-analyzing a scan — the LIVE config, always.
 
-    Re-fit on the rows the scan was acquired with, not on whatever the
-    current config says — a different band would shift the peaks by a few
-    MHz each and the re-fit would not reproduce the stored shifts.
+    USER RULE (2026-08-20): the fitter always does what the current fitter
+    config says; the scan's stored acquisition band (AxialScan.sline_rows)
+    is provenance only and is NOT applied. Measured justification: with the
+    calibration re-fitted on the same band as the samples (which
+    calibration_for_scan guarantees), moving the band is common-mode in
+    pixel space — a 2-row move changes calibrated shifts by only
+    0.1-0.8 MHz per peak, <0.4 MHz on the distance (3 sessions, 2026-08-20).
+    The old ~3-4 MHz/row figure applies to a calibration-vs-sample band
+    MISMATCH, which one shared fitter cannot produce.
     """
-    spectrum_fitter = SpectrumFitter()
-    sline_rows = stored_sline_rows(scan)
-    if sline_rows is not None:
-        sline_config = replace(
-            spectrum_fitter.sline_config,
-            selected_rows=sline_rows,
-            row_selection="manual",
-        )
-        spectrum_fitter.update_sline_config(sline_config)
-    return spectrum_fitter
+    return SpectrumFitter()
 
 
 def fit_axial_scan(scan: AxialScan,
@@ -209,15 +213,17 @@ def fit_axial_scan(scan: AxialScan,
     fitter / calibration_calculator let a caller that already built them
     (e.g. the analyzer GUI, which also needs the calculator for calibration
     plots) inject them instead of paying for a second calibration re-fit.
-    A supplied fitter must carry the scan's row band — build it with
-    fitter_for_scan().
+    The row band, like everything else, comes from the fitter's LIVE config
+    (user rule 2026-08-20 — the stored acquisition band is provenance only);
+    calibration and samples share the fitter, so they always share the band.
     """
     spectrum_fitter = fitter if fitter is not None else fitter_for_scan(scan)
-    sline_rows = stored_sline_rows(scan)
     if calibration_calculator is None:
         calibration_calculator = calibration_for_scan(scan, spectrum_fitter)
 
     is_reference_mode = scan.system_state.is_reference_mode
+    rows_used = spectrum_fitter.get_selected_rows(
+        np.asarray(scan.measurements[0].frame_andor))
 
     # The reflection background (prmr preset) needs the packaged
     # reflection template registered onto THIS scan's own calibration —
@@ -225,10 +231,9 @@ def fit_axial_scan(scan: AxialScan,
     reflection_mapper = None
     if not is_reference_mode and config_requires_reflection_background(
             spectrum_fitter.sample_config):
-        n_rows = len(sline_rows) if sline_rows is not None else None
         reflection_mapper = ReflectionBackgroundMapper(
             ReflectionBackground.load_default(), calibration_calculator,
-            n_rows=n_rows)
+            n_rows=len(rows_used))
 
     list_analyzed_spectras: list[AnalyzedSpectrum] = []
 

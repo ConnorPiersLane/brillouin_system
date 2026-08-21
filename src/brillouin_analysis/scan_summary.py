@@ -35,7 +35,6 @@ from brillouin_system.my_dataclasses.human_interface_measurements import (
     calibration_for_scan,
     fit_axial_scan,
     fitter_for_scan,
-    stored_sline_rows,
 )
 from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
 from brillouin_system.spectrum_fitting.noise_analysis import (
@@ -186,10 +185,9 @@ def summarize_axial_scan(
             level = (ccd_config.get().dark_median_counts
                      or float(np.median(np.asarray(
                          scan.measurements[0].frame_andor, dtype=float))))
-        rows = stored_sline_rows(scan)
-        if rows is None:
-            rows = fitter.get_selected_rows(np.asarray(
-                scan.measurements[0].frame_andor, dtype=float))
+        # The band the analysis actually used — the live config, always.
+        rows = fitter.get_selected_rows(np.asarray(
+            scan.measurements[0].frame_andor, dtype=float))
 
         theo = theoretical_precision(
             fs=mean_fs, photons=photons, calibration_calculator=calc,

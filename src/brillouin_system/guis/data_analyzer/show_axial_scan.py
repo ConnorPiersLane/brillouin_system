@@ -254,13 +254,12 @@ class AxialScanViewer(QWidget):
         self._colorbar = show_frame(self.fig, self.ax_img, frame,
                                     colorbar=self._colorbar)
 
-        # Summed row band and fitted peak columns.
-        rows = stored_sline_rows(self.axial_scan)
-        if rows is None:
-            try:
-                rows = self.fitter.get_selected_rows(frame)
-            except Exception:
-                rows = None
+        # Summed row band (the band the ANALYSIS used — live config) and
+        # fitted peak columns.
+        try:
+            rows = self.fitter.get_selected_rows(frame)
+        except Exception:
+            rows = None
         if rows:
             for edge in (min(rows) - 0.5, max(rows) + 0.5):
                 self.ax_img.axhline(edge, color="cyan", ls="--", lw=1.0,
@@ -376,9 +375,7 @@ class AxialScanViewer(QWidget):
         else:
             level = (ccd_config.get().dark_median_counts
                      or float(np.median(first_frame)))
-        rows = stored_sline_rows(self.axial_scan)
-        if rows is None:
-            rows = self.fitter.get_selected_rows(first_frame)
+        rows = self.fitter.get_selected_rows(first_frame)
         bias_counts = level * len(rows)
         return theoretical_precision(
             fs=mean_fs, photons=photons, calibration_calculator=self.calc,
@@ -395,10 +392,11 @@ class AxialScanViewer(QWidget):
             return None
         if not config_requires_reflection_background(self.fitter.sample_config):
             return None
-        rows = stored_sline_rows(self.axial_scan)
+        rows = self.fitter.get_selected_rows(
+            np.asarray(self.axial_scan.measurements[0].frame_andor))
         mapper = ReflectionBackgroundMapper(
             ReflectionBackground.load_default(), self.calc,
-            n_rows=len(rows) if rows is not None else None)
+            n_rows=len(rows))
         return mapper.render(px)
 
     def _scan_mean_frame(self) -> np.ndarray:
@@ -622,7 +620,12 @@ class AxialScanViewer(QWidget):
                  f"preamp_gain={ss.andor_camera_info.preamp_gain}")
         rows = stored_sline_rows(scan)
         if rows is not None:
-            log.info(f"Stored sline rows: {rows[0]}-{rows[-1]} ({len(rows)} rows)")
+            log.info(f"Acquisition sline rows (provenance only): "
+                     f"{rows[0]}-{rows[-1]} ({len(rows)} rows)")
+        used = self.fitter.get_selected_rows(
+            np.asarray(scan.measurements[0].frame_andor))
+        log.info(f"Analysis sline rows (live config): "
+                 f"{used[0]}-{used[-1]} ({len(used)} rows)")
         if scan.reflection_result_forwards is not None:
             z = scan.reflection_result_forwards.event_z_um
             log.info(f"Plane (forwards): {round(z) if z is not None else None}")
