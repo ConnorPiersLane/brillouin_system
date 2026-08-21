@@ -158,7 +158,6 @@ class TheoreticalPeakStdError:
 
 
 def get_b_values(std_img, fit, k: float = 2.0,
-                 rows: list[int] | None = None,
                  ) -> tuple[float | None, float | None] | None:
     """Per-sline-pixel noise std near the left/right peaks, from a std frame.
 
@@ -167,9 +166,8 @@ def get_b_values(std_img, fit, k: float = 2.0,
     summed rows in quadrature, median inside a window of +-k*width around
     each fitted peak.
 
-    rows: the rows actually summed into the fitted sline. Pass them when
-    known (a scan's stored band can differ from the live config) — the
-    global sline config is only the fallback.
+    The rows come from the live sline config — which IS the band every fit
+    uses (row-band rule 2026-08-20: nothing stored overrides the config).
     """
     if std_img is None:
         return None
@@ -179,8 +177,7 @@ def get_b_values(std_img, fit, k: float = 2.0,
     H, W = std_img.shape
 
     # Select rows (same as in get_px_sline_from_image)
-    if rows is None:
-        rows = sline_from_frame_config.get().selected_rows
+    rows = sline_from_frame_config.get().selected_rows
     if not rows or not all(0 <= r < H for r in rows):
         print("[get_b_values] Warning: Invalid or empty row list — using full image height.")
         rows = list(range(H))
@@ -207,10 +204,14 @@ def get_b_values(std_img, fit, k: float = 2.0,
     return left_b, right_b
 
 
-def _n_summed_rows(rows: list[int] | None = None) -> int:
-    """Rows summed into the sline, for the read-noise fallback."""
-    if rows is not None:
-        return max(len(rows), 1)
+def _n_summed_rows() -> int:
+    """Rows summed into the sline, for the read-noise fallback.
+
+    From the live sline config — the single source of truth for the band
+    (row-band rule 2026-08-20). The row count is the one acquisition-
+    geometry fact the bound needs that a 1-D fit cannot carry: the sline is
+    a sum of n camera rows, so its per-pixel read noise is rn*sqrt(n).
+    """
     cfg = sline_from_frame_config.get()
     if cfg.row_selection == "auto":
         return int(cfg.n_rows)
@@ -225,7 +226,6 @@ def theoretical_precision(fs: FittedSpectrum,
                           emccd_gain: int | float,
                           corr_left_right: float = 0.0,
                           pedestal_bias_counts: float = 0.0,
-                          sline_rows: list[int] | None = None,
                           ) -> TheoreticalPeakStdError:
     """The Thompson bound of a production fit, in MHz — from ONE frame.
 
@@ -292,11 +292,11 @@ def theoretical_precision(fs: FittedSpectrum,
 
     if dark_frame_std is None:
         fallback = (ccd_config.get().read_noise_counts
-                    * math.sqrt(_n_summed_rows(sline_rows)))
+                    * math.sqrt(_n_summed_rows()))
         read_counts_l, read_counts_r = fallback, fallback
     else:
         read_counts_l, read_counts_r = get_b_values(std_img=dark_frame_std,
-                                                    fit=fs, rows=sline_rows)
+                                                    fit=fs)
 
     def b_electrons(read_counts, pedestal_counts):
         read_e = count_to_electrons(read_counts or 0.0,

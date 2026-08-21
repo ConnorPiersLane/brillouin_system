@@ -381,8 +381,7 @@ class AxialScanViewer(QWidget):
             fs=mean_fs, photons=photons, calibration_calculator=self.calc,
             dark_frame_std=dark.std_image if dark is not None else None,
             preamp_gain=info.preamp_gain, emccd_gain=info.gain,
-            pedestal_bias_counts=bias_counts,
-            sline_rows=rows)
+            pedestal_bias_counts=bias_counts)
 
     def _measured_background_for_fit(self, px: np.ndarray) -> np.ndarray | None:
         """The reflection background rendered for this scan, when the live
