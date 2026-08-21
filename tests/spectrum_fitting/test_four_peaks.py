@@ -33,7 +33,7 @@ GAMMA = 1.0
 OFFSET = 80.0
 
 
-def make_config(model="prm0", n_peaks=2) -> FindPeaksConfig:
+def make_config(model="prm0") -> FindPeaksConfig:
     return FindPeaksConfig(
         prominence_fraction=0.05,
         min_peak_width=1,
@@ -41,15 +41,14 @@ def make_config(model="prm0", n_peaks=2) -> FindPeaksConfig:
         rel_height=0.5,
         wlen_pixels=20,
         fitting_model=model,
-        n_peaks=n_peaks,
     )
 
 
-def make_fitter(model="prm0") -> SpectrumFitter:
+def make_fitter(model="prm0", n_peaks=2) -> SpectrumFitter:
     fitter = SpectrumFitter()
-    # kernel working values live in the [global] sline config
+    # kernel working values AND n_peaks live in the [global] sline config
     fitter.update_sline_config(replace(
-        fitter.sline_config,
+        fitter.sline_config, n_peaks=n_peaks,
         psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
         psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR))
     fitter.update_sample_config(make_config(model))
@@ -148,20 +147,26 @@ def test_four_peak_wrong_outer_tau_biases_outer_centre():
     assert abs(result.outer_left_peak_center_px - CENTERS[0]) > 0.15
 
 
-def test_config_driven_n_peaks():
-    """n_peaks=4 in the config makes fit() four-peak without the argument."""
-    fitter = make_fitter()
-    fitter.update_sample_config(make_config("prm0", n_peaks=4))
+def test_global_config_drives_n_peaks():
+    """n_peaks=4 in the GLOBAL sline config makes fit() four-peak without
+    the argument — for sample and reference fits alike (one ROI, one
+    peak count)."""
+    fitter = make_fitter(n_peaks=4)
     px, sline = make_spectrum()
-    result = fitter.fit(px, sline, is_reference_mode=False)
-    assert result.is_success
-    assert result.model.startswith("4")
-    assert result.outer_left_peak_center_px is not None
+    for is_reference in (False, True):
+        result = fitter.fit(px, sline, is_reference_mode=is_reference)
+        assert result.is_success
+        assert result.model.startswith("4")
+        assert result.outer_left_peak_center_px is not None
 
 
-def test_config_n_peaks_validation():
+def test_global_config_n_peaks_validation():
+    from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
+        SlineFromFrameConfig,
+    )
     with pytest.raises(ValueError, match="n_peaks"):
-        make_config("prm0", n_peaks=3)
+        SlineFromFrameConfig(pixel_offset_left=0, pixel_offset_right=0,
+                             selected_rows=[0], n_peaks=3)
 
 
 # ---------------- per-order tracks + the four-peak combination ----------
@@ -170,9 +175,7 @@ def test_config_n_peaks_validation():
 def _reference_fitter(n_peaks=4) -> SpectrumFitter:
     """A fitter whose sline is one frame row, for synthetic calibration
     frames (frame = the spectrum stacked over 3 rows)."""
-    fitter = make_fitter()
-    fitter.update_reference_config(
-        make_config("lorentzian_x_psf", n_peaks=n_peaks))
+    fitter = make_fitter(n_peaks=n_peaks)
     fitter.update_sline_config(replace(
         fitter.sline_config,
         pixel_offset_left=0, pixel_offset_right=0,

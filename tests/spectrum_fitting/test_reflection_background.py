@@ -198,7 +198,7 @@ def make_config(model: str) -> FindPeaksConfig:
 def make_fitter(sample_model="prmr", reference_model="lorentzian_x_psf"):
     fitter = SpectrumFitter()
     fitter.update_sline_config(replace(
-        fitter.sline_config, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
+        fitter.sline_config, n_peaks=2, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L,
         psf_tau_right_px=TAU_R))
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))

@@ -528,12 +528,11 @@ def calibrate(data: CalibrationData, polyfit_degree,
                 freqs_all.append(point.microwave_freq)
 
     if not all_fits:
-        n_ref = resolve_fit_options(sf.reference_config).n_peaks
-        hint = ("" if n_ref != 4 else
-                " The reference config asks for n_peaks=4: a four-peak "
-                "calibration needs frames whose ROI contains all four VIPA "
-                "orders (and thresholds that find them) — set n_peaks=2 for "
-                "a main-pair-only ROI.")
+        hint = ("" if int(sf.sline_config.n_peaks) != 4 else
+                " n_peaks=4 is set (global fitting config) but no frame "
+                "yielded a four-peak fit — this calibration was likely "
+                "recorded with a two-peak ROI (or the reference thresholds "
+                "miss the outer orders). Set n_peaks=2 for this data.")
         raise ValueError("No successful fits found in calibration data." + hint)
 
     freqs_all = np.asarray(freqs_all, dtype=float)

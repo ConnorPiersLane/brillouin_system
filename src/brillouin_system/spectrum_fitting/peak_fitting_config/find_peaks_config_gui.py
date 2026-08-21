@@ -88,25 +88,6 @@ class FindPeaksConfigDialog(QDialog):
         row.addWidget(combo)
         vlayout.addLayout(row)
 
-        # How many VIPA orders to fit. 4 is the standard where the ROI
-        # contains the outer orders; use the SAME value for sample and
-        # reference so calibration and samples share the fit convention.
-        row = QHBoxLayout()
-        row.addWidget(QLabel("N peaks"))
-        n_peaks_combo = QComboBox()
-        n_peaks_combo.addItems(["2", "4"])
-        n_peaks_combo.setToolTip(
-            "2: the inner main pair only.\n"
-            "4: all four VIPA orders jointly — each order gets its own "
-            "calibration track and the analysis reports the per-order "
-            "shifts plus their inverse-variance combination. Requires an "
-            "ROI containing the outer orders; keep sample and reference "
-            "on the same setting."
-        )
-        inputs["n_peaks"] = n_peaks_combo
-        row.addWidget(n_peaks_combo)
-        vlayout.addLayout(row)
-
         # NA correction (sample group only): the weighting selects the model,
         # the indented fields below are its parameters.
         if "na_collection" in extra_fields:
@@ -215,6 +196,24 @@ class FindPeaksConfigDialog(QDialog):
         row.addWidget(edit)
         layout.addLayout(row)
 
+        # How many VIPA orders to fit — GLOBAL: one ROI, one peak count,
+        # shared by the sample and reference fits.
+        row = QHBoxLayout()
+        row.addWidget(QLabel("N peaks (VIPA orders)"))
+        n_peaks_combo = QComboBox()
+        n_peaks_combo.addItems(["2", "4"])
+        n_peaks_combo.setToolTip(
+            "2: the inner main pair only.\n"
+            "4: all four VIPA orders jointly — each order gets its own "
+            "calibration track and the analysis reports the per-order "
+            "shifts plus their inverse-variance combination. Requires an "
+            "ROI containing the outer orders; on two-peak data the "
+            "calibration stops with an error and sample fits fail loudly."
+        )
+        self.global_inputs["n_peaks"] = n_peaks_combo
+        row.addWidget(n_peaks_combo)
+        layout.addLayout(row)
+
         # Pixel Offsets
         for key in ["pixel_offset_left", "pixel_offset_right"]:
             row = QHBoxLayout()
@@ -274,7 +273,6 @@ class FindPeaksConfigDialog(QDialog):
         for inputs, cfg in ((self.sample_inputs, sample),
                             (self.reference_inputs, reference)):
             inputs["fitting_model"].setCurrentText(cfg.fitting_model)
-            inputs["n_peaks"].setCurrentText(str(cfg.n_peaks))
             inputs["background"].setCurrentText(cfg.background)
             inputs["use_window"].setChecked(bool(cfg.use_window))
             inputs["beta"].setText(str(cfg.beta))
@@ -285,6 +283,7 @@ class FindPeaksConfigDialog(QDialog):
         self.global_inputs["selected_rows"].setText(", ".join(str(x) for x in global_cfg.selected_rows))
         self.global_inputs["row_selection"].setCurrentText(global_cfg.row_selection)
         self.global_inputs["n_rows"].setText(str(global_cfg.n_rows))
+        self.global_inputs["n_peaks"].setCurrentText(str(global_cfg.n_peaks))
 
     def create_buttons(self):
         layout = QHBoxLayout()
@@ -309,6 +308,7 @@ class FindPeaksConfigDialog(QDialog):
                 "selected_rows": self._parse_selected_rows(self.global_inputs["selected_rows"].text()),
                 "row_selection": self.global_inputs["row_selection"].currentText(),
                 "n_rows": max(self._parse(self.global_inputs["n_rows"].text(), "int"), 1),
+                "n_peaks": int(self.global_inputs["n_peaks"].currentText()),
             }
             # Camera PSF working values ride in the same [global] config.
             global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
@@ -374,7 +374,6 @@ class FindPeaksConfigDialog(QDialog):
         """Lineshape + the options that apply to any lineshape."""
         return {
             "fitting_model": inputs["fitting_model"].currentText(),
-            "n_peaks": int(inputs["n_peaks"].currentText()),
             "background": inputs["background"].currentText(),
             "use_window": inputs["use_window"].isChecked(),
         }

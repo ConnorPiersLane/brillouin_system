@@ -48,7 +48,7 @@ def make_fitter(sample_model: str, reference_model: str) -> SpectrumFitter:
     # camera kernel working values live in the [global] sline config; pin the
     # test values on the fitter directly
     fitter.update_sline_config(replace(
-        fitter.sline_config, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_LEFT,
+        fitter.sline_config, n_peaks=2, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_LEFT,
         psf_tau_right_px=TAU_RIGHT))
     return fitter
 

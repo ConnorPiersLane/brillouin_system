@@ -246,6 +246,9 @@ class SpectrumFitter:
         # samples (a one-row difference biases the two peaks by ~3-4 MHz in
         # opposite directions).
         self._auto_rows: list[int] | None = None
+        # One-shot flag: the "n_peaks=4 on two-peak data" error is reported
+        # once per fitter, not once per frame.
+        self._warned_missing_outer = False
 
     def update_configs(self, configs: FittingConfigs):
         self.update_sline_config(configs.sline_config)
@@ -258,6 +261,7 @@ class SpectrumFitter:
         self.sline_config = sline_config
         # A new sline config may change n_rows / the mode: re-locate the band.
         self._auto_rows = None
+        self._warned_missing_outer = False
 
     def auto_select_rows(self, frames) -> list[int]:
         """Locate and freeze the row band from a frame or a stack of frames.
@@ -464,8 +468,9 @@ class SpectrumFitter:
         required by (and only used with) background='reflection'
         (the 'prmr' preset).
 
-        n_peaks comes from the CONFIG (per section, [sample]/[reference] —
-        the four-peak standard since 2026-08-21); the argument overrides it
+        n_peaks comes from the GLOBAL config (sline_config.n_peaks — one
+        ROI, one peak count, shared by sample and reference fits; the
+        four-peak standard since 2026-08-21); the argument overrides it
         for analysis scripts and tests. n_peaks=4 jointly fits all four
         VIPA orders — each peak identical (amplitude/centre/width free)
         through the frozen kernel with its own per-position tau; the
@@ -551,7 +556,8 @@ class SpectrumFitter:
         # the offset/background model to handle negative baseline excursions.
         sline = np.clip(sline, 0, None)
 
-        n_requested = n_peaks if n_peaks is not None else opts.n_peaks
+        n_requested = (n_peaks if n_peaks is not None
+                       else int(self.sline_config.n_peaks))
         if n_requested not in (2, 4):
             raise ValueError(f"n_peaks must be 2 or 4, got {n_requested!r}.")
 
@@ -579,9 +585,18 @@ class SpectrumFitter:
             # the ROI/thresholds don't support it — fail loudly, no silent
             # fallback to a different model layout.
             if n_requested == 4 and 1 <= n_found < 4:
-                log.warning(f"[SpectrumFitter] n_peaks=4 requested but only "
-                            f"{n_found} peak(s) detected — the ROI must "
-                            f"contain the outer VIPA orders.")
+                # Once per fitter, not per frame: on a two-peak ROI every
+                # frame would repeat it; the failed fits carry the record.
+                if not self._warned_missing_outer:
+                    self._warned_missing_outer = True
+                    log.error(f"[SpectrumFitter] n_peaks=4 but only "
+                              f"{n_found} peak(s) detected — this data "
+                              f"was likely recorded with a two-peak ROI "
+                              f"(or the thresholds miss the outer "
+                              f"orders). Fits fail until n_peaks is set "
+                              f"to 2 in the global fitting config. "
+                              f"Reported once; further frames fail "
+                              f"silently.")
             return self._failed_fit(px, sline, self._fit_kind(
                 n_requested, requested_model, use_window, background))
 
