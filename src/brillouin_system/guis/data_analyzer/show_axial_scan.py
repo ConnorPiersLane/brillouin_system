@@ -52,7 +52,7 @@ from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.my_dataclasses.human_interface_measurements import (
     AnalyzedSpectrum, AxialScan, calibration_for_scan, fit_axial_scan,
-    fitter_for_scan, stored_sline_rows,
+    fitter_for_scan,
 )
 from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.spectrum_fitting.noise_analysis import (
@@ -618,10 +618,6 @@ class AxialScanViewer(QWidget):
                  f"exposure={ss.andor_camera_info.exposure}, "
                  f"emccd_gain={ss.andor_camera_info.gain}, "
                  f"preamp_gain={ss.andor_camera_info.preamp_gain}")
-        rows = stored_sline_rows(scan)
-        if rows is not None:
-            log.info(f"Acquisition sline rows (provenance only): "
-                     f"{rows[0]}-{rows[-1]} ({len(rows)} rows)")
         used = self.fitter.get_selected_rows(
             np.asarray(scan.measurements[0].frame_andor))
         log.info(f"Analysis sline rows (live config): "

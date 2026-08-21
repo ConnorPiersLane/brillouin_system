@@ -107,15 +107,15 @@ class AxialScan:
     # (approach_um is otherwise only recoverable from the raw Zaber logs).
     sweep_config: SweepScanConfig | None = None
     scanning_config: ScanningConfig | None = None
-    # Camera rows summed into the spectral line AT ACQUISITION — provenance
-    # only (user rule 2026-08-20): re-analysis always uses the LIVE fitter
-    # config, never these. Safe, because calibration and samples share one
-    # fitter and hence one band: a common band move is common-mode in pixel
-    # space and changes calibrated shifts by only ~0.1-0.8 MHz per peak /
-    # <0.4 MHz on the distance per 2 rows (measured 2026-08-20, 3 sessions).
-    # The ~3-4 MHz/row danger is a calibration-vs-sample band MISMATCH,
-    # which the shared fitter rules out.
-    sline_rows: list[int] | None = None
+    # NOTE: an sline_rows field existed 2026-08 only (the acquisition row
+    # band) and was REMOVED 2026-08-20 (user decision): the fitter always
+    # follows the live config, so storing the band served no purpose. Safe,
+    # because calibration and samples share one fitter and hence one band —
+    # a common band move is common-mode in pixel space (measured: 2 rows
+    # move calibrated shifts 0.1-0.8 MHz per peak, <0.4 MHz on the
+    # distance; the ~3-4 MHz/row danger is a cal-vs-sample band MISMATCH,
+    # which the shared fitter rules out). Old files carrying the field
+    # still load (h5 drops unknown fields, pickles keep it inert).
 
 # -------------- Scan Fitting --------------
 @dataclass
@@ -171,36 +171,12 @@ def calibration_for_scan(scan: AxialScan, fitter: SpectrumFitter) -> Calibration
     return CalibrationCalculator(parameters=scan.calibration_params)
 
 
-def stored_sline_rows(scan: AxialScan) -> list[int] | None:
-    """The scan's stored acquisition row band as a plain int list, or None.
-
-    PROVENANCE ONLY (user rule 2026-08-20): the analysis never applies these
-    — the fitter always follows the live config. Kept for display and for
-    documenting how a scan was taken.
-
-    Scans loaded from HDF5 carry sline_rows as a numpy array, whose truth
-    value is ambiguous — `if scan.sline_rows:` raises ValueError on them.
-    Always go through this helper.
-    """
-    rows = getattr(scan, "sline_rows", None)
-    if rows is None or len(rows) == 0:
-        return None
-    return [int(r) for r in rows]
-
-
 def fitter_for_scan(scan: AxialScan) -> SpectrumFitter:
     """A SpectrumFitter for re-analyzing a scan — the LIVE config, always.
 
     USER RULE (2026-08-20): the fitter always does what the current fitter
-    config says; the scan's stored acquisition band (AxialScan.sline_rows)
-    is provenance only and is NOT applied. Measured justification: with the
-    calibration re-fitted on the same band as the samples (which
-    calibration_for_scan guarantees), moving the band is common-mode in
-    pixel space — a 2-row move changes calibrated shifts by only
-    0.1-0.8 MHz per peak, <0.4 MHz on the distance (3 sessions, 2026-08-20).
-    The old ~3-4 MHz/row figure applies to a calibration-vs-sample band
-    MISMATCH, which one shared fitter cannot produce.
-    """
+    config says; nothing stored on the scan steers it (see the note on the
+    removed sline_rows field in AxialScan)."""
     return SpectrumFitter()
 
 
