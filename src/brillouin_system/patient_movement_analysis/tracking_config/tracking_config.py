@@ -17,7 +17,8 @@ from typing import Any
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 
 @dataclass
@@ -33,7 +34,7 @@ class TrackingConfig:
     max_track_time_s: float = 300.0     # safety cap on one tracking session
 
 
-TRACKING_TOML_PATH = Path(__file__).parent.resolve() / "tracking_config.toml"
+TRACKING_TOML_PATH = CONFIG_DIR / "tracking_config.toml"
 
 
 def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
@@ -73,4 +74,4 @@ def save_tracking_config(config: ThreadSafeConfig, path: Path = TRACKING_TOML_PA
         tomli_w.dump(data, f)
 
 
-tracking_config = ThreadSafeConfig(load_tracking_config())
+tracking_config = LazyThreadSafeConfig(lambda: load_tracking_config())

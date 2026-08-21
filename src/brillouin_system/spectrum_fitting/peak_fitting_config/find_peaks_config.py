@@ -3,7 +3,8 @@ from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 import tomli
 import tomli_w
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 # The model name selects the LINESHAPE only. Windowing (use_window) and the
 # baseline (background) are independent toggles that apply to any lineshape.
@@ -320,7 +321,7 @@ class FittingConfigs:
     reference_config: FindPeaksConfig
     sline_config: SlineFromFrameConfig
 
-FIND_PEAKS_TOML_PATH = Path(__file__).parent / "find_peaks_config.toml"
+FIND_PEAKS_TOML_PATH = CONFIG_DIR / "find_peaks_config.toml"
 
 # Keys that used to live duplicated in the [sample]/[reference] sections
 # (under their OLD pr_* names): the camera constants moved to the global
@@ -355,6 +356,6 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig):
         tomli_w.dump(data, f)
 
 # Global configuration instances
-find_peaks_sample_config = ThreadSafeConfig(load_config_section(FIND_PEAKS_TOML_PATH, "sample"))
-find_peaks_reference_config = ThreadSafeConfig(load_config_section(FIND_PEAKS_TOML_PATH, "reference"))
-sline_from_frame_config = ThreadSafeConfig(load_sline_from_frame_config(FIND_PEAKS_TOML_PATH))
+find_peaks_sample_config = LazyThreadSafeConfig(lambda: load_config_section(FIND_PEAKS_TOML_PATH, "sample"))
+find_peaks_reference_config = LazyThreadSafeConfig(lambda: load_config_section(FIND_PEAKS_TOML_PATH, "reference"))
+sline_from_frame_config = LazyThreadSafeConfig(lambda: load_sline_from_frame_config(FIND_PEAKS_TOML_PATH))

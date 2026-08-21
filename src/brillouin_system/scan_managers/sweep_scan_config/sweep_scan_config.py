@@ -17,7 +17,8 @@ from typing import Any
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 
 @dataclass
@@ -44,7 +45,7 @@ class SweepScanConfig:
     min_peak_fraction: float = 0.3
 
 
-SWEEP_SCAN_TOML_PATH = Path(__file__).parent.resolve() / "sweep_scan_config.toml"
+SWEEP_SCAN_TOML_PATH = CONFIG_DIR / "sweep_scan_config.toml"
 
 
 def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
@@ -85,4 +86,4 @@ def save_sweep_scan_config(config: ThreadSafeConfig, path: Path = SWEEP_SCAN_TOM
         tomli_w.dump(data, f)
 
 
-sweep_scan_config = ThreadSafeConfig(load_sweep_scan_config())
+sweep_scan_config = LazyThreadSafeConfig(lambda: load_sweep_scan_config())

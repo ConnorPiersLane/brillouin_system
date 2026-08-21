@@ -7,7 +7,8 @@ from typing import Any
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 
 @dataclass
@@ -30,7 +31,7 @@ class ScanningConfig:
     min_samples_above: int = 3
 
 
-AXIAL_SCANNING_TOML_PATH = Path(__file__).parent.resolve() / "scanning_config.toml"
+AXIAL_SCANNING_TOML_PATH = CONFIG_DIR / "scanning_config.toml"
 
 
 # old-name shims for backward compatibility
@@ -109,6 +110,6 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> N
         tomli_w.dump(data, f)
 
 
-axial_scanning_config = ThreadSafeConfig(
+axial_scanning_config = LazyThreadSafeConfig(lambda: 
     load_axial_scanning_config(AXIAL_SCANNING_TOML_PATH, "axial_scanning")
 )

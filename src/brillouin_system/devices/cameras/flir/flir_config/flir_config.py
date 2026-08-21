@@ -2,7 +2,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 @dataclass
 class FLIRConfig:
@@ -25,7 +26,7 @@ _max_gamma = 4.0
 _min_gamma = 0.25
 
 # Path to config file
-flir_config_toml_path = Path(__file__).parent.resolve() / "flir_config.toml"
+flir_config_toml_path = CONFIG_DIR / "flir_config.toml"
 
 def load_flir_settings(path: Path) -> FLIRConfig:
     with path.open("rb") as f:
@@ -40,4 +41,4 @@ def save_flir_settings(path: Path, config: ThreadSafeConfig):
         tomli_w.dump(data, f)
 
 # Global config instance
-flir_config = ThreadSafeConfig(load_flir_settings(flir_config_toml_path))
+flir_config = LazyThreadSafeConfig(lambda: load_flir_settings(flir_config_toml_path))

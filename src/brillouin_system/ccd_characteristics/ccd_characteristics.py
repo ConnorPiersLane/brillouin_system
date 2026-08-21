@@ -31,7 +31,7 @@ from pathlib import Path
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 CCD_TOML_PATH = Path(__file__).parent / "ccd_characteristics.toml"
 
@@ -137,5 +137,5 @@ def save_ccd_section(section: str, config: ThreadSafeConfig,
 
 
 # Global instances
-ccd_config = ThreadSafeConfig(load_ccd_characteristics(CCD_TOML_PATH))
-psf_measurement_config = ThreadSafeConfig(load_psf_measurement(CCD_TOML_PATH))
+ccd_config = LazyThreadSafeConfig(lambda: load_ccd_characteristics(CCD_TOML_PATH))
+psf_measurement_config = LazyThreadSafeConfig(lambda: load_psf_measurement(CCD_TOML_PATH))

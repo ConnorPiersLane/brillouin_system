@@ -5,9 +5,10 @@ from random import Random
 
 import tomli
 import tomli_w
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
-CALIBRATION_TOML_PATH = Path(__file__).parent / "calibration_config.toml"
+CALIBRATION_TOML_PATH = CONFIG_DIR / "calibration_config.toml"
 
 
 def _strided_order(freqs: list[float]) -> list[float]:
@@ -108,4 +109,4 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
 
 
 # Global instance
-calibration_config = ThreadSafeConfig(load_calibration_config(CALIBRATION_TOML_PATH))
+calibration_config = LazyThreadSafeConfig(lambda: load_calibration_config(CALIBRATION_TOML_PATH))

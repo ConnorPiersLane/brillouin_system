@@ -3,7 +3,8 @@ from pathlib import Path
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 
 @dataclass
@@ -23,7 +24,7 @@ class AndorConfig:
 
 # ---------- Load/save helpers ----------
 
-andor_config_toml_path = Path(__file__).parent.resolve() / "andor_config.toml"
+andor_config_toml_path = CONFIG_DIR / "andor_config.toml"
 
 
 
@@ -59,4 +60,4 @@ def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):
 
 # ---------- Global instances ----------
 
-andor_frame_config = ThreadSafeConfig(load_andor_frame_settings(andor_config_toml_path))
+andor_frame_config = LazyThreadSafeConfig(lambda: load_andor_frame_settings(andor_config_toml_path))

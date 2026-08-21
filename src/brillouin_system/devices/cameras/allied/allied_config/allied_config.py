@@ -2,7 +2,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 @dataclass
 class AlliedConfig:
@@ -16,7 +17,7 @@ class AlliedConfig:
     gamma: float
 
 # Path to config file
-allied_config_toml_path = Path(__file__).parent.resolve() / "allied_config.toml"
+allied_config_toml_path = CONFIG_DIR / "allied_config.toml"
 
 def load_allied_settings(path: Path, section: str) -> AlliedConfig:
     """Load config for given section (e.g. 'left', 'right')."""
@@ -37,6 +38,6 @@ def save_allied_settings(path: Path, config_map: dict):
 
 # Global configs for left & right cameras
 allied_config = {
-    "left": ThreadSafeConfig(load_allied_settings(allied_config_toml_path, "left")),
-    "right": ThreadSafeConfig(load_allied_settings(allied_config_toml_path, "right")),
+    "left": LazyThreadSafeConfig(lambda: load_allied_settings(allied_config_toml_path, "left")),
+    "right": LazyThreadSafeConfig(lambda: load_allied_settings(allied_config_toml_path, "right")),
 }
