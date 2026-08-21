@@ -367,14 +367,29 @@ class FindPeaksConfigDialog(QDialog):
         )
 
     def _parse(self, value, field):
+        # Raise instead of silently coercing: a typo (or an empty field)
+        # must surface in the Apply/Save error dialog, never become 0.
         value = value.strip()
+        kind = "number" if self._is_float_field(field) else "integer"
         try:
             return float(value) if self._is_float_field(field) else int(value)
         except ValueError:
-            return 0
+            raise ValueError(f"'{field}' must be a {kind}, got '{value}'.")
 
     def _parse_selected_rows(self, text):
-        return [int(x.strip()) for x in text.split(",") if x.strip().isdigit()]
+        # Empty is fine (auto row selection); a malformed token is not.
+        rows = []
+        for token in text.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if not token.isdigit():
+                raise ValueError(
+                    f"Selected rows must be comma-separated integers, "
+                    f"got '{token}'."
+                )
+            rows.append(int(token))
+        return rows
 
 
 # ---------- Example usage ----------

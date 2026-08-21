@@ -46,14 +46,6 @@ import numpy as np
 from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
-# Backwards-compatible module aliases, frozen at import time. The functions
-# below read the LIVE ccd_config instead — prefer that in new code.
-SENSITIVITY_E_PER_COUNT_PREAMP_1X = (
-    ccd_config.get().sensitivity_e_per_count_preamp_1x)
-SENSITIVITY_E_PER_COUNT_EM_PREAMP_1X: float | None = (
-    ccd_config.get().sensitivity_e_per_count_em_preamp_1x or None)
-EM_EXCESS_NOISE_FACTOR = ccd_config.get().em_excess_noise_factor
-
 
 def electrons_per_count(preamp_gain: int | float,
                         emccd_gain: int | float,
@@ -68,15 +60,16 @@ def electrons_per_count(preamp_gain: int | float,
 
     counts * sensitivity / (preamp * em).
 
-    EM mode needs SENSITIVITY_E_PER_COUNT_EM_PREAMP_1X to be measured first --
-    the Conventional value does not transfer, because EM mode reads out through
-    a different amplifier. Rather than return a wrong number this raises.
+    EM mode needs its own sensitivity measured first (ccd_characteristics
+    sensitivity_e_per_count_em_preamp_1x) -- the Conventional value does not
+    transfer, because EM mode reads out through a different amplifier. Rather
+    than return a wrong number this raises.
 
     NOTE for EM mode: the electron count returned here is the honest number of
     photoelectrons, but a shot-noise bound built from it will be optimistic by
-    sqrt(EM_EXCESS_NOISE_FACTOR), since the EM register multiplies
-    stochastically. Feed N / EM_EXCESS_NOISE_FACTOR to a precision calculation,
-    or scale its result, when running in EM mode.
+    sqrt(em_excess_noise_factor) (ccd_characteristics), since the EM register
+    multiplies stochastically. Feed N / em_excess_noise_factor to a precision
+    calculation, or scale its result, when running in EM mode.
     """
     if preamp_gain is None or preamp_gain <= 0:
         raise ValueError(f"preamp multiplier must be positive, got {preamp_gain!r}")

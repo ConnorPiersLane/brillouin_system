@@ -38,7 +38,6 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 class OuterOrderTracks:
     """px -> GHz maps of the two outer VIPA orders, mirroring the production
     CalibrationCalculator interface (freq_* / dfreq_dpx_* / df_*)."""
-    degree: int = 1
     freq_outer_left: Optional[np.ndarray] = field(default=None)
     freq_outer_right: Optional[np.ndarray] = field(default=None)
 
@@ -118,7 +117,6 @@ def build_outer_order_tracks(data: CalibrationData, polyfit_degree: int,
     or_px_sorted, or_freq_sorted = sort_xy(outer_right_px, freqs)
 
     return OuterOrderTracks(
-        degree=polyfit_degree,
         freq_outer_left=np.polyfit(outer_left_px, freqs, polyfit_degree),
         freq_outer_right=np.polyfit(outer_right_px, freqs, polyfit_degree),
         outer_left_px_points=ol_px_sorted,

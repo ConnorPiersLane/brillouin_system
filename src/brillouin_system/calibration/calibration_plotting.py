@@ -1,5 +1,4 @@
 import io
-import os
 
 import matplotlib
 import numpy as np
@@ -13,9 +12,6 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
-
-
-HEADLESS = os.environ.get("DISPLAY", "") == ""
 
 
 _VALID_REFERENCES = {"left", "right", "distance"}

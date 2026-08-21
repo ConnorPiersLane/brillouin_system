@@ -150,6 +150,45 @@ _LEGACY_BACKGROUND_MODELS = {
 }
 
 
+@dataclass(frozen=True)
+class ResolvedFitOptions:
+    """What a fit will actually run, after preset and legacy-name resolution."""
+    model: str
+    background: str
+    use_window: bool
+    beta: float
+
+
+def resolve_fit_options(config) -> ResolvedFitOptions:
+    """THE resolution path for a fitting config: legacy '<model>_window'
+    names, legacy background names, legacy background-in-the-model names,
+    and the prm* presets, applied in that order.
+
+    FindPeaksConfig.__post_init__ normalises through here on construction,
+    but callers that assign config fields directly bypass it — so everything
+    that needs the effective (model, background, use_window, beta) resolves
+    through this one function instead of re-implementing the rules.
+    """
+    model = str(getattr(config, "fitting_model", ""))
+    use_window = bool(getattr(config, "use_window", True))
+    background = str(getattr(config, "background", "flat"))
+    beta = float(getattr(config, "beta", 4.0))
+    if model.endswith("_window"):
+        model = model[: -len("_window")]
+        use_window = True
+    if model in _LEGACY_BACKGROUND_MODELS:
+        model, background = _LEGACY_BACKGROUND_MODELS[model]
+    background = _LEGACY_BACKGROUNDS.get(background, background)
+    if model in MODEL_PRESETS:
+        preset = MODEL_PRESETS[model]
+        model = preset["fitting_model"]
+        background = preset["background"]
+        use_window = preset["use_window"]
+        beta = preset["beta"]
+    return ResolvedFitOptions(model=model, background=background,
+                              use_window=use_window, beta=beta)
+
+
 # The camera PSF working values live in the [global] section below
 # (SlineFromFrameConfig) — ONE fitting config, no nested sub-config (user
 # decision 2026-08-20: "a config in a config is not a good design"). The
@@ -175,37 +214,23 @@ class FindPeaksConfig:
     beta: float = 4.0
 
     def __post_init__(self):
-        model = str(self.fitting_model)
-        # Legacy '<model>_window' names -> base name + use_window.
-        if model.endswith("_window"):
-            model = model[: -len("_window")]
-            self.use_window = True
-        # Legacy names that folded the baseline into the lineshape name.
-        if model in _LEGACY_BACKGROUND_MODELS:
-            model, self.background = _LEGACY_BACKGROUND_MODELS[model]
-        # Legacy per-peak background names -> the plain names (the scope now
-        # follows use_window, so a windowed fit is per-peak either way).
-        if self.background in _LEGACY_BACKGROUNDS:
-            self.background = _LEGACY_BACKGROUNDS[self.background]
-        # Preset names pin the validated combination (see MODEL_PRESETS):
-        # they override background, use_window and beta.
-        if model in MODEL_PRESETS:
-            preset = MODEL_PRESETS[model]
-            model = preset["fitting_model"]
-            self.background = preset["background"]
-            self.use_window = preset["use_window"]
-            self.beta = preset["beta"]
-        if model in _REMOVED_MODELS:
+        # All legacy-name and preset rules live in resolve_fit_options —
+        # the same path the fitter uses on configs that bypass this method.
+        resolved = resolve_fit_options(self)
+        if resolved.model in _REMOVED_MODELS:
             raise ValueError(
-                f"Fitting model '{model}' has been removed: "
-                f"{_REMOVED_MODELS[model]}."
+                f"Fitting model '{resolved.model}' has been removed: "
+                f"{_REMOVED_MODELS[resolved.model]}."
             )
-        if self.background not in BACKGROUNDS:
+        if resolved.background not in BACKGROUNDS:
             raise ValueError(
-                f"Unknown background '{self.background}'. "
+                f"Unknown background '{resolved.background}'. "
                 f"Choose one of {BACKGROUNDS}."
             )
-        self.fitting_model = model
+        self.fitting_model = resolved.model
+        self.background = resolved.background
+        self.use_window = resolved.use_window
+        self.beta = resolved.beta
 
 
 @dataclass

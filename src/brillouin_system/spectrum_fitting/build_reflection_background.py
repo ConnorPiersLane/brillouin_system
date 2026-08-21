@@ -73,13 +73,15 @@ def build_reflection_background(
     reflection_pkl = Path(reflection_pkl)
     dark_pkl = Path(dark_pkl)
 
-    dark_scans = pickle.load(open(dark_pkl, "rb"))
+    with open(dark_pkl, "rb") as f:
+        dark_scans = pickle.load(f)
     bias = float(np.median(np.stack(
         [np.asarray(m.frame_andor, dtype=float)
          for m in dark_scans[0].measurements])))
     print(f"bias (closed shutter) = {bias:.2f} counts")
 
-    scans = pickle.load(open(reflection_pkl, "rb"))
+    with open(reflection_pkl, "rb") as f:
+        scans = pickle.load(f)
     candidates = [s for s in scans if len(s.measurements) == frames_per_scan]
     if not candidates:
         raise ValueError(

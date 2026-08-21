@@ -122,18 +122,6 @@ class ReflectionBackground:
             self._px_of_g[order] = np.polyfit(self.cal_freqs, x, 2)
         return self._px_of_g[order]
 
-    def own_freq_polys(self, degree: int = 2) -> tuple[np.ndarray, np.ndarray]:
-        """px -> g polynomials of the template's own session, per order.
-
-        The same form a session calibration provides (freq_left_peak /
-        freq_right_peak); mapping the template onto these must reproduce its
-        own sline — the identity check.
-        """
-        return (
-            np.polyfit(self.cal_left_px, self.cal_freqs, degree),
-            np.polyfit(self.cal_right_px, self.cal_freqs, degree),
-        )
-
     # ---------------- y alignment ----------------
 
     def sline(self, n_rows: int | None = None) -> np.ndarray:

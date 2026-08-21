@@ -10,7 +10,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     sline_from_frame_config,
     FittingConfigs,
     MODEL_PRESETS,
-    _LEGACY_BACKGROUNDS,
+    resolve_fit_options,
 )
 from brillouin_system.spectrum_fitting.fit_util import (
     find_peak_locations,
@@ -55,13 +55,10 @@ def resolved_background(config) -> str:
 
     Preset-aware: callers that assign config.fitting_model directly bypass
     FindPeaksConfig.__post_init__, so a preset name can sit there with a stale
-    config.background — fit() resolves it the same way.
+    config.background — resolve_fit_options handles that, and fit() resolves
+    through the same path.
     """
-    preset = MODEL_PRESETS.get(str(config.fitting_model))
-    if preset is not None:
-        return preset["background"]
-    background = str(getattr(config, "background", "flat"))
-    return _LEGACY_BACKGROUNDS.get(background, background)
+    return resolve_fit_options(config).background
 
 
 def config_requires_reflection_background(config) -> bool:
@@ -99,45 +96,6 @@ def _lorentzian_pixel_integrated(x, amp, cen, wid):
         np.arctan((right - cen) / wid)
         - np.arctan((left - cen) / wid)
     )
-
-
-def _asym_lorentzian_pixel_integrated(x, amp, cen, wid_left, wid_right):
-    """Pixel-integrated two-half-width Lorentzian.
-
-    NOT a selectable model any more (tested on calibration data 2026-07 and
-    rejected — it triples the residual sine). Kept as a plain function because
-    the analysis scripts in Dropbox Data/2026-7-28/fixed_skew/ use it to build
-    synthetic skewed truths.
-    """
-    x = np.asarray(x, dtype=float)
-
-    left = x - 0.5
-    right = x + 0.5
-
-    wid_left = max(float(wid_left), 1e-12)
-    wid_right = max(float(wid_right), 1e-12)
-
-    y = np.zeros_like(x, dtype=float)
-
-    m_left = right <= cen
-    y[m_left] = amp * wid_left * (
-        np.arctan((right[m_left] - cen) / wid_left)
-        - np.arctan((left[m_left] - cen) / wid_left)
-    )
-
-    m_right = left >= cen
-    y[m_right] = amp * wid_right * (
-        np.arctan((right[m_right] - cen) / wid_right)
-        - np.arctan((left[m_right] - cen) / wid_right)
-    )
-
-    m_cross = ~(m_left | m_right)
-    y[m_cross] = (
-        amp * wid_left * np.arctan((cen - left[m_cross]) / wid_left)
-        + amp * wid_right * np.arctan((right[m_cross] - cen) / wid_right)
-    )
-
-    return y
 
 
 # -----------------------------
@@ -362,12 +320,40 @@ class SpectrumFitter:
         return px, sline
 
     def get_empty_fitting(self, px, sline) -> FittedSpectrum:
+        """An un-attempted fit (live fitting off, or fit() raised upstream).
+
+        Same shape as a failed fit; the empty model tag ('') means 'never
+        fitted', a non-empty tag on an unsuccessful result means 'attempted
+        with this recipe and failed'.
+        """
+        return self._failed_fit(px, sline, model="")
+
+    def _failed_fit(self, px, sline, model: str) -> FittedSpectrum:
+        """The ONE failure shape, used by every unsuccessful path.
+
+        A failed fit is a legitimate outcome (no peaks, pure background, the
+        microscope moving), so it carries the same record a success does:
+        the raw data, the attempted recipe tag, and the row band. All peak
+        fields stay None — downstream code keys on is_success.
+        """
         return FittedSpectrum(
             is_success=False,
             x_pixels=px,
             sline=sline,
+            model=model,
             sline_rows=self._rows_or_none(),
         )
+
+    @staticmethod
+    def _fit_kind(n_peaks: int, model: str, use_window: bool,
+                  background: str) -> str:
+        """The recipe tag a fit result carries (e.g. '2lorentzian_x_psf_window_linear')."""
+        kind = f"{n_peaks}{model}"
+        if use_window:
+            kind += "_window"
+        if background != "flat":
+            kind += f"_{background}"
+        return kind
 
     def _rows_or_none(self) -> list[int] | None:
         """The row band this fitter sums, for recording on fit results.
@@ -481,22 +467,24 @@ class SpectrumFitter:
         free) through the frozen kernel with its own per-position tau; the
         reported left/right peaks stay the INNER main pair, so every
         downstream consumer is unchanged, and the outer pair is reported in
-        the outer_* fields."""
-        config = self.reference_config if is_reference_mode else self.sample_config
-        requested_model, window_forced = normalize_model_name(config.fitting_model)
-        use_window = bool(getattr(config, "use_window", True)) or window_forced
-        background = str(getattr(config, "background", "flat"))
-        # Callers that assign config.background directly bypass
-        # FindPeaksConfig.__post_init__, so normalise legacy names here too.
-        background = _LEGACY_BACKGROUNDS.get(background, background)
-        beta = config.beta
+        the outer_* fields.
 
-        # Presets pin background and beta too (callers that assign
-        # config.fitting_model directly bypass FindPeaksConfig.__post_init__).
-        preset = MODEL_PRESETS.get(str(config.fitting_model))
-        if preset is not None:
-            background = preset["background"]
-            beta = preset["beta"]
+        Degraded outcomes never raise mid-scan: a frame with no findable
+        peaks returns is_success=False (with the raw data, the recipe tag
+        and the row band); a 2-peak request that finds one blob — the peaks
+        MERGED at small shift — fits that single peak and reports it as two
+        coincident half-amplitude peaks with inter_peak_distance 0, tagged
+        '1<model>...' (see _build_result)."""
+        config = self.reference_config if is_reference_mode else self.sample_config
+        # The one resolution path for model / background / window / beta —
+        # presets and legacy names included (callers that assign config
+        # fields directly bypass FindPeaksConfig.__post_init__, so fit()
+        # resolves again through the same function).
+        opts = resolve_fit_options(config)
+        requested_model = opts.model
+        background = opts.background
+        use_window = opts.use_window
+        beta = opts.beta
 
         if requested_model not in SUPPORTED_MODELS:
             raise ValueError(
@@ -513,8 +501,7 @@ class SpectrumFitter:
         # -168 MHz left-right split (measured 2026-08). Calibration and
         # samples must therefore use the same lineshape family.
         if not is_reference_mode:
-            reference_model, _ = normalize_model_name(
-                self.reference_config.fitting_model)
+            reference_model = resolve_fit_options(self.reference_config).model
             psf = "lorentzian_x_psf"
             if (psf in (requested_model, reference_model)
                     and requested_model != reference_model):
@@ -560,44 +547,44 @@ class SpectrumFitter:
         # the offset/background model to handle negative baseline excursions.
         sline = np.clip(sline, 0, None)
 
+        if n_peaks not in (2, 4):
+            raise ValueError(f"n_peaks must be 2 or 4, got {n_peaks!r}.")
+        n_requested = n_peaks
+
         pk_ind, pk_info = find_peak_locations(sline, config=config)
         if len(pk_ind) < 1:
-            return FittedSpectrum(
-                is_success=False,
-                sline=sline,
-                x_pixels=px,
-                model=requested_model,
-            )
+            return self._failed_fit(px, sline, self._fit_kind(
+                n_requested, requested_model, use_window, background))
 
         # Selection by amplitude ranking. n_peaks=2 (the default — production
         # never passes anything else) keeps the two strongest, which are
         # always the inner main pair (VIPA side orders are dimmer); the
         # opt-in n_peaks=4 keeps the outer orders as well.
-        if n_peaks not in (2, 4):
-            raise ValueError(f"n_peaks must be 2 or 4, got {n_peaks!r}.")
-        n_requested = n_peaks
         pk_ind, pk_info = select_top_n_peaks(pk_ind, pk_info, n_requested)
         amp, cen, wid = self._extract_peak_params(pk_ind, pk_info, px, sline)
 
-        n_peaks = len(cen)
-        if n_peaks < 1 or (n_requested == 4 and n_peaks < 4):
+        # n_found is how many peaks the finder actually delivered; it may be
+        # fewer than n_requested. n_found == 1 with a 2-peak request is the
+        # MERGED-PAIR case: at small shifts the two Brillouin peaks overlap
+        # into one blob the finder cannot separate. That is legitimate data,
+        # so the fit proceeds with a single peak and _build_result reports it
+        # as two coincident half-amplitude peaks (see there); the recipe tag
+        # then starts with '1', keeping the case visible downstream.
+        n_found = len(cen)
+        if n_found < 1 or (n_requested == 4 and n_found < 4):
             # A 4-peak fit needs all four orders in view; fewer found means
             # the ROI/thresholds don't support it — fail loudly, no silent
             # fallback to a different model layout.
-            if n_requested == 4 and 1 <= n_peaks < 4:
+            if n_requested == 4 and 1 <= n_found < 4:
                 print(f"[SpectrumFitter] n_peaks=4 requested but only "
-                      f"{n_peaks} peak(s) detected — the ROI must contain "
+                      f"{n_found} peak(s) detected — the ROI must contain "
                       f"the outer VIPA orders.")
-            return FittedSpectrum(
-                is_success=False,
-                sline=sline,
-                x_pixels=px,
-                model=requested_model,
-            )
+            return self._failed_fit(px, sline, self._fit_kind(
+                n_requested, requested_model, use_window, background))
 
         # Peaks are ordered left-to-right from here on: the per-peak
         # PSF tails and the per-peak baseline segments rely on it
-        # (select_top_two_peaks orders by height).
+        # (select_top_n_peaks returns them in height order).
         order = np.argsort(np.asarray(cen, dtype=float))
         amp, cen, wid = (np.asarray(amp)[order], np.asarray(cen)[order],
                          np.asarray(wid)[order])
@@ -612,13 +599,13 @@ class SpectrumFitter:
             center_ranges = self._bounded_center_ranges(px, cen, wid, beta=beta)
         else:
             mask = np.ones_like(px, dtype=bool)
-            center_ranges = [(x_min, x_max)] * n_peaks
+            center_ranges = [(x_min, x_max)] * n_found
 
         px_fit = px[mask]
         sline_fit = sline[mask]
 
         peak_func, p0_pk, lo_pk, hi_pk, n_per_peak = self._peak_model(
-            requested_model, n_peaks, amp, cen, wid,
+            requested_model, n_found, amp, cen, wid,
             center_ranges, x_span, use_window,
         )
         bg_func, p0_bg, lo_bg, hi_bg, n_bg = _make_background(
@@ -635,11 +622,10 @@ class SpectrumFitter:
         p0 = list(p0_pk) + list(p0_bg)
         bounds = (list(lo_pk) + list(lo_bg), list(hi_pk) + list(hi_bg))
 
-        fit_kind = f"{n_peaks}{requested_model}"
-        if use_window:
-            fit_kind += "_window"
-        if background != "flat":
-            fit_kind += f"_{background}"
+        # Tagged with the number of peaks actually FITTED, so a merged pair
+        # (n_found = 1 on a 2-peak request) is recognisable by its '1' prefix.
+        fit_kind = self._fit_kind(n_found, requested_model, use_window,
+                                  background)
 
         try:
             popt, _ = curve_fit(
@@ -653,15 +639,10 @@ class SpectrumFitter:
             )
         except Exception as e:
             print(f"[SpectrumFitter] Fit failed: {e}")
-            return FittedSpectrum(
-                is_success=False,
-                sline=sline,
-                x_pixels=px,
-                model=fit_kind,
-            )
+            return self._failed_fit(px, sline, fit_kind)
 
         peak_params = [list(popt[i * n_per_peak:(i + 1) * n_per_peak])
-                       for i in range(n_peaks)]
+                       for i in range(n_found)]
         bg_params = list(popt[n_pk:])
 
         fit_centers = [p[1] for p in peak_params]
@@ -673,8 +654,8 @@ class SpectrumFitter:
             perm = list(np.argsort(fit_centers))
             peak_params = [peak_params[i] for i in perm]
             if use_window and background in ("flat", "linear"):
-                k = n_bg // n_peaks
-                groups = [bg_params[i * k:(i + 1) * k] for i in range(n_peaks)]
+                k = n_bg // n_found
+                groups = [bg_params[i * k:(i + 1) * k] for i in range(n_found)]
                 bg_params = [v for i in perm for v in groups[i]]
             elif use_window and background == "reflection":
                 offs = bg_params[:-1]
@@ -745,6 +726,14 @@ class SpectrumFitter:
             right = peak_params[-1]
             outer_l = outer_r = None
             bg_left, bg_right = bg_at_peaks[0], bg_at_peaks[-1]
+        # ONE fitted peak = the merged pair (a 2-peak request whose two
+        # Brillouin peaks overlap into a single blob at small shift). It is
+        # reported as two COINCIDENT peaks at HALF the fitted amplitude
+        # each: the model is linear in amplitude, so two same-width peaks at
+        # amp/2 on the same centre sum exactly to the fitted blob — per-peak
+        # areas (and the photon counts derived from them) stay additive.
+        # inter_peak_distance is 0 by construction, and the model tag's '1'
+        # prefix marks the case for downstream consumers.
         two_peaks = len(peak_params) >= 2
 
         return FittedSpectrum(

@@ -49,21 +49,12 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import is_psf_fit
 # Thompson's photon term s^2/N is derived for a GAUSSIAN profile. Brillouin
 # peaks are Lorentzian and the HWHM is passed in place of s; a Lorentzian's
 # tails carry less information about the centre, so its photon term is
-# 2 s^2 / N -- a factor 2 in variance. Verified by Monte Carlo (2000 fits at
-# matched width and photons) and against measured scatter: without the
-# factor the formula reads 0.55-0.77x of the real per-frame scatter across
-# water, glycerol and cornea; with it, 0.78-1.08x.
+# 2 s^2 / N -- a factor 2 in variance (a Gaussian's factor is 1). Verified
+# by Monte Carlo (2000 fits at matched width and photons) and against
+# measured scatter: without the factor the formula reads 0.55-0.77x of the
+# real per-frame scatter across water, glycerol and cornea; with it,
+# 0.78-1.08x.
 LORENTZIAN_PHOTON_FACTOR = 2.0
-GAUSSIAN_PHOTON_FACTOR = 1.0
-
-# Per-pixel read noise rms [counts] (4.3 e-) — measured value and
-# provenance live in ccd_characteristics.toml (dark exposure ladder
-# 2026-08-19; a closed-shutter frame's per-pixel std IS the read noise, no
-# measurable dark current). A per-scan dark stack taken at the live
-# settings is preferred over the constant (readout-mode dependence).
-# Import-time alias for backwards compatibility; theoretical_precision
-# reads the live config.
-READ_NOISE_COUNTS = ccd_config.get().read_noise_counts
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +134,7 @@ def distance_precision(
 
 @dataclass
 class TheoreticalPeakStdError:
-    """ All Values in MHz"""
+    """All values in MHz."""
     left_peak_photons_mhz: float | None = None
     left_peak_pixelation_mhz: float | None = None
     left_peak_bg_mhz: float | None = None
@@ -249,7 +240,6 @@ def theoretical_precision(fs: FittedSpectrum,
     s_r = a_r * float(w_r)
 
     read_per_sline_px = ccd.read_noise_counts * math.sqrt(n_rows)
-    read_counts_l = read_counts_r = read_per_sline_px
 
     def b_electrons(read_counts, fitted_bg_counts):
         read_e = count_to_electrons(read_counts or 0.0,
@@ -263,8 +253,8 @@ def theoretical_precision(fs: FittedSpectrum,
                                             emccd_gain=emccd_gain)
         return math.sqrt(read_e ** 2 + bg_light_var_e)
 
-    b_l = b_electrons(read_counts_l, fs.left_peak_bg_counts)
-    b_r = b_electrons(read_counts_r, fs.right_peak_bg_counts)
+    b_l = b_electrons(read_per_sline_px, fs.left_peak_bg_counts)
+    b_r = b_electrons(read_per_sline_px, fs.right_peak_bg_counts)
 
     left = peak_precision(width=s_l, n_photons=photons.left_peak_photons,
                           bg_rms=b_l, pixel_size=a_l)

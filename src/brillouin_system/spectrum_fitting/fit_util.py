@@ -50,15 +50,6 @@ def select_top_n_peaks(pk_ind, pk_info, n: int):
              for prop, values in pk_info.items()})
 
 
-def select_top_two_peaks(pk_ind, pk_info):
-    """Select the two strongest peaks by height (amplitude ranking).
-
-    The inner main pair is always the brightest, so this is the production
-    selection; fewer than two detected peaks are returned as-is.
-    """
-    return select_top_n_peaks(pk_ind, pk_info, 2)
-
-
 def refine_fitted_spectrum(function, x_pixels: np.ndarray, parameters: tuple, factor: int):
     """
     Refine the Lorentzian (or composite) fit by interpolating more densely.

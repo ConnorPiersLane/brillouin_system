@@ -7,15 +7,19 @@ from brillouin_system.calibration.calibration import (
     CalibrationCalculator,
     CalibrationPolyfitParameters,
 )
+from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.noise_analysis import (
     LORENTZIAN_PHOTON_FACTOR,
     PixelCountsAndPhotons,
-    SENSITIVITY_E_PER_COUNT_PREAMP_1X,
     count_to_electrons,
     electrons_per_count,
     theoretical_precision,
 )
+
+# The measured sensitivity the functions read from the live ccd config.
+SENSITIVITY_E_PER_COUNT_PREAMP_1X = (
+    ccd_config.get().sensitivity_e_per_count_preamp_1x)
 
 
 def test_sensitivity_matches_photon_transfer_measurement():

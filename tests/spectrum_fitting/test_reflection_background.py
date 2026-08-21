@@ -165,8 +165,12 @@ def test_packaged_default_loads():
     bg = ReflectionBackground.load_default()
     assert bg.frame.ndim == 2
     assert len(bg.cal_freqs) >= 3
-    # Identity render on its own calibration reproduces its own sline.
-    mapper = ReflectionBackgroundMapper(bg, bg.own_freq_polys(), n_rows=11)
+    # Identity render on its own calibration reproduces its own sline: feed
+    # the mapper px->GHz polynomials fitted from the template's OWN
+    # calibration points (the same form a session calibration provides).
+    own_polys = (np.polyfit(bg.cal_left_px, bg.cal_freqs, 2),
+                 np.polyfit(bg.cal_right_px, bg.cal_freqs, 2))
+    mapper = ReflectionBackgroundMapper(bg, own_polys, n_rows=11)
     R = mapper.render(bg.px)
     sline = bg.sline(11)
     valid = R != 0.0
