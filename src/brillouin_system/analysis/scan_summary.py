@@ -29,12 +29,10 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from brillouin_system.calibration.calibration import calibration_calculator_for_scan
-from brillouin_system.analysis.fit_axial_scan import fit_axial_scan
+from brillouin_system.analysis.fit_axial_scan import fit_axial_scan, photons_and_bound
 from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
 from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
-from brillouin_system.analysis.pixel_counts_and_photons import PixelCountsAndPhotons
-from brillouin_system.analysis.thompson_shot_noise_limit import theoretical_precision
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -199,14 +197,12 @@ def summarize_axial_scan(
             outer_right_peak_amplitude=mean_of("outer_right_peak_amplitude"),
             outer_right_peak_bg_counts=mean_of("outer_right_peak_bg_counts"),
         )
-        photons = PixelCountsAndPhotons.from_fit(
-            fs=mean_fs, preamp_gain=info.preamp_gain, emccd_gain=info.gain)
         # mean_fs carries the row band (sline_rows, inherited from the
         # fits); the camera numbers (read noise, dark level) come from
-        # ccd_characteristics inside theoretical_precision.
-        theo = theoretical_precision(
-            fs=mean_fs, photons=photons, calibration_calculator=calc,
-            preamp_gain=info.preamp_gain, emccd_gain=info.gain)
+        # ccd_characteristics inside theoretical_precision. On a camera
+        # mode without photon calibration (e.g. unmeasured EM sensitivity)
+        # the bounds degrade to None — shifts and fits are unaffected.
+        _, theo = photons_and_bound(mean_fs, calc, scan.system_state)
         out.thompson_left_mhz = theo.left_peak_total_mhz
         out.thompson_right_mhz = theo.right_peak_total_mhz
         out.thompson_distance_mhz = theo.distance_total_mhz

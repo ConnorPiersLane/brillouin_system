@@ -15,7 +15,11 @@ from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
 from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.my_dataclasses.system_state import SystemState
 from brillouin_system.analysis.pixel_counts_and_photons import PixelCountsAndPhotons
-from brillouin_system.analysis.thompson_shot_noise_limit import theoretical_precision
+from brillouin_system.analysis.thompson_shot_noise_limit import (
+    TheoreticalPeakStdError,
+    theoretical_precision,
+)
+from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackground,
     ReflectionBackgroundMapper,
@@ -24,6 +28,49 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
     config_requires_reflection_background,
 )
+
+log = get_logger(__name__)
+
+
+# One-shot flag: "photon calibration unavailable" is reported once per
+# process, not once per frame (a scan would repeat it hundreds of times).
+_photon_calibration_warned = False
+
+
+def photons_and_bound(fitting,
+                      calibration_calculator: CalibrationCalculator,
+                      system_state: SystemState,
+                      ):
+    """Photon numbers + Thompson bound for one fit — or EMPTY results when
+    the camera mode's photon calibration is unavailable (e.g. EM mode with
+    the EM sensitivity never measured).
+
+    Fits and GHz shifts need no gain at all; only this photon/noise layer
+    does. An uncalibratable mode must therefore degrade these outputs to
+    None (shown as N/A) instead of blocking the whole analysis — the loud
+    guard stays in electrons_per_count for anyone asking for photon
+    numbers directly.
+    """
+    global _photon_calibration_warned
+    try:
+        photons = PixelCountsAndPhotons.from_fit(
+            fs=fitting,
+            preamp_gain=system_state.andor_camera_info.preamp_gain,
+            emccd_gain=system_state.andor_camera_info.gain)
+        theo = theoretical_precision(
+            fs=fitting, photons=photons,
+            calibration_calculator=calibration_calculator,
+            preamp_gain=system_state.andor_camera_info.preamp_gain,
+            emccd_gain=system_state.andor_camera_info.gain)
+        return photons, theo
+    except ValueError as e:
+        if not _photon_calibration_warned:
+            _photon_calibration_warned = True
+            log.warning(f"[analysis] Photon numbers and Thompson bounds are "
+                        f"unavailable for this camera mode — fits and shifts "
+                        f"are unaffected. Reported once. Cause: {e}")
+        return (PixelCountsAndPhotons(None, None, None, None, None, None),
+                TheoreticalPeakStdError())
 
 
 def analyze_frame(frame: np.ndarray,
@@ -48,21 +95,14 @@ def analyze_frame(frame: np.ndarray,
                          is_reference_mode=system_state.is_reference_mode,
                          reflection_background=reflection_bg)
 
-    # Per-peak counts and photons, from the fit parameters alone.
-    photons = PixelCountsAndPhotons.from_fit(
-        fs=fitting,
-        preamp_gain=system_state.andor_camera_info.preamp_gain,
-        emccd_gain=system_state.andor_camera_info.gain)
+    photons, theo = photons_and_bound(fitting, calibration_calculator,
+                                      system_state)
 
     return AnalyzedSpectrum(
         fitted_spectrum=fitting,
         analyzed_shifts=calibration_calculator.analyze(fitting),
         photons=photons,
-        theoretical_precisions=theoretical_precision(
-            fs=fitting, photons=photons,
-            calibration_calculator=calibration_calculator,
-            preamp_gain=system_state.andor_camera_info.preamp_gain,
-            emccd_gain=system_state.andor_camera_info.gain),
+        theoretical_precisions=theo,
     )
 
 

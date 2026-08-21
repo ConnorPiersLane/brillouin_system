@@ -185,6 +185,42 @@ def test_four_peak_bound_covers_the_outer_orders_and_the_combination():
     assert t.outer_left_total_mhz > t.left_peak_total_mhz
 
 
+def test_uncalibrated_camera_mode_degrades_photons_not_shifts():
+    """EM mode without a measured EM sensitivity: the analysis chain must
+    return empty photon/Thompson results (N/A) instead of raising — fits
+    and GHz shifts need no gain (user issue 2026-08-21, dummy-mode Show)."""
+    from brillouin_system.analysis.fit_axial_scan import photons_and_bound
+    from brillouin_system.devices.cameras.andor.andor_dataclasses import (
+        AndorCameraInfo,
+    )
+    from brillouin_system.my_dataclasses.system_state import SystemState
+
+    def state(emccd_gain):
+        return SystemState(
+            is_reference_mode=False,
+            andor_camera_info=AndorCameraInfo(
+                model="fake", serial="0", roi=(1, 84, 1, 13), binning=(1, 1),
+                gain=emccd_gain, exposure=0.3, amp_mode="EM",
+                preamp_gain=1.0, temperature=-70.0,
+                flip_image_horizontally=False, advanced_gain_option=False,
+                vss_speed=1.0),
+        )
+
+    fs = _fitted_two_peaks()
+    calc = _linear_calculator()
+
+    # EM mode, sensitivity never measured: degrade, don't raise.
+    photons, theo = photons_and_bound(fs, calc, state(emccd_gain=300))
+    assert photons.left_peak_photons is None
+    assert theo.left_peak_total_mhz is None
+    assert theo.distance_total_mhz is None
+
+    # Conventional mode: the real numbers.
+    photons, theo = photons_and_bound(fs, calc, state(emccd_gain=0))
+    assert photons.left_peak_photons > 0
+    assert theo.distance_total_mhz > 0
+
+
 def test_two_peak_fit_has_no_combined_bound():
     calc = _four_peak_calculator()
     fs = _fitted_two_peaks()

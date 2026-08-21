@@ -14,7 +14,11 @@ from .baseCamera import BaseCamera
 class DummyCamera(BaseCamera):
     def __init__(self):
         self.exposure_time = 0.3
-        self.gain = 1
+        # Conventional mode (emccd gain 0), matching the real data the
+        # ReplayCamera serves — a nonzero EM gain would (correctly) disable
+        # the photon/Thompson outputs, because the EM sensitivity was never
+        # measured.
+        self.gain = 0
         self.roi = (0, 160, 0, 20)
         self.binning = (1, 1)
         self.verbose = True
