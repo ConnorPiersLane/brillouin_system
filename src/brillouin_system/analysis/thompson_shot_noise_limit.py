@@ -36,7 +36,7 @@ import numpy as np
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.spectrum_fitting.noise_analysis.pixel_counts_and_photons import (
+from brillouin_system.analysis.pixel_counts_and_photons import (
     PixelCountsAndPhotons,
     count_to_electrons,
 )

@@ -1,7 +1,8 @@
 """A scan's calibration is re-fitted from its own raw frames, so the calibration
 and the samples share a peak-centre convention. The stored polynomial was fitted
 at acquisition time with an unrecorded model, so it cannot back a pixel-response
-re-analysis.
+re-analysis. calibration_calculator_for_scan takes only the scan's calibration
+information (calibration_data, calibration_params) plus the fitter.
 """
 import numpy as np
 import pytest
@@ -11,11 +12,7 @@ from brillouin_system.calibration.calibration import (
     CalibrationMeasurementPoint,
     CalibrationPolyfitParameters,
     MeasurementsPerFreq,
-)
-from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AxialScan,
-    calibration_for_scan,
+    calibration_calculator_for_scan,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
@@ -76,20 +73,17 @@ def make_calibration_data() -> CalibrationData:
     return CalibrationData(measured_freqs=blocks)
 
 
-def make_scan(with_frames: bool) -> AxialScan:
-    return AxialScan(
-        i=0, id="scan-under-test", measurements=[], system_state=None,
-        calibration_params=CalibrationPolyfitParameters(
-            degree=1,
-            freq_left_peak=STORED, freq_right_peak=STORED,
-            freq_peak_distance=STORED,
-        ),
-        calibration_data=make_calibration_data() if with_frames else None,
+def make_stored_params() -> CalibrationPolyfitParameters:
+    return CalibrationPolyfitParameters(
+        degree=1,
+        freq_left_peak=STORED, freq_right_peak=STORED,
+        freq_peak_distance=STORED,
     )
 
 
 def test_stored_frames_are_refitted_not_reused():
-    calc = calibration_for_scan(make_scan(with_frames=True), make_fitter("prm1"))
+    calc = calibration_calculator_for_scan(
+        make_calibration_data(), make_stored_params(), make_fitter("prm1"))
 
     assert not np.allclose(calc.p.freq_left_peak, STORED)
     # A real fit fills in what the stored stub never had.
@@ -100,17 +94,20 @@ def test_stored_frames_are_refitted_not_reused():
 def test_refit_uses_the_scans_row_band():
     """The band must not move between a calibration and its samples."""
     fitter = make_fitter("prm1")
-    calibration_for_scan(make_scan(with_frames=True), fitter)
+    calibration_calculator_for_scan(
+        make_calibration_data(), make_stored_params(), fitter)
 
     assert fitter.get_selected_rows() == list(range(N_ROWS))
 
 
 def test_pixel_response_without_raw_frames_is_refused():
     with pytest.raises(ValueError, match="no raw calibration frames"):
-        calibration_for_scan(make_scan(with_frames=False), make_fitter("prm1"))
+        calibration_calculator_for_scan(
+            None, make_stored_params(), make_fitter("prm1"))
 
 
 def test_lorentzian_without_raw_frames_falls_back_to_the_stored_polynomial():
-    calc = calibration_for_scan(make_scan(with_frames=False), make_fitter("lorentzian"))
+    calc = calibration_calculator_for_scan(
+        None, make_stored_params(), make_fitter("lorentzian"))
 
     assert np.allclose(calc.p.freq_left_peak, STORED)

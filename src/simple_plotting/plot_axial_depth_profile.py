@@ -24,13 +24,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalyzedSpectrum
+from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.noise_analysis import (
+from brillouin_system.analysis import (
     PixelCountsAndPhotons, theoretical_precision,
 )
-from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
 from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
@@ -71,7 +71,7 @@ SESSION_D_MM = DEFAULT_D_MM
 N_SAMPLE = 1.376        # cornea (the live TOML sits at 1.33 = water; worth 0.9 MHz)
 # The NA lineshape models were removed 2026-08-20: fit a plain windowed
 # Lorentzian and DIVIDE the shifts by the post-hoc scalar <cos(v/2)>
-# (na_mean_shift_ratio, Gaussian coupling weight) — validated equivalent.
+# (na_mean_shift_ratio, Gaussian coupling weight) â€” validated equivalent.
 FITTING_MODEL = "lorentzian_window"
 
 # Only files holding real depth scans. connor40/connor50 are 3x repeats at a
@@ -124,7 +124,6 @@ def fit_scan(scan: AxialScan, sf: SpectrumFitter) -> list[AnalyzedSpectrum]:
     out = []
     for measurement in scan.measurements:
         frame = measurement.frame_andor.copy()
-        frame = subtract_darknoise(frame=frame, darknoise_frame=ss.dark_image)
 
         px, sline = sf.get_px_sline_from_image(frame)
         fit = sf.fit(px=px, sline=sline, is_reference_mode=ss.is_reference_mode)
@@ -184,20 +183,20 @@ def plot_person(name: str, filename: str):
         ax.errorbar(depth, shift, yerr=err, lw=1.5, capsize=2.5, alpha=0.9, ms=6,
                     color=PALETTE[n_plotted % len(PALETTE)],
                     marker=MARKERS[n_plotted % len(MARKERS)],
-                    label=f"scan {scan.i}  ({n_good}/{n_tot} pts, {step:.0f} µm step)")
+                    label=f"scan {scan.i}  ({n_good}/{n_tot} pts, {step:.0f} Âµm step)")
         n_plotted += 1
         print(f"  scan i={scan.i} ({scan.id}): {n_good}/{n_tot} valid, "
-              f"{shift.min():.3f}-{shift.max():.3f} GHz over {depth.max():.0f} µm")
+              f"{shift.min():.3f}-{shift.max():.3f} GHz over {depth.max():.0f} Âµm")
 
-    ax.set_xlabel("Depth from front surface — Zaber lens travel (µm)")
+    ax.set_xlabel("Depth from front surface â€” Zaber lens travel (Âµm)")
     ax.set_ylabel("Brillouin shift (GHz)")
-    ax.set_title(f"{name} — cornea axial scans, 2026-07-23\n"
+    ax.set_title(f"{name} â€” cornea axial scans, 2026-07-23\n"
                  f"shift from inter-peak distance; depth 0 = first valid fit of each scan",
                  fontsize=10)
     # State the NA-model parameters on the figure: D is a single session-wide
     # value, not refit per point, and it is not water-calibrated for this date.
     ax.text(0.995, 0.02,
-            f"{FITTING_MODEL}, D = {SESSION_D_MM} mm (house default — no 7-23 water "
+            f"{FITTING_MODEL}, D = {SESSION_D_MM} mm (house default â€” no 7-23 water "
             f"bracket), n = {N_SAMPLE}",
             transform=ax.transAxes, ha="right", va="bottom", fontsize=7, color="0.45")
     ax.grid(alpha=0.3)
@@ -209,7 +208,7 @@ def plot_person(name: str, filename: str):
 
     secax = ax.secondary_xaxis("top", functions=(lambda d: d * N_CORNEA,
                                                 lambda d: d / N_CORNEA))
-    secax.set_xlabel(f"approx. focus depth in tissue (µm, ×n={N_CORNEA})", fontsize=9)
+    secax.set_xlabel(f"approx. focus depth in tissue (Âµm, Ã—n={N_CORNEA})", fontsize=9)
 
     fig.tight_layout()
     out = OUT / f"axial_depth_{name.lower()}_20260723.png"

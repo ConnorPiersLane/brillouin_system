@@ -68,7 +68,7 @@ def residual_rms_mhz(data, degree: int, sigma: float, tau_l: float,
         fitter.sline_config, psf_sigma_px=sigma,
         psf_tau_left_px=tau_l, psf_tau_right_px=tau_r))
 
-    p = calibrate(data=data, poyfit_degree=degree, fitter=fitter)
+    p = calibrate(data=data, polyfit_degree=degree, fitter=fitter)
 
     res = []
     for px, freqs, coeffs in (

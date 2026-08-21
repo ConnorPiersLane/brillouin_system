@@ -39,7 +39,7 @@ from scipy.stats import norm
 from tifffile import imwrite
 
 from brillouin_system.calibration.calibration import (
-    AnalyzedFreqShifts, CalibrationCalculator,
+    AnalyzedFreqShifts, CalibrationCalculator, calibration_calculator_for_scan,
 )
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.guis.data_analyzer.excel_export_axial_scan import (
@@ -49,13 +49,12 @@ from brillouin_system.guis.data_analyzer.log_panel import LogPanel
 from brillouin_system.guis.data_analyzer.plot_helpers import plot_fitted_spectrum, show_frame
 from brillouin_system.guis.data_analyzer.show_calibration import CalibrationViewer
 from brillouin_system.logging_utils.logging_setup import get_logger
+from brillouin_system.analysis.fit_axial_scan import fit_axial_scan
+from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AnalyzedSpectrum, AxialScan, calibration_for_scan, fit_axial_scan,
-    fitter_for_scan,
-)
 from brillouin_system.ccd_characteristics import ccd_config
-from brillouin_system.spectrum_fitting.noise_analysis import (
+from brillouin_system.analysis import (
     MonteCarloFrames, PixelCountsAndPhotons,
     TheoreticalPeakStdError, electrons_per_count, theoretical_precision,
 )
@@ -63,7 +62,7 @@ from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackground, ReflectionBackgroundMapper,
 )
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
-    config_requires_reflection_background,
+    SpectrumFitter, config_requires_reflection_background,
 )
 
 log = get_logger(__name__)
@@ -107,9 +106,12 @@ class AxialScanViewer(QWidget):
         self.peak_reference = calibration_config.get().reference
 
         # One fitter + one calibration re-fit, shared by the whole viewer
-        # (fit pipeline, calibration plot, Monte Carlo).
-        self.fitter = fitter_for_scan(axial_scan)
-        self.calc: CalibrationCalculator = calibration_for_scan(axial_scan, self.fitter)
+        # (fit pipeline, calibration plot, Monte Carlo). The fitter always
+        # follows the LIVE config; nothing stored on the scan steers it.
+        self.fitter = SpectrumFitter()
+        self.calc: CalibrationCalculator = calibration_calculator_for_scan(
+            axial_scan.calibration_data, axial_scan.calibration_params,
+            self.fitter)
         self.list_analyzed_spectras: list[AnalyzedSpectrum] = fit_axial_scan(
             axial_scan, fitter=self.fitter, calibration_calculator=self.calc)
         self.freq_shifts: list[float | None] = [

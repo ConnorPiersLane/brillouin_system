@@ -24,7 +24,6 @@ import numpy as np
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 DATA = Path(r"C:\Users\cplan\Partners HealthCare Dropbox\Connor Lane\Data\2026-8-5")
@@ -43,7 +42,6 @@ def scan_shifts(scan):
     vas, vs = [], []
     for m in scan.measurements:
         f = m.frame_andor.copy()
-        f = subtract_darknoise(frame=f, darknoise_frame=ss.dark_image)
         px, sline = sf.get_px_sline_from_image(f)
         fit = sf.fit(px=px, sline=sline, is_reference_mode=False)
         if not fit.is_success:

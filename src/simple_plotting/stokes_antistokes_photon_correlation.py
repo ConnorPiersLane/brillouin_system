@@ -29,7 +29,6 @@ from scipy.signal import find_peaks, peak_widths
 
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 DATA = Path(r"C:\Users\cplan\Partners HealthCare Dropbox\Connor Lane\Data\2026-8-5")
@@ -49,7 +48,6 @@ def scan_slines(scan):
     out = []
     for m in scan.measurements:
         f = m.frame_andor.copy()
-        f = subtract_darknoise(frame=f, darknoise_frame=ss.dark_image)
         out.append(sf.get_px_sline_from_image(f))
     return out
 

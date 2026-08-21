@@ -9,7 +9,7 @@ from brillouin_system.calibration.calibration import (
 )
 from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.spectrum_fitting.noise_analysis import (
+from brillouin_system.analysis import (
     LORENTZIAN_PHOTON_FACTOR,
     PixelCountsAndPhotons,
     count_to_electrons,

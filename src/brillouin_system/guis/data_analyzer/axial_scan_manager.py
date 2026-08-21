@@ -42,9 +42,9 @@ from brillouin_system.guis.data_analyzer.log_panel import LogPanel, install_anal
 from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
 from brillouin_system.guis.data_analyzer.show_calibration import CalibrationViewer
 from brillouin_system.logging_utils.logging_setup import get_logger
-from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AxialScan, calibration_for_scan, fit_axial_scan, fitter_for_scan,
-)
+from brillouin_system.calibration.calibration import calibration_calculator_for_scan
+from brillouin_system.analysis.fit_axial_scan import fit_axial_scan
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
     dict_to_dataclass_tree, load_dict_from_hdf5,
@@ -285,8 +285,9 @@ class AxialScanManager(QWidget):
                                 f"and no stored calibration parameters.")
             return
         log.info(f"Showing the calibration of scan '{scan.id}'")
-        fitter = fitter_for_scan(scan)
-        calc = calibration_for_scan(scan, fitter)
+        fitter = SpectrumFitter()
+        calc = calibration_calculator_for_scan(
+            scan.calibration_data, scan.calibration_params, fitter)
         viewer = CalibrationViewer(
             calc, title=f"Calibration of Scan {scan.id}",
             calibration_data=scan.calibration_data, fitter=fitter)
@@ -301,7 +302,7 @@ class AxialScanManager(QWidget):
                  f"(degree={degree})")
         fitter = SpectrumFitter()
         calc = CalibrationCalculator(
-            calibrate(data=entry.obj, poyfit_degree=degree, fitter=fitter))
+            calibrate(data=entry.obj, polyfit_degree=degree, fitter=fitter))
         viewer = CalibrationViewer(calc, title=f"Calibration - {entry.label}",
                                    calibration_data=entry.obj, fitter=fitter)
         self._register_window(key, viewer)

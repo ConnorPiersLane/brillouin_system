@@ -25,7 +25,6 @@ QtCore.QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
 
 import sys
-import pickle
 from collections import deque
 
 import numpy as np
@@ -53,9 +52,9 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import Ando
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
-from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, RequestSweepScan, \
-    AxialScan
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
+from brillouin_system.my_dataclasses.request_axial_step_scan import RequestAxialStepScan
+from brillouin_system.my_dataclasses.request_sweep_scan import RequestSweepScan
 from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
 from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 ###
@@ -95,7 +94,6 @@ class HiFrontend(QWidget):
     update_microwave_freq_requested = pyqtSignal(float)
     toggle_illumination_requested = pyqtSignal()
     toggle_reference_mode_requested = pyqtSignal()
-    acquire_background_requested = pyqtSignal()
 
     move_zaber_eye_lens_requested = pyqtSignal(float)
     move_zaber_stage_x_requested = pyqtSignal(float)
@@ -181,7 +179,6 @@ class HiFrontend(QWidget):
         self.update_microwave_freq_requested.connect(self.brillouin_signaller.set_microwave_frequency)
         self.toggle_illumination_requested.connect(self.brillouin_signaller.toggle_illumination_mode)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
-        self.acquire_background_requested.connect(self.brillouin_signaller.acquire_dark_images)
 
         self.move_zaber_eye_lens_requested.connect(self.brillouin_signaller.move_zaber_eye_lens_relative)
         self.move_zaber_stage_x_requested.connect(self.brillouin_signaller.move_zaber_stage_x_relative)
@@ -283,7 +280,6 @@ class HiFrontend(QWidget):
         left_column_layout.addWidget(self.create_andor_camera_group())
         left_column_layout.addWidget(self.create_fitting_group())
         left_column_layout.addWidget(self.create_reference_group())
-        left_column_layout.addWidget(self.create_background_group())
         left_column_layout.addWidget(self.create_illumination_group())
         left_column_layout.addWidget(self.create_allied_vision_group())
         left_column_layout.addWidget(self.create_axial_scans_group())
@@ -345,26 +341,6 @@ class HiFrontend(QWidget):
         layout.addWidget(cancel_btn)
         layout.addWidget(restart_btn)
         layout.addWidget(self.state_label)
-        group.setLayout(layout)
-        return group
-
-    def create_background_group(self):
-        # The bg-frame subtraction feature was removed 2026-08-20; this group
-        # now only manages the dark frames (always subtracted from samples).
-        self.btn_take_bg = QPushButton("Take darks")
-        self.btn_take_bg.clicked.connect(self.take_dark_images)
-
-        self.btn_save_bg = QPushButton("Save darks")
-        self.btn_save_bg.clicked.connect(self.save_dark_images)
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_take_bg)
-        btn_row.addWidget(self.btn_save_bg)
-
-        layout = QVBoxLayout()
-        layout.addLayout(btn_row)
-
-        group = QGroupBox("Dark frames")
         group.setLayout(layout)
         return group
 
@@ -1154,13 +1130,10 @@ class HiFrontend(QWidget):
             return
 
         try:
-            # Save as Pickle
-            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-            with open(pkl_path, "wb") as f:
-                pickle.dump(scans, f)
-            log.info(f"[✓] Pickle saved to: {pkl_path}")
-
-            # Save as HDF5
+            # HDF5 only (2026-08-21 decision): the format of record. It is
+            # refactor-proof (name-based loading, unknown fields dropped),
+            # unlike pickle, which pins module paths forever. Old .pkl files
+            # remain loadable everywhere — they are just not written any more.
             h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
             native_dict = dataclass_to_hdf5_native_dict(scans)
             save_dict_to_hdf5(h5_path, native_dict)
@@ -1416,47 +1389,12 @@ class HiFrontend(QWidget):
     # -------------- Functions --------------
 
 
-    def save_dark_images(self):
-        def receive_data(data: BackgroundImage):
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Save Dark Frames", filter="All Files (*)"
-            )
-            if not path:
-                return
-
-            try:
-                # Save as Pickle
-                pkl_path = path if path.endswith(".pkl") else path + ".pkl"
-                with open(pkl_path, "wb") as f:
-                    pickle.dump(data, f)
-                log.info(f"[✓] Background image saved to: {pkl_path}")
-
-                # Save as HDF5
-                h5_path = path if path.endswith(".h5") else path + ".h5"
-                native_dict = dataclass_to_hdf5_native_dict(data)
-                save_dict_to_hdf5(h5_path, native_dict)
-                log.info(f"[✓] Background image saved as HDF5 to: {h5_path}")
-
-            except Exception as e:
-                log.exception(f"[Brillouin Viewer] [Error] Failed to save background data: {e}")
-
-            finally:
-                self.brillouin_signaller.background_data_ready.disconnect(receive_data)
-
-        self.brillouin_signaller.background_data_ready.connect(receive_data)
-        self.brillouin_signaller.emit_background_data()
-
-
-
     def set_reference_freq(self):
         try:
             freq = float(self.ref_freq_input.text())
             self.update_microwave_freq_requested.emit(freq)
         except ValueError:
             log.exception("[Brillouin Viewer] [Reference] Invalid frequency input.")
-
-    def take_dark_images(self):
-        self.acquire_background_requested.emit()
 
     def receive_axial_scan_list(self, scan_list: list):
 
@@ -1533,13 +1471,7 @@ class HiFrontend(QWidget):
                 return
 
             try:
-                # Save Pickle
-                pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-                with open(pkl_path, "wb") as f:
-                    pickle.dump(cali_data, f)
-                log.info(f"[✓] Calibration data saved to {pkl_path}")
-
-                # Save HDF5
+                # HDF5 only (2026-08-21 decision, same as the scan save).
                 h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
                 hdf5_dict = dataclass_to_hdf5_native_dict(cali_data)
                 save_dict_to_hdf5(h5_path, hdf5_dict)

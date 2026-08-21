@@ -41,13 +41,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from brillouin_system.calibration.calibration import CalibrationCalculator
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalyzedSpectrum
+from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.noise_analysis import (
+from brillouin_system.analysis import (
     PixelCountsAndPhotons, theoretical_precision,
 )
-from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
 from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
@@ -66,7 +66,7 @@ SESSION_D_MM = 6.241
 N_SAMPLE = 1.376
 # The NA lineshape models were removed 2026-08-20: fit a plain windowed
 # Lorentzian and DIVIDE the shifts by the post-hoc scalar <cos(v/2)>
-# (na_mean_shift_ratio, Gaussian coupling weight) — validated equivalent.
+# (na_mean_shift_ratio, Gaussian coupling weight) â€” validated equivalent.
 FITTING_MODEL = "lorentzian_window"
 # The calibration must be fitted in the SAME lineshape family as the samples --
 # the fitter refuses to mix pixel-response with plain-Lorentzian centres. The
@@ -124,7 +124,6 @@ def fit_scan(scan: AxialScan, sf: SpectrumFitter) -> list[AnalyzedSpectrum]:
     out = []
     for measurement in scan.measurements:
         frame = measurement.frame_andor.copy()
-        frame = subtract_darknoise(frame=frame, darknoise_frame=ss.dark_image)
 
         px, sline = sf.get_px_sline_from_image(frame)
         fit = sf.fit(px=px, sline=sline, is_reference_mode=ss.is_reference_mode)
@@ -210,7 +209,7 @@ def plot_person(ax, name: str, files: list[str], sf: SpectrumFitter):
         d = np.array([r["depth"] for r in kept])
         y = np.array([r["shift"] for r in kept])
         e = np.array([r["err"] for r in kept])
-        spread = (f"± {y.std(ddof=1)*1000:.1f} MHz sd" if len(y) > 1 else "single point")
+        spread = (f"Â± {y.std(ddof=1)*1000:.1f} MHz sd" if len(y) > 1 else "single point")
         ax.errorbar(d, y, yerr=e, ls="none", marker=MARKERS[k % len(MARKERS)], ms=7,
                     capsize=2.5, lw=1.3, alpha=0.9, color=PALETTE[k % len(PALETTE)],
                     label=f"{fn.replace('.h5', '')}  (n={len(kept)}, "
@@ -228,17 +227,17 @@ def plot_person(ax, name: str, files: list[str], sf: SpectrumFitter):
         se_b = (resid.std(ddof=2) / np.sqrt(((d - d.mean()) ** 2).sum()))
         xs = np.linspace(d.min(), d.max(), 50)
         ax.plot(xs, a + b * xs, "-", color="0.35", lw=1.4, zorder=1,
-                label=f"linear: {b*1e3*1e3:+.1f} ± {se_b*1e6:.1f} MHz/mm travel")
-        print(f"  pooled slope {b*1e6:+.1f} ± {se_b*1e6:.1f} MHz per mm of travel "
+                label=f"linear: {b*1e3*1e3:+.1f} Â± {se_b*1e6:.1f} MHz/mm travel")
+        print(f"  pooled slope {b*1e6:+.1f} Â± {se_b*1e6:.1f} MHz per mm of travel "
               f"({b*1e6/N_CORNEA:+.1f} MHz per mm in tissue), n={len(all_kept)}")
 
     ax.set_title(f"{name}", fontsize=11)
-    ax.set_xlabel("Depth past the surface — Zaber lens travel (µm)")
+    ax.set_xlabel("Depth past the surface â€” Zaber lens travel (Âµm)")
     ax.grid(alpha=0.3)
     ax.legend(fontsize=7.5, loc="best")
     secax = ax.secondary_xaxis("top", functions=(lambda d: d * N_CORNEA,
                                                 lambda d: d / N_CORNEA))
-    secax.set_xlabel(f"approx. depth in tissue (µm, ×n={N_CORNEA})", fontsize=8)
+    secax.set_xlabel(f"approx. depth in tissue (Âµm, Ã—n={N_CORNEA})", fontsize=8)
 
 
 def gate_sensitivity(sf: SpectrumFitter):
@@ -272,9 +271,9 @@ if __name__ == "__main__":
     for ax, (name, files) in zip(axes, PEOPLE.items()):
         plot_person(ax, name, files, sf)
     axes[0].set_ylabel("Brillouin shift (GHz)")
-    fig.suptitle("Cornea Brillouin shift vs. depth — 2026-07-30\n"
+    fig.suptitle("Cornea Brillouin shift vs. depth â€” 2026-07-30\n"
                  f"strict gate: forward and backward reflection planes agree within "
-                 f"{MAX_PLANE_GAP_UM:.0f} µm; depth measured from their average",
+                 f"{MAX_PLANE_GAP_UM:.0f} Âµm; depth measured from their average",
                  fontsize=11)
     fig.text(0.995, 0.005,
              f"{FITTING_MODEL} vs. {REFERENCE_MODEL} calibration, D = {SESSION_D_MM} mm "

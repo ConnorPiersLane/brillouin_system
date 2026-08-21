@@ -1,7 +1,8 @@
 from dataclasses import dataclass, fields
 from typing import Optional
 
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalyzedSpectrum
+from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from dataclasses import asdict
 import pandas as pd
 

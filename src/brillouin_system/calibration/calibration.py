@@ -3,8 +3,15 @@ from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
 
+from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
+from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
+    resolve_fit_options,
+)
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, is_psf_fit
+
+log = get_logger(__name__)
 
 # The production line is deliberately minimal (cleaned 2026-08-20): a
 # calibration stores raw frames + set frequencies, NOTHING else — fits happen
@@ -310,15 +317,64 @@ class CalibrationCalculator:
         return " + ".join(terms) if terms else "0"
 
 
-def get_calibration_calculator_from_data(calibration_data: CalibrationData, poyfit_degree) -> CalibrationCalculator:
-    return CalibrationCalculator(calibrate(data=calibration_data, poyfit_degree=poyfit_degree))
+def get_calibration_calculator_from_data(calibration_data: CalibrationData, polyfit_degree) -> CalibrationCalculator:
+    return CalibrationCalculator(calibrate(data=calibration_data, polyfit_degree=polyfit_degree))
+
+
+def calibration_calculator_for_scan(
+        calibration_data: CalibrationData | None,
+        calibration_params: CalibrationPolyfitParameters | None,
+        fitter: SpectrumFitter) -> CalibrationCalculator:
+    """A scan's own calibration, re-fitted from its raw frames when possible.
+
+    Takes only the scan's calibration information (AxialScan.calibration_data
+    and .calibration_params) plus the fitter that will fit the samples.
+
+    calibration_params was fitted at ACQUISITION time with whatever reference
+    model was live then, so it silently pins the peak-centre convention of
+    that model. Re-analysing samples with a different lineshape against it is
+    the model-mixing trap (~0.27 px, -168 MHz split) that the fitter's guard
+    catches between the two live configs but cannot see here. Re-fitting the
+    stored frames with the current configs is what keeps the calibration and
+    the samples on the same convention.
+
+    Without the raw frames there is nothing to re-fit and no record of which
+    model produced the stored polynomial, so a PSF-convolved re-analysis of
+    such a scan is refused rather than quietly mixed.
+    """
+    if calibration_data is not None:
+        degree = (calibration_params.degree
+                  if calibration_params is not None
+                  else calibration_config.get().degree)
+        params = calibrate(data=calibration_data, polyfit_degree=degree,
+                           fitter=fitter)
+        log.info(f"[calibration] Re-fitted the scan's calibration from its raw "
+                 f"frames (model={fitter.reference_config.fitting_model}, "
+                 f"degree={degree}) — shifts may differ from the stored analysis.")
+        return CalibrationCalculator(parameters=params)
+
+    if resolve_fit_options(fitter.sample_config).model == "lorentzian_x_psf":
+        raise ValueError(
+            "The scan carries no raw calibration frames (calibration_data is "
+            "None: recorded before they were stored, or with "
+            "save_calibration_frames off), so its calibration cannot be "
+            "re-fitted and there is no record of the model it was fitted "
+            "with. A PSF-convolved sample fit against a calibration that is "
+            "most likely lorentzian is the -168 MHz mixing trap. Analyse "
+            "this scan with 'lorentzian' instead."
+        )
+
+    log.info("[calibration] No raw calibration frames stored — using the "
+             "calibration polynomial as fitted at acquisition time.")
+    return CalibrationCalculator(parameters=calibration_params)
+
 
 def sort_xy(x, y):
     idx = np.argsort(x)
     return np.asarray(x)[idx], np.asarray(y)[idx]
 
 
-def calibrate(data: CalibrationData, poyfit_degree,
+def calibrate(data: CalibrationData, polyfit_degree,
               fitter: SpectrumFitter | None = None) -> CalibrationPolyfitParameters:
     """Fit a calibration from its raw frames.
 
@@ -328,7 +384,7 @@ def calibrate(data: CalibrationData, poyfit_degree,
     here reads the configs as they are NOW, which is what a re-analysis wants —
     the model can only be changed by re-fitting.
     """
-    degree = poyfit_degree
+    degree = polyfit_degree
     sf = fitter if fitter is not None else SpectrumFitter()
 
     all_fits = []
@@ -354,7 +410,7 @@ def calibrate(data: CalibrationData, poyfit_degree,
 
     def safe_polyfit(x, y, deg):
         if len(x) <= deg:
-            print(f"[Calibration Warning] Not enough points for degree {deg} fit (got {len(x)} points).")
+            log.warning(f"[calibration] Not enough points for degree {deg} fit (got {len(x)} points).")
             return np.full(deg + 1, np.nan)
         return np.polyfit(x, y, deg)
 

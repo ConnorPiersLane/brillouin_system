@@ -10,17 +10,13 @@ from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
     save_dict_to_hdf5,
     load_dict_from_hdf5,
     dict_to_dataclass_tree,
-    register_dataclass,
-    known_classes
 )
 
-@register_dataclass
 @dataclass
 class Inner:
     value: int
     label: str
 
-@register_dataclass
 @dataclass
 class Outer:
     numbers: list[int]
@@ -28,6 +24,11 @@ class Outer:
     array: np.ndarray
     flag: bool
     maybe_none: str | None
+
+
+# Reconstruction is name-based via an explicit lookup (production uses
+# known_dataclasses_lookup.known_classes; the tests use their own).
+TEST_CLASSES = {cls.__name__: cls for cls in (Inner, Outer)}
 
 class TestSafeAndLoadHDF5Full(unittest.TestCase):
 
@@ -40,7 +41,7 @@ class TestSafeAndLoadHDF5Full(unittest.TestCase):
 
     def roundtrip_rehydrated(self, obj):
         raw = self.roundtrip_raw(obj)
-        return dict_to_dataclass_tree(raw)
+        return dict_to_dataclass_tree(raw, TEST_CLASSES)
 
     def test_full_dataclass_roundtrip(self):
         obj = Outer(

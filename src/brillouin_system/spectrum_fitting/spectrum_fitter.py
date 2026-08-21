@@ -18,11 +18,14 @@ from brillouin_system.spectrum_fitting.fit_util import (
     refine_fitted_spectrum,
 )
 
+from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.row_selection import (
     select_rows,
     captured_fraction,
 )
+
+log = get_logger(__name__)
 
 # A model name selects the LINESHAPE only. Windowing (config.use_window) and
 # the baseline (config.background) are independent options that apply to any
@@ -266,9 +269,9 @@ class SpectrumFitter:
         """
         rows = select_rows(frames, self.sline_config.n_rows)
         self._auto_rows = rows
-        print(f"[SpectrumFitter] auto row band: {rows[0]}-{rows[-1]} "
-              f"({len(rows)} rows, "
-              f"{100 * captured_fraction(frames, rows):.1f}% of the signal)")
+        log.info(f"[SpectrumFitter] auto row band: {rows[0]}-{rows[-1]} "
+                 f"({len(rows)} rows, "
+                 f"{100 * captured_fraction(frames, rows):.1f}% of the signal)")
         return rows
 
     def get_selected_rows(self, frame: np.ndarray | None = None) -> list[int]:
@@ -304,7 +307,7 @@ class SpectrumFitter:
         height = frame.shape[0]
 
         if not rows or not all(0 <= r < height for r in rows):
-            print("[get_sline_from_image] Warning: Invalid or empty row list — using full image height.")
+            log.warning("[SpectrumFitter] Invalid or empty row list — using full image height.")
             rows = list(range(height))
 
         sline = frame[rows, :].sum(axis=0)
@@ -576,9 +579,9 @@ class SpectrumFitter:
             # the ROI/thresholds don't support it — fail loudly, no silent
             # fallback to a different model layout.
             if n_requested == 4 and 1 <= n_found < 4:
-                print(f"[SpectrumFitter] n_peaks=4 requested but only "
-                      f"{n_found} peak(s) detected — the ROI must contain "
-                      f"the outer VIPA orders.")
+                log.warning(f"[SpectrumFitter] n_peaks=4 requested but only "
+                            f"{n_found} peak(s) detected — the ROI must "
+                            f"contain the outer VIPA orders.")
             return self._failed_fit(px, sline, self._fit_kind(
                 n_requested, requested_model, use_window, background))
 
@@ -638,7 +641,7 @@ class SpectrumFitter:
                 maxfev=50000,
             )
         except Exception as e:
-            print(f"[SpectrumFitter] Fit failed: {e}")
+            log.warning(f"[SpectrumFitter] Fit failed: {e}")
             return self._failed_fit(px, sline, fit_kind)
 
         peak_params = [list(popt[i * n_per_peak:(i + 1) * n_per_peak])

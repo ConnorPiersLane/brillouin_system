@@ -141,7 +141,7 @@ def main():
 
     config = calibration_config.get()
 
-    calculator = get_calibration_calculator_from_data(calibration_data, poyfit_degree=config.degree)
+    calculator = get_calibration_calculator_from_data(calibration_data, polyfit_degree=config.degree)
     calculator.print_all_models()
 
     # Plot all

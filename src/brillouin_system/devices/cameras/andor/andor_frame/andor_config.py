@@ -20,7 +20,6 @@ class AndorConfig:
     temperature: float | str
     flip_image_horizontally: bool
     verbose: bool
-    n_dark_images: int
 
 # ---------- Load/save helpers ----------
 
@@ -45,7 +44,6 @@ def load_andor_frame_settings(path: Path) -> AndorConfig:
         temperature=raw["temperature"],
         flip_image_horizontally=raw["flip_image_horizontally"],
         verbose=raw["verbose"],
-        n_dark_images=raw["n_dark_images"],
     )
 
 

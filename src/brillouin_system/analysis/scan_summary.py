@@ -28,18 +28,13 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from brillouin_system.my_dataclasses.human_interface_measurements import (
-    AnalyzedSpectrum,
-    AxialScan,
-    calibration_for_scan,
-    fit_axial_scan,
-    fitter_for_scan,
-)
+from brillouin_system.calibration.calibration import calibration_calculator_for_scan
+from brillouin_system.analysis.fit_axial_scan import fit_axial_scan
+from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
-from brillouin_system.spectrum_fitting.noise_analysis import (
-    PixelCountsAndPhotons,
-    theoretical_precision,
-)
+from brillouin_system.analysis.pixel_counts_and_photons import PixelCountsAndPhotons
+from brillouin_system.analysis.thompson_shot_noise_limit import theoretical_precision
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
 
@@ -113,8 +108,9 @@ def summarize_axial_scan(
 ) -> AxialScanSummary:
     """The one entry point: fit the scan with the production chain and
     reduce it to a figure-ready row."""
-    fitter = fitter if fitter is not None else fitter_for_scan(scan)
-    calc = calibration_for_scan(scan, fitter)
+    fitter = fitter if fitter is not None else SpectrumFitter()
+    calc = calibration_calculator_for_scan(
+        scan.calibration_data, scan.calibration_params, fitter)
     analyzed = fit_axial_scan(scan, fitter=fitter, calibration_calculator=calc)
 
     info = scan.system_state.andor_camera_info

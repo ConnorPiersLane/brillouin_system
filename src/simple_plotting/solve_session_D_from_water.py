@@ -21,7 +21,6 @@ from scipy.optimize import brentq
 from brillouin_system.calibration.calibration import CalibrationCalculator
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.helpers.subtract_darknoise import subtract_darknoise
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 from brillouin_system.spectrum_fitting.na_lineshape import na_mean_shift_ratio
 
@@ -29,7 +28,7 @@ P = Path(sys.argv[1] if len(sys.argv) > 1 else
          r"C:\Users\cplan\Partners HealthCare Dropbox\Connor Lane\Data\2026-7-27\water_na014_na042.h5")
 N_WATER = 1.33
 # The NA lineshape models are gone (2026-08-20): this now uses the production
-# post-hoc route — fit a plain windowed Lorentzian, then DIVIDE the shift by
+# post-hoc route â€” fit a plain windowed Lorentzian, then DIVIDE the shift by
 # the scalar <cos(v/2)> (na_mean_shift_ratio) with the Gaussian coupling
 # weight. Validated equivalent to the in-fit NA model on water.
 MODEL = "lorentzian_window"
@@ -62,7 +61,6 @@ for s in SCANS:
     slines = []
     for m in s.measurements:
         f = m.frame_andor.copy()
-        f = subtract_darknoise(frame=f, darknoise_frame=ss.dark_image)
         slines.append(sf0.get_px_sline_from_image(f))
     CACHE.append((s, slines))
 print(f"cached {sum(len(c[1]) for c in CACHE)} frames from {len(SCANS)} scans")

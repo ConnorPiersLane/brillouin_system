@@ -8,13 +8,11 @@ from brillouin_system.calibration.config.calibration_config import CalibrationCo
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
-from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
+from brillouin_system.guis.human_interface import scan_procedures
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.logging_utils.logging_setup import get_logger
-from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan
+from brillouin_system.my_dataclasses.request_axial_step_scan import RequestAxialStepScan
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
 log = get_logger(__name__)
@@ -43,7 +41,6 @@ class HiSignaller(QObject):
     camera_settings_ready = pyqtSignal(dict)
     zaber_lens_position_updated = pyqtSignal(float)
     microwave_frequency_updated = pyqtSignal(float)
-    background_data_ready = pyqtSignal(object)  # emits a BackgroundData instance
     # frame_and_fit_ready = pyqtSignal(object)
     measurement_result_ready = pyqtSignal(object)
     camera_shutter_state_changed = pyqtSignal(bool)
@@ -133,13 +130,6 @@ class HiSignaller(QObject):
     @pyqtSlot()
     def emit_is_illumination_continuous(self):
         self.illumination_mode_state.emit(self.backend.is_shutter_open)
-
-    @pyqtSlot()
-    def emit_background_data(self):
-        data = BackgroundImage(
-            dark_image=self.backend.dark_image,
-        )
-        self.background_data_ready.emit(data)
 
     @pyqtSlot()
     def toggle_do_live_fitting(self):
@@ -285,23 +275,6 @@ class HiSignaller(QObject):
             log.warning(f"Failed to read microwave frequency: {e}")
 
     @pyqtSlot()
-    def acquire_dark_images(self):
-
-        # Stop live view
-        self._running = False
-
-        try:
-            self.backend.take_darknoise_images()
-            log.info("Dark images acquired.")
-        except OperationCancelled:
-            log.info("Dark acquisition cancelled by user.")
-        except Exception as e:
-            log.warning(f"Failed to acquire dark images: {e}")
-
-        if self.backend.is_shutter_open:
-            self.restart_live_view_when_ready()
-
-    @pyqtSlot()
     def snap_and_fit(self):
         try:
             frame = self.backend.get_andor_frame()
@@ -405,7 +378,7 @@ class HiSignaller(QObject):
         old_state = self.system_state
         self.update_system_state(new_state=SystemState.BUSY)
         try:
-            is_sucess = self.backend.perform_calibration()
+            is_sucess = scan_procedures.perform_calibration(self.backend)
             if is_sucess:
                 self.calibration_finished.emit()
         finally:
@@ -427,7 +400,7 @@ class HiSignaller(QObject):
         QCoreApplication.processEvents()
 
         try:
-            self.backend.take_axial_step_scan(request_axial_scan)
+            scan_procedures.take_axial_step_scan(self.backend, request_axial_scan)
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)
@@ -449,7 +422,7 @@ class HiSignaller(QObject):
         QCoreApplication.processEvents()
 
         try:
-            self.backend.take_sweep_scan(request)
+            scan_procedures.take_sweep_scan(self.backend, request)
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)
