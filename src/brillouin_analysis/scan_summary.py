@@ -187,15 +187,16 @@ def summarize_axial_scan(
                      or float(np.median(np.asarray(
                          scan.measurements[0].frame_andor, dtype=float))))
         rows = stored_sline_rows(scan)
-        n_rows = (len(rows) if rows is not None else
-                  len(fitter.get_selected_rows(np.asarray(
-                      scan.measurements[0].frame_andor, dtype=float))))
+        if rows is None:
+            rows = fitter.get_selected_rows(np.asarray(
+                scan.measurements[0].frame_andor, dtype=float))
 
         theo = theoretical_precision(
             fs=mean_fs, photons=photons, calibration_calculator=calc,
             dark_frame_std=dark.std_image if dark is not None else None,
             preamp_gain=info.preamp_gain, emccd_gain=info.gain,
-            pedestal_bias_counts=level * n_rows)
+            pedestal_bias_counts=level * len(rows),
+            sline_rows=rows)
         out.thompson_left_mhz = theo.left_peak_total_mhz
         out.thompson_right_mhz = theo.right_peak_total_mhz
         out.thompson_distance_mhz = theo.distance_total_mhz

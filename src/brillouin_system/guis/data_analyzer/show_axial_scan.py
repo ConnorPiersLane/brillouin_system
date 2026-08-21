@@ -377,14 +377,15 @@ class AxialScanViewer(QWidget):
             level = (ccd_config.get().dark_median_counts
                      or float(np.median(first_frame)))
         rows = stored_sline_rows(self.axial_scan)
-        n_rows = (len(rows) if rows is not None
-                  else len(self.fitter.get_selected_rows(first_frame)))
-        bias_counts = level * n_rows
+        if rows is None:
+            rows = self.fitter.get_selected_rows(first_frame)
+        bias_counts = level * len(rows)
         return theoretical_precision(
             fs=mean_fs, photons=photons, calibration_calculator=self.calc,
             dark_frame_std=dark.std_image if dark is not None else None,
             preamp_gain=info.preamp_gain, emccd_gain=info.gain,
-            pedestal_bias_counts=bias_counts)
+            pedestal_bias_counts=bias_counts,
+            sline_rows=rows)
 
     def _measured_background_for_fit(self, px: np.ndarray) -> np.ndarray | None:
         """The reflection background rendered for this scan, when the live

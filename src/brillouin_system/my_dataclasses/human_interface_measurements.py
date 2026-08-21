@@ -273,15 +273,16 @@ def fit_axial_scan(scan: AxialScan,
         # dark stack median, or the frame median when no darks were taken.
         level = (dark_level_per_px if dark_level_per_px is not None
                  else float(np.median(frame)))
-        n_rows = len(spectrum_fitter.get_selected_rows(frame))
-        bias_counts = level * n_rows
+        rows_used = spectrum_fitter.get_selected_rows(frame)
+        bias_counts = level * len(rows_used)
         theoretical_std: TheoreticalPeakStdError = theoretical_precision(
             fs=fitting, photons=photons,
             calibration_calculator=calibration_calculator,
             dark_frame_std=dark.std_image if dark is not None else None,
             preamp_gain=scan.system_state.andor_camera_info.preamp_gain,
             emccd_gain=scan.system_state.andor_camera_info.gain,
-            pedestal_bias_counts=bias_counts)
+            pedestal_bias_counts=bias_counts,
+            sline_rows=rows_used)
 
         # Append
         anaylzed_spectra = AnalyzedSpectrum(
