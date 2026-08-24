@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from brillouin_system.ccd_characteristics import ccd_config
 from brillouin_system.spectrum_fitting.reflection_background import (
     DEFAULT_REFLECTION_BG,
     ReflectionBackground,
@@ -62,6 +63,59 @@ def _calibration_points(scan, fitter: SpectrumFitter):
             left.append(float(np.mean(ls)))
             right.append(float(np.mean(rs)))
     return np.array(freqs), np.array(left), np.array(right)
+
+
+def background_from_scan(scan, source: str = "",
+                         notes: str = "") -> ReflectionBackground:
+    """A ReflectionBackground from ONE stored scan — the analyzer's
+    "Load Background" path.
+
+    The scan must be a reflection-plane measurement that carries its own raw
+    calibration frames — the frequency anchor. Scans always do since
+    2026-08-24 (the save_calibration_frames off-toggle was removed); only
+    older datasets can lack them. The bias is the ccd_characteristics dark
+    median — per-session dark stacks are not part of the workflow (user rule
+    2026-08-20).
+    """
+    cal = getattr(scan, "calibration_data", None)
+    if cal is None:
+        raise ValueError(
+            "The scan carries no raw calibration frames — a reflection "
+            "background needs the session's own calibration as its frequency "
+            "anchor. (Only old datasets lack them; frames always travel with "
+            "scans since 2026-08-24.)"
+        )
+
+    bias = ccd_config.get().dark_median_counts
+    frame = _mean_frame(scan) - bias
+
+    fitter = SpectrumFitter()
+    fitter.auto_select_rows(np.stack(
+        [np.asarray(p.frame, dtype=float)
+         for b in cal.measured_freqs
+         for p in b.cali_meas_points]))
+    freqs, left, right = _calibration_points(scan, fitter)
+    if len(freqs) < 3:
+        raise ValueError(
+            f"Only {len(freqs)} calibration frequencies fitted successfully — "
+            f"the background tracks need at least 3."
+        )
+
+    meta = {
+        "source": source,
+        "scan_i": int(getattr(scan, "i", -1)),
+        "scan_id": str(getattr(scan, "id", "?")),
+        "bias_counts": bias,
+        "bias_origin": "ccd_characteristics dark_median_counts",
+        "n_scans": 1,
+        "frames_per_scan": len(scan.measurements),
+        "built": datetime.date.today().isoformat(),
+        "notes": notes or "built from a single scan in the data analyzer",
+    }
+    return ReflectionBackground(
+        frame=frame, cal_freqs=freqs, cal_left_px=left, cal_right_px=right,
+        meta=meta,
+    )
 
 
 def build_reflection_background(

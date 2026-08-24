@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton,
-    QButtonGroup, QPushButton, QLabel, QMessageBox, QHBoxLayout, QCheckBox
+    QButtonGroup, QPushButton, QLabel, QMessageBox, QHBoxLayout
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 
@@ -59,17 +59,14 @@ class CalibrationConfigDialog(QDialog):
         ref_layout.addWidget(self.dist_radio)
         ref_layout.addWidget(self.combined_radio)
 
-        # Save calibration frames checkbox
-        self.save_frames_checkbox = QCheckBox("Save calibration frames with each scan")
-
-        # Form layout
+        # Form layout. (No storage toggle: calibration frames ALWAYS travel
+        # with each scan — user decision 2026-08-24, see CalibrationConfig.)
         form.addRow("n_per_freq:", self.n_per_freq_input)
         form.addRow("Polynomial Degree:", self.degree_input)
         form.addRow("Start Frequency (GHz):", self.start_input)
         form.addRow("Stop Frequency (GHz):", self.stop_input)
         form.addRow("Step (GHz):", self.step_input)
         form.addRow(QLabel("Reference Method:"), ref_layout)
-        form.addRow(QLabel("Storage:"), self.save_frames_checkbox)
 
         layout.addLayout(form)
 
@@ -96,8 +93,6 @@ class CalibrationConfigDialog(QDialog):
             self.combined_radio.setChecked(True)
         else:
             self.dist_radio.setChecked(True)
-
-        self.save_frames_checkbox.setChecked(cfg.save_calibration_frames)
 
     def create_buttons(self):
         layout = QHBoxLayout()
@@ -134,7 +129,6 @@ class CalibrationConfigDialog(QDialog):
                 stop=float(self.stop_input.text()),
                 step=float(self.step_input.text()),
                 reference=reference,
-                save_calibration_frames=self.save_frames_checkbox.isChecked(),
             )
 
             if self.on_apply:

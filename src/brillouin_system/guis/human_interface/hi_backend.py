@@ -9,7 +9,6 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import ando
 from brillouin_system.calibration.config.calibration_config import CalibrationConfig, calibration_config
 from brillouin_system.devices.cameras.andor.baseCamera import BaseCamera
 from brillouin_system.devices.cameras.andor.dummyCamera import DummyCamera
-from brillouin_system.devices.cameras.andor.replayCamera import ReplayCamera
 from brillouin_system.devices.cameras.andor.ixonUltra import IxonUltra
 from brillouin_system.devices.microwave_device import Microwave, MicrowaveDummy
 
@@ -37,8 +36,8 @@ from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, \
     config_requires_reflection_background
 from brillouin_system.spectrum_fitting.reflection_background import (
-    ReflectionBackground,
     ReflectionBackgroundMapper,
+    get_current_background,
 )
 
 
@@ -57,9 +56,10 @@ class HiBackend:
         self.spectrum_fitter = SpectrumFitter()
 
         # Reflection background ("ReflectionBG") for the reflection
-        # background / prmr preset: the packaged template is loaded lazily,
-        # the mapper is rebuilt whenever the calibration or row band changes.
-        self._reflection_bg: ReflectionBackground | None = None
+        # background / prmr preset: the current template comes from the
+        # runtime registry (no default fallback — with none loaded, fits
+        # warn and drop the reflection term); the mapper is rebuilt whenever
+        # the template, calibration or row band changes.
         self._reflection_mapper: ReflectionBackgroundMapper | None = None
         self._reflection_mapper_key = None
 
@@ -67,12 +67,9 @@ class HiBackend:
         if use_dummy:
             shutter_manager=ShutterManagerDummy('human_interface')
             microwave=MicrowaveDummy()
-            # Replay real stored frames (water sample + EOM calibration) so
-            # dummy mode shows real signals; falls back to synthetic frames
-            # if the replay file is missing on this machine.
-            camera=ReplayCamera(microwave=microwave, shutter_manager=shutter_manager)
-            if camera.has_replay_data:
-                microwave.set_available_frequencies(camera.calibration_freqs)
+            # Synthetic two-peak frames; in reference mode the EOM peaks
+            # follow the dummy microwave, so calibration sweeps work.
+            camera=DummyCamera(microwave=microwave, shutter_manager=shutter_manager)
             # Simulated NI + eye lens with a moving simulated cornea: the DAQ
             # signal is coupled to the lens-cornea distance, so reflection
             # finding actually works in dummy mode.
@@ -329,27 +326,32 @@ class HiBackend:
             return self.spectrum_fitter.get_empty_fitting(px, sline)
 
     def calibration_data_to_store(self) -> CalibrationData | None:
-        """The raw calibration frames to travel with a scan, or None.
+        """The raw calibration frames to travel with a scan (None only when
+        no calibration has been taken yet).
 
-        Re-fitting a scan against its OWN calibration is only possible if the
-        frames are stored with it; the fitted polynomials alone cannot be
-        re-derived with a different lineshape model. Disable via
-        calibration_config.save_calibration_frames to save disk space.
+        ALWAYS stored — the off-toggle was removed 2026-08-24 (user
+        decision): re-fitting a scan against its OWN calibration and
+        anchoring a reflection-background template both need the frames,
+        and the fitted polynomials alone cannot be re-derived with a
+        different lineshape model.
         """
-        if not self.calibration_config.save_calibration_frames:
-            return None
         return self.calibration_data
 
     def _reflection_background_if_required(self, px) -> np.ndarray | None:
         """The mapped reflection background for sample fits, or None.
 
-        Only built when the sample config uses the reflection
-        background (the prmr preset). The packaged template is registered onto
-        the CURRENT calibration in frequency space, so it survives VIPA
-        realignment; raises if no calibration is loaded (no fallback)."""
+        Only built when the sample config uses the reflection background
+        (the prmr preset). The CURRENT template (runtime registry, no
+        default fallback — None makes fit() warn once and drop the
+        reflection term) is registered onto the CURRENT calibration in
+        frequency space, so it survives VIPA realignment; raises if no
+        calibration is loaded (no fallback)."""
         if self.is_reference_mode:
             return None
         if not config_requires_reflection_background(self.spectrum_fitter.sample_config):
+            return None
+        background = get_current_background()
+        if background is None:
             return None
         if self.calibration_calculator is None:
             raise ValueError(
@@ -359,12 +361,10 @@ class HiBackend:
         sline_config = self.spectrum_fitter.sline_config
         n_rows = (sline_config.n_rows if sline_config.row_selection == "auto"
                   else len(sline_config.selected_rows))
-        key = (id(self.calibration_calculator), n_rows)
+        key = (id(background), id(self.calibration_calculator), n_rows)
         if self._reflection_mapper is None or self._reflection_mapper_key != key:
-            if self._reflection_bg is None:
-                self._reflection_bg = ReflectionBackground.load_default()
             self._reflection_mapper = ReflectionBackgroundMapper(
-                self._reflection_bg, self.calibration_calculator,
+                background, self.calibration_calculator,
                 n_rows=n_rows)
             self._reflection_mapper_key = key
         return self._reflection_mapper.render(px)

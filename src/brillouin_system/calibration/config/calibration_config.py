@@ -54,11 +54,12 @@ class CalibrationConfig:
     # inverse-variance combination of all four orders; needs n_peaks = 4 in
     # BOTH fitting sections, shows N/A otherwise).
     reference: str
-    # Whether to store the raw calibration reference frames on each axial
-    # scan (AxialScan.calibration_data). Adds frames to every saved scan, but
-    # re-fitting a scan against its OWN calibration (the production
-    # re-analysis path) is only possible when they are stored.
-    save_calibration_frames: bool = True
+    # NOTE: a save_calibration_frames toggle existed until 2026-08-24 and was
+    # REMOVED (user decision): the raw calibration frames ALWAYS travel with
+    # each scan. They are the only way to re-fit a scan against its OWN
+    # calibration (the production re-analysis path) and the frequency anchor
+    # of reflection-background templates — an accidental off-switch was pure
+    # downside. Old TOMLs still carrying the key load fine (ignored).
 
     @property
     def calibration_freqs(self) -> list[float]:
@@ -86,7 +87,6 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         stop=raw["stop"],
         step=raw["step"],
         reference=raw["reference"],
-        save_calibration_frames=raw.get("save_calibration_frames", True),
     )
 
 
@@ -104,7 +104,6 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
             "stop",
             "step",
             "reference",
-            "save_calibration_frames",
         ]
     }
 

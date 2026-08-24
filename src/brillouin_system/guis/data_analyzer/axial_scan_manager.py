@@ -21,10 +21,11 @@ import pickle
 import sys
 import traceback
 from dataclasses import dataclass
+from pathlib import Path
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QListWidget,
+    QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
     QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QSplitter,
     QVBoxLayout, QWidget,
 )
@@ -48,6 +49,15 @@ from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
 from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
     dict_to_dataclass_tree, load_dict_from_hdf5,
+)
+from brillouin_system.spectrum_fitting.build_reflection_background import (
+    background_from_scan,
+)
+from brillouin_system.spectrum_fitting.reflection_background import (
+    ReflectionBackground, get_current_background, set_current_background,
+)
+from brillouin_system.guis.data_analyzer.show_reflection_background import (
+    ReflectionBackgroundViewer,
 )
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import (
     FindPeaksConfigDialog,
@@ -142,6 +152,29 @@ class AxialScanManager(QWidget):
         config_row.addWidget(self.fitting_config_btn)
 
         layout.addLayout(config_row)
+
+        # --- reflection background (the template prmr fits use) ---
+        bg_row = QHBoxLayout()
+
+        self.load_bg_btn = QPushButton("Load Background")
+        self.load_bg_btn.clicked.connect(self.load_background)
+        bg_row.addWidget(self.load_bg_btn)
+
+        self.show_bg_btn = QPushButton("Show Background")
+        self.show_bg_btn.clicked.connect(self.show_background)
+        bg_row.addWidget(self.show_bg_btn)
+
+        self.bg_label = QLabel("Background: none loaded")
+        self.bg_label.setToolTip(
+            "The reflection background used by 'reflection'-background "
+            "(prmr) sample fits. Load one from a reflection-plane scan of "
+            "the session's own alignment (e.g. a 'reflection_background' "
+            "scan taken with the GUI's Take Background button). With none "
+            "loaded, prmr fits warn and use per-peak offsets only — there "
+            "is deliberately no default template.")
+        bg_row.addWidget(self.bg_label, stretch=1)
+
+        layout.addLayout(bg_row)
 
         splitter.addWidget(left)
 
@@ -330,6 +363,106 @@ class AxialScanManager(QWidget):
                      "configs so they affect the viewer.")
         dlg = FindPeaksConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
+
+    # --- Reflection background ---
+
+    def _pick_scan(self, scans: list) -> AxialScan | None:
+        if len(scans) == 1:
+            log.info("File holds a single scan — using it.")
+            return scans[0]
+        labels = [f"{getattr(s, 'i', '?')} - {getattr(s, 'id', 'no-id')} "
+                  f"({len(s.measurements)} frames)" for s in scans]
+        # Preselect a scan recorded with the GUI's Take Background button.
+        default = next((i for i, s in enumerate(scans)
+                        if "reflection_background" in str(getattr(s, "id", ""))),
+                       0)
+        choice, ok = QInputDialog.getItem(
+            self, "Pick Background Scan",
+            "Reflection-plane scan to build the background from:",
+            labels, default, False)
+        if not ok:
+            return None
+        return scans[labels.index(choice)]
+
+    def load_background(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Reflection Background",
+            filter="Scans / Templates (*.h5 *.hdf5 *.pkl *.npz);;"
+                   "All Files (*)")
+        if not path:
+            return
+        try:
+            if path.endswith(".npz"):
+                bg = ReflectionBackground.load(path)
+                label = Path(path).name
+            else:
+                loaded = self._load_file(path)
+                objs = loaded if isinstance(loaded, list) else [loaded]
+                scans = [o for o in objs if isinstance(o, AxialScan)]
+                if not scans:
+                    QMessageBox.warning(
+                        self, "No Scans",
+                        f"{path} contains no scans to build a background "
+                        f"from.")
+                    return
+                scan = self._pick_scan(scans)
+                if scan is None:
+                    return
+                log.info(f"Building the reflection background from scan "
+                         f"'{scan.id}' ({len(scan.measurements)} frames) — "
+                         f"fitting its calibration...")
+                bg = background_from_scan(scan, source=path)
+                label = (f"scan {getattr(scan, 'i', '?')} - {scan.id} "
+                         f"({Path(path).name})")
+                self._offer_background_save(bg, scan)
+
+            set_current_background(bg)
+            self.bg_label.setText(f"Background: {label}")
+            # A stale viewer of the previous template would be misleading.
+            if "reflection-bg" in self.open_viewers:
+                self.open_viewers["reflection-bg"].close()
+            log.info(f"Reflection background set to {label} — newly opened "
+                     f"viewers and exports with a 'reflection' background "
+                     f"config will use it.")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Load Background Failed",
+                                 f"Could not load a reflection background "
+                                 f"from {path}:\n\n{type(e).__name__}: {e}")
+
+    def _offer_background_save(self, bg: ReflectionBackground, scan):
+        answer = QMessageBox.question(
+            self, "Save Background?",
+            "Save this background as a .npz template so it can be reloaded "
+            "directly next time?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        out, _ = QFileDialog.getSaveFileName(
+            self, "Save Reflection Background",
+            f"reflection_bg_{scan.id}.npz", "Background Template (*.npz)")
+        if not out:
+            return
+        if not out.lower().endswith(".npz"):
+            out += ".npz"
+        bg.save(out)
+        log.info(f"Saved the reflection background to {out}")
+
+    def show_background(self):
+        if self._raise_if_open("reflection-bg"):
+            return
+        bg = get_current_background()
+        if bg is None:
+            QMessageBox.information(
+                self, "No Background",
+                "No reflection background is loaded — use 'Load Background' "
+                "first. (prmr fits currently warn and use per-peak offsets "
+                "only.)")
+            return
+        title = self.bg_label.text().replace("Background: ",
+                                             "Reflection Background — ")
+        viewer = ReflectionBackgroundViewer(bg, title=title)
+        self._register_window("reflection-bg", viewer)
 
     # --- Excel export ---
 

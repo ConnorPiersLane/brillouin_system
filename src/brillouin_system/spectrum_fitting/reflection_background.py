@@ -178,6 +178,29 @@ class ReflectionBackground:
         return cls.load(DEFAULT_REFLECTION_BG)
 
 
+# The background production fits actually use. The reflection pattern is an
+# instrument-state property — a realignment can change it beyond what the
+# frequency registration repairs — so the template is selectable at runtime
+# (the analyzer's "Load Background" button) and there is deliberately NO
+# fallback to the packaged default (user decision 2026-08-24): silently
+# fitting with a stale-alignment template is worse than fitting without the
+# reflection term. With no template loaded, prmr fits warn and degrade to
+# per-peak flat offsets (see SpectrumFitter.fit).
+_current_background: ReflectionBackground | None = None
+
+
+def set_current_background(bg: ReflectionBackground | None):
+    """Select the background used by subsequent prmr fits in this process
+    (None clears it — fits then warn and drop the reflection term)."""
+    global _current_background
+    _current_background = bg
+
+
+def get_current_background() -> ReflectionBackground | None:
+    """The user-selected background, or None when none has been loaded."""
+    return _current_background
+
+
 def _freq_polys(calibration) -> tuple[np.ndarray, np.ndarray]:
     """The two px->GHz polynomials from whatever calibration form is given.
 

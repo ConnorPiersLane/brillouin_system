@@ -1,23 +1,53 @@
+"""Synthetic dummy camera with a rough two-peak spectrometer simulation.
+
+Serves fully synthetic frames (no data files needed on any machine):
+
+- sample mode -> two water-like Brillouin peaks (shift ~5 GHz)
+- reference mode (reference shutter open) -> two EOM sideband peaks whose
+  positions follow the dummy microwave's current frequency, so running a
+  calibration sweep produces a plausible pixel->GHz mapping
+- camera shutter closed -> dark frame (bias + read noise)
+
+Both modes place peaks with the same rough dispersion model (FSR 21.7 GHz,
+~294 MHz/px at the window centre, mildly nonlinear across the window), so
+an analyzed sample shift comes out near the simulated 5.0 GHz.
+"""
+
 import time
 from contextlib import contextmanager
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter1d
 
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from .andor_dataclasses import AndorExposure, AndorCameraInfo
 from .baseCamera import BaseCamera
 
+# Hardware numbers of the real system (shot/read noise synthesis) — from the
+# measured ccd_characteristics, the one home for every obtained camera number.
+from brillouin_system.ccd_characteristics import ccd_config as _ccd_config
 
+_GAIN_E_PER_COUNT = _ccd_config.get().sensitivity_e_per_count_preamp_1x
+_READ_NOISE_COUNTS = _ccd_config.get().read_noise_counts
+
+# ---- rough spectrometer model ----
+_FSR_GHZ = 21.7
+_PX_PER_GHZ = 3.4          # ~294 MHz/px at the window centre
+_PX_PER_GHZ2 = 0.03        # dispersion varies across the window
+_PX_PER_GHZ3 = -0.0015     # small cubic term: calibration is only ROUGHLY polynomial
+_WATER_SHIFT_GHZ = 5.0
+_WATER_HWHM_GHZ = 0.129
+_PSF_SIGMA_PX = 0.8        # instrument line blur applied to every spectrum
+_BIAS_COUNTS = 100.0
+_REF_EXPOSURE_S = 0.3      # exposure at which the nominal amplitudes apply
 
 
 class DummyCamera(BaseCamera):
-    def __init__(self):
+    def __init__(self, microwave=None, shutter_manager=None):
         self.exposure_time = 0.3
-        # Conventional mode (emccd gain 0), matching the real data the
-        # ReplayCamera serves — a nonzero EM gain would (correctly) disable
-        # the photon/Thompson outputs, because the EM sensitivity was never
-        # measured.
+        # Conventional mode (emccd gain 0) — a nonzero EM gain would
+        # (correctly) disable the photon/Thompson outputs, because the EM
+        # sensitivity was never measured.
         self.gain = 0
         self.roi = (0, 160, 0, 20)
         self.binning = (1, 1)
@@ -28,6 +58,11 @@ class DummyCamera(BaseCamera):
         self._pre_amp_mode = 16
         self._vss_index = 4
         self._streaming_img_count = 0
+
+        self._microwave = microwave
+        self._shutter_manager = shutter_manager
+        self._shutter_open = True
+        self._rng = np.random.default_rng()
 
         if self.verbose:
             print("[DummyCamera] initialized")
@@ -90,36 +125,75 @@ class DummyCamera(BaseCamera):
         return "DummyCamera"
 
     def open_shutter(self):
+        self._shutter_open = True
         print("[DummyCamera] Shutter open")
 
     def close_shutter(self):
+        self._shutter_open = False
         print("[DummyCamera] Shutter closed")
+
+    def _is_reference_mode(self) -> bool:
+        if self._shutter_manager is None:
+            return False
+        return bool(self._shutter_manager.reference._state)
 
     def snap(self) -> np.ndarray:
         time.sleep(self.exposure_time)
-        frame = self._generate_plastic_image()
+
+        if not self._shutter_open:
+            frame = self._dark_frame()
+        elif self._is_reference_mode():
+            freq = self._microwave.get_frequency() if self._microwave is not None else 5.75
+            # mild EOM/RF-chain roll-off toward high frequency
+            amp = 6000.0 * np.exp(-(freq - 4.0) / 8.0)
+            frame = self._spectrum_frame(nu_ghz=freq, amp=amp, hwhm_px=0.5)
+        else:
+            frame = self._spectrum_frame(nu_ghz=_WATER_SHIFT_GHZ, amp=1000.0,
+                                         hwhm_px=_WATER_HWHM_GHZ * _PX_PER_GHZ)
+
         if self._flip:
             frame = np.fliplr(frame)
         return frame
 
-    def _generate_plastic_image(self) -> np.ndarray:
+    def _peak_pixels(self, nu_ghz: float, w: int) -> tuple[float, float]:
+        """Left/right peak positions for a shift (or EOM sideband) nu_ghz.
+
+        Both peaks sit at optical offsets +-(FSR/2 - nu) from the window
+        centre, mapped to pixels with a mildly nonlinear dispersion — the
+        pair converges toward the centre as nu approaches FSR/2.
+        """
+        u = _FSR_GHZ / 2.0 - nu_ghz
+        x0 = w / 2.0
+
+        def x_of(uo: float) -> float:
+            return x0 + _PX_PER_GHZ * uo + _PX_PER_GHZ2 * uo ** 2 + _PX_PER_GHZ3 * uo ** 3
+
+        return x_of(-u), x_of(+u)
+
+    def _spectrum_frame(self, nu_ghz: float, amp: float, hwhm_px: float) -> np.ndarray:
         h, w = self.get_frame_shape()
-        image = np.random.normal(loc=150, scale=10, size=(h, w))
+        x = np.arange(w, dtype=np.float64)
+        x_left, x_right = self._peak_pixels(nu_ghz, w)
 
-        def lorentzian(xx, amp, cen, wid):
-            return amp * wid ** 2 / ((xx - cen) ** 2 + wid ** 2)
+        def lorentzian(cen):
+            return amp * hwhm_px ** 2 / ((x - cen) ** 2 + hwhm_px ** 2)
 
-        x = np.arange(w)
-        peak1 = lorentzian(x, amp=1000, cen=w // 2 - 20, wid=4)
-        peak2 = lorentzian(x, amp=1000, cen=w // 2 + 20, wid=4)
-        spectrum_line = peak1 + peak2 + 200 + np.random.normal(0, 15, size=w)
+        line = lorentzian(x_left) + lorentzian(x_right)
+        line = gaussian_filter1d(line, _PSF_SIGMA_PX)
+        line *= self.exposure_time / _REF_EXPOSURE_S
 
-        band_y = h // 2 + np.random.randint(-2, 2)
-        for offset in [-1, 0, 1]:
-            image[band_y + offset, :] += spectrum_line
+        # vertical beam profile across the sline row band
+        rows = np.exp(-0.5 * ((np.arange(h) - h / 2.0) / 2.5) ** 2)
+        signal = rows[:, None] * line[None, :]
 
-        image = gaussian_filter(image, sigma=1.2)
-        return np.clip(image, 0, 65535).astype(np.uint16)
+        noise_sigma = np.sqrt(_READ_NOISE_COUNTS ** 2 + signal / _GAIN_E_PER_COUNT)
+        frame = _BIAS_COUNTS + signal + self._rng.normal(0.0, 1.0, size=(h, w)) * noise_sigma
+        return np.clip(frame, 0, 65535).astype(np.uint16)
+
+    def _dark_frame(self) -> np.ndarray:
+        h, w = self.get_frame_shape()
+        frame = self._rng.normal(_BIAS_COUNTS, _READ_NOISE_COUNTS, size=(h, w))
+        return np.clip(frame, 0, 65535).astype(np.uint16)
 
     def set_exposure_time(self, seconds: float):
         self.exposure_time = seconds

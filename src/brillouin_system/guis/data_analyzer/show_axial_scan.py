@@ -59,7 +59,7 @@ from brillouin_system.analysis import (
     TheoreticalPeakStdError, electrons_per_count, theoretical_precision,
 )
 from brillouin_system.spectrum_fitting.reflection_background import (
-    ReflectionBackground, ReflectionBackgroundMapper,
+    ReflectionBackgroundMapper, get_current_background,
 )
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter, config_requires_reflection_background,
@@ -388,10 +388,16 @@ class AxialScanViewer(QWidget):
             return None
         if not config_requires_reflection_background(self.fitter.sample_config):
             return None
+        background = get_current_background()
+        if background is None:
+            log.warning("[MC] No reflection background loaded — the MC fits "
+                        "run WITHOUT the reflection term (per-peak offsets "
+                        "only), same as the scan fits.")
+            return None
         rows = self.fitter.get_selected_rows(
             np.asarray(self.axial_scan.measurements[0].frame_andor))
         mapper = ReflectionBackgroundMapper(
-            ReflectionBackground.load_default(), self.calc,
+            background, self.calc,
             n_rows=len(rows))
         return mapper.render(px)
 
@@ -465,11 +471,13 @@ class AxialScanViewer(QWidget):
         samples = []
         n_failed = 0
         reflection_bg = None
+        reflection_bg_built = False
         for i, noisy in enumerate(mc.frames()):
             try:
                 px, sline = self.fitter.get_px_sline_from_image(noisy)
-                if reflection_bg is None:
+                if not reflection_bg_built:
                     reflection_bg = self._reflection_background_for_fit(px)
+                    reflection_bg_built = True
                 fit = self.fitter.fit(px=px, sline=sline,
                                       is_reference_mode=is_ref,
                                       reflection_background=reflection_bg)

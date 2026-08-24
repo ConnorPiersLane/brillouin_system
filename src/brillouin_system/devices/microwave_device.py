@@ -90,15 +90,7 @@ class MicrowaveDummy:
         self._frequency_ghz = 5.75
         self._power_dbm = 1.0
         self._output_enabled = True
-        # Optional grid of frequencies the simulation can actually serve
-        # (the ReplayCamera's stored calibration frames). When set,
-        # set_frequency snaps to the nearest grid point so the reported
-        # frequency stays consistent with the served frame.
-        self._available_freqs_ghz: list[float] | None = None
         print(f"[{self.device_name}] Initialized at {self._frequency_ghz} GHz, {self._power_dbm} dBm")
-
-    def set_available_frequencies(self, freqs_ghz):
-        self._available_freqs_ghz = None if freqs_ghz is None else [float(f) for f in freqs_ghz]
 
     def shutdown(self):
         self._output_enabled = False
@@ -109,12 +101,6 @@ class MicrowaveDummy:
         return self._frequency_ghz
 
     def set_frequency(self, freq_ghz: float):
-        if self._available_freqs_ghz:
-            nearest = min(self._available_freqs_ghz, key=lambda f: abs(f - freq_ghz))
-            if abs(nearest - freq_ghz) > 1e-3:
-                print(f"[{self.device_name}] {freq_ghz:.3f} GHz not in the stored "
-                      f"calibration grid; snapping to {nearest:.3f} GHz")
-            freq_ghz = nearest
         self._frequency_ghz = freq_ghz
         print(f"[{self.device_name}] Frequency set to: {self._frequency_ghz} GHz")
 

@@ -68,10 +68,33 @@ def config_requires_reflection_background(config) -> bool:
     """True if fits with this config need the mapped reflection background.
 
     Callers then build it per scan: ReflectionBackgroundMapper(
-    ReflectionBackground.load_default(), calibration, n_rows).render(px)
-    and pass the result to fit() as reflection_background.
+    get_current_background(), calibration, n_rows).render(px) and pass the
+    result to fit() as reflection_background — when get_current_background()
+    is None (nothing loaded, no fallback), pass None and fit() warns and
+    degrades to per-peak flat offsets.
     """
     return resolved_background(config) == "reflection"
+
+
+# One-shot: a prmr fit without a loaded template degrades to per-peak flat
+# offsets. Warn once per process, not once per frame — a scan would repeat
+# it hundreds of times.
+_missing_reflection_bg_warned = False
+
+
+def _warn_missing_reflection_background():
+    global _missing_reflection_bg_warned
+    if _missing_reflection_bg_warned:
+        return
+    _missing_reflection_bg_warned = True
+    log.warning(
+        "[SpectrumFitter] Background 'reflection' (prmr) requested but NO "
+        "reflection background is loaded — fitting with per-peak flat "
+        "offsets only (there is deliberately no default template: alignments "
+        "differ). Load one in the analyzer ('Load Background') or record a "
+        "'reflection_background' scan at the reflection plane and build it "
+        "from that. Reported once."
+    )
 
 
 def is_psf_fit(model: str | None) -> bool:
@@ -529,14 +552,12 @@ class SpectrumFitter:
         px = np.asarray(px, dtype=np.float64)
         sline = np.asarray(sline, dtype=np.float64)
 
+        if background == "reflection" and reflection_background is None:
+            # NO fallback template (user decision 2026-08-24: a
+            # stale-alignment default is worse than no correction).
+            _warn_missing_reflection_background()
+            background = "flat"
         if background == "reflection":
-            if reflection_background is None:
-                raise ValueError(
-                    "Background 'reflection' needs the mapped "
-                    "reflection background: pass reflection_background = "
-                    "ReflectionBackgroundMapper(...).render(px) (see "
-                    "spectrum_fitting/reflection_background.py)."
-                )
             reflection_background = np.asarray(reflection_background,
                                              dtype=np.float64)
             if reflection_background.shape != px.shape:

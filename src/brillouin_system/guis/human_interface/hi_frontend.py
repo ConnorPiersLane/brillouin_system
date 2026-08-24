@@ -608,9 +608,19 @@ class HiFrontend(QWidget):
         self.axial_btn2 = QPushButton("Find -> Scan")
         self.axial_btn2.clicked.connect(lambda: self.take_axial_step_scan(find_reflection_plane=True))
 
+        self.take_background_btn = QPushButton("Take Background")
+        self.take_background_btn.setToolTip(
+            "Records Num Meas frames at the CURRENT position through the "
+            "normal scan pipeline (step 0), named 'reflection_background', "
+            "stored and saved like any scan. Position at the reflection "
+            "plane first. The analyzer's 'Load Background' builds the prmr "
+            "fitting template from it.")
+        self.take_background_btn.clicked.connect(self.take_background_scan)
+
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.axial_btn)
         btn_row.addWidget(self.axial_btn2)
+        btn_row.addWidget(self.take_background_btn)
         btn_row.addStretch()
 
         layout.addRow(btn_row)
@@ -1535,6 +1545,31 @@ class HiFrontend(QWidget):
 
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
+
+
+    def take_background_scan(self):
+        """A reflection-background capture IS a normal axial scan: N frames
+        at the current position (step 0), fixed id 'reflection_background',
+        registered and saved like any other scan — no separate pipeline."""
+        try:
+            n_meas = int(self.axial_num_input.text())
+
+            log.info(f"[Brillouin Viewer] Background Scan Request | "
+                     f"id: reflection_background, N: {n_meas}, step 0 µm "
+                     f"(position at the reflection plane first)")
+
+            request = RequestAxialStepScan(
+                id="reflection_background",
+                n_measurements=n_meas,
+                step_size_um=0.0,
+                find_reflection_plane=False,
+                eye_tracker_results=self.lastest_eye_tracker_results,
+            )
+
+            self.take_axial_step_scan_requested.emit(request)
+
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to initiate background scan: {e}")
 
 
     def take_sweep_scan(self):

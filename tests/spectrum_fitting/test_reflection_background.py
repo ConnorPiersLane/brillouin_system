@@ -17,6 +17,8 @@ from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackground,
     ReflectionBackgroundMapper,
+    get_current_background,
+    set_current_background,
 )
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
@@ -179,6 +181,20 @@ def test_packaged_default_loads():
     assert err.max() < 0.01 * sline.max()
 
 
+def test_current_background_registry():
+    # Nothing loaded -> None: there is deliberately NO fallback to the
+    # packaged default (a stale-alignment template applied silently is worse
+    # than no reflection term).
+    assert get_current_background() is None
+    bg = make_background()
+    set_current_background(bg)
+    try:
+        assert get_current_background() is bg
+    finally:
+        set_current_background(None)
+    assert get_current_background() is None
+
+
 # ---------------- fitter integration ----------------
 
 SIGMA, TAU_L, TAU_R = 0.25, 0.4, 0.2
@@ -257,14 +273,23 @@ def test_reflection_fit_recovers_truth_and_shared_scale():
     assert abs(s - 0.05) < 0.01
 
 
-def test_reflection_fit_without_template_raises():
+def test_reflection_fit_without_template_warns_and_degrades():
+    # No template passed -> warn and fit with per-peak flat offsets only
+    # (no error, no silent default template).
     bg = make_background()
     R = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
                                    n_rows=None).render(np.arange(0.0, 200.0))
-    px, sline, _ = make_sample(R)
+    px, sline, (cen_l, cen_r) = make_sample(R)
     fitter = make_fitter()
-    with pytest.raises(ValueError, match="reflection"):
-        fitter.fit(px, sline, is_reference_mode=False)
+    result = fitter.fit(px, sline, is_reference_mode=False)
+    assert result.is_success
+    # The recipe tag records the fit as it ran: windowed with the default
+    # flat background (unnamed in the tag), NOT as a reflection fit.
+    assert "reflection" not in result.model
+    assert result.model == "2lorentzian_x_psf_window"
+    # The unmodelled s*R structure is small; centres stay near truth.
+    assert abs(result.left_peak_center_px - cen_l) < 0.5
+    assert abs(result.right_peak_center_px - cen_r) < 0.5
 
 
 def test_reflection_fit_rejects_mismatched_axis():

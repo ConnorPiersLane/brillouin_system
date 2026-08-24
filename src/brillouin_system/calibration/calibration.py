@@ -485,8 +485,9 @@ def calibration_calculator_for_scan(
     if resolve_fit_options(fitter.sample_config).model == "lorentzian_x_psf":
         raise ValueError(
             "The scan carries no raw calibration frames (calibration_data is "
-            "None: recorded before they were stored, or with "
-            "save_calibration_frames off), so its calibration cannot be "
+            "None: recorded before they were stored, or with the old "
+            "save_calibration_frames toggle off — removed 2026-08-24, frames "
+            "always travel now), so its calibration cannot be "
             "re-fitted and there is no record of the model it was fitted "
             "with. A PSF-convolved sample fit against a calibration that is "
             "most likely lorentzian is the -168 MHz mixing trap. Analyse "

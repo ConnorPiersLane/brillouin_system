@@ -21,8 +21,8 @@ from brillouin_system.analysis.thompson_shot_noise_limit import (
 )
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.spectrum_fitting.reflection_background import (
-    ReflectionBackground,
     ReflectionBackgroundMapper,
+    get_current_background,
 )
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
@@ -113,16 +113,25 @@ def _reflection_mapper_if_required(fitter: SpectrumFitter,
                                    ) -> ReflectionBackgroundMapper | None:
     """The mapped reflection template for prmr sample fits, or None.
 
-    The packaged template is registered onto THIS scan's own calibration —
-    frequency-anchored, so it applies across alignment changes.
+    The current template (user-selected, no default fallback) is registered
+    onto THIS scan's own calibration — frequency-anchored, so it applies
+    across alignment changes. With none loaded the fits warn and drop the
+    reflection term (per-peak flat offsets only).
     """
     if system_state.is_reference_mode:
         return None
     if not config_requires_reflection_background(fitter.sample_config):
         return None
+    background = get_current_background()
+    if background is None:
+        log.warning("[analysis] The config asks for the 'reflection' "
+                    "background but none is loaded — fitting this scan "
+                    "WITHOUT the reflection term (per-peak offsets only). "
+                    "Load one via the analyzer's 'Load Background'.")
+        return None
     rows = fitter.get_selected_rows(first_frame)
     return ReflectionBackgroundMapper(
-        ReflectionBackground.load_default(), calibration_calculator,
+        background, calibration_calculator,
         n_rows=len(rows))
 
 

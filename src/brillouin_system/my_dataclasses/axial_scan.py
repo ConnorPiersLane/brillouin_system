@@ -24,9 +24,10 @@ class AxialScan:
     # calibration can be re-fitted later (e.g. with a different lineshape
     # model). Analyses must use each scan's own calibration — session-level
     # calibration files drift tens of MHz against the scans — and that is only
-    # possible if the frames travel with the scan. Controlled by
-    # calibration_config.save_calibration_frames; None for datasets recorded
-    # before the field existed or with the toggle off.
+    # possible if the frames travel with the scan. ALWAYS stored since
+    # 2026-08-24 (the save_calibration_frames off-toggle was removed, user
+    # decision); None only for datasets recorded before the field existed or
+    # while the old toggle was off.
     calibration_data: CalibrationData | None = None
     eye_tracker_results: EyeTrackerResults | None = None
     reflection_result_forwards: ReflectionResult | None = None

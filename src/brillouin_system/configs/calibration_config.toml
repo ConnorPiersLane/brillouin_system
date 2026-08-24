@@ -5,8 +5,6 @@ start = 4.0
 stop = 8.0
 step = 0.1
 reference = "distance"
-# Store the raw calibration frames on each scan (AxialScan.calibration_data).
-# Needed to re-fit a scan's own calibration later — e.g. with a different
-# lineshape model. Costs disk space; the fitted polynomials are stored either
-# way.
-save_calibration_frames = true
+# NOTE: the save_calibration_frames toggle was REMOVED 2026-08-24 — raw
+# calibration frames ALWAYS travel with each scan (re-analysis + the
+# reflection-background frequency anchor both depend on them).
