@@ -212,6 +212,22 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
             p0 += [offset0, 0.0]
         return func, p0, [-np.inf] * n, [np.inf] * n, n
 
+    if background == "flat_shared":
+        # ONE offset over the whole fit domain regardless of the window
+        # scope — the CALIBRATION (reference) baseline (2026-08-25). A
+        # calibration frame is two bright sidebands on one dark level;
+        # per-peak offsets let each side's offset trade against its own
+        # peak's WIDTH (opposite signs per side, worst at the 8 GHz sweep
+        # edge), bending the width-vs-px calibration polynomial and
+        # fabricating ~+10 MHz of AS-S linewidth gap at the sample
+        # position. Validated against the Figure 4(d) workbook chain.
+        # Centres are insensitive — shifts/splits do not move.
+        def func(x, *params):
+            x = np.asarray(x, dtype=float)
+            return np.full_like(x, params[0])
+
+        return func, [offset0], [0.0], [np.inf], 1
+
     if background == "reflection":
         # Per-peak flat offset + ONE shared scale of the measured reflection
         # background (the bg19 minimal model, validated 2026-08-19). The

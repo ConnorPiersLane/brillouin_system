@@ -201,3 +201,40 @@ def test_matched_lorentzian_pair_unaffected():
     px, sline = make_spectrum()
     result = fitter.fit(px, sline, is_reference_mode=False)
     assert result.is_success
+
+
+# ---------------- flat_shared: the calibration baseline ----------------
+
+def test_flat_shared_single_offset_for_reference_fits():
+    """ONE shared offset over both windows (the calibration baseline,
+    2026-08-25): per-peak offsets trade against the sideband WIDTHS at
+    the sweep edges, bending the width-vs-px calibration polynomial and
+    fabricating ~+10 MHz of AS-S linewidth gap at the sample position.
+    flat_shared removes that per-side freedom: 6 peak parameters plus
+    exactly one background value."""
+    fitter = make_fitter("lorentzian_x_psf", "lorentzian_x_psf")
+    fitter.update_reference_config(replace(
+        fitter.reference_config, background="flat_shared"))
+    px = np.arange(0, 86, dtype=float)
+    true = (psf_profile(px, AMP, CEN_LEFT, GAMMA, SIGMA, TAU_LEFT)
+            + psf_profile(px, AMP, CEN_RIGHT, GAMMA, SIGMA, TAU_RIGHT)
+            + 80.0)
+    rng = np.random.default_rng(3)
+    sline = true + rng.normal(0.0, 2.0, size=true.shape)
+    result = fitter.fit(px, sline, is_reference_mode=True)
+    assert result.is_success
+    assert "flat_shared" in result.model
+    assert len(result.parameters) == 7      # 2 x 3 peak + ONE offset
+    assert abs(float(result.parameters[6]) - 80.0) < 5.0
+    assert abs(result.left_peak_width_px - GAMMA) < 0.05
+    assert abs(result.right_peak_width_px - GAMMA) < 0.05
+
+
+def test_packaged_reference_background_is_flat_shared():
+    # The shipped [reference] config carries the shared-offset baseline —
+    # the production convention validated against the Figure 4(d)
+    # workbook chain (2026-08-25).
+    from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
+        FIND_PEAKS_TOML_PATH, load_config_section)
+    cfg = load_config_section(FIND_PEAKS_TOML_PATH, "reference")
+    assert cfg.background == "flat_shared"

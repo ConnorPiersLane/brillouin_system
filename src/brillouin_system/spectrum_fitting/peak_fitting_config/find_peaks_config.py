@@ -92,9 +92,23 @@ MODEL_PRESETS = {
 #               against the AS centre at ~5 MHz/px) and NO per-peak scale
 #               (re-opens the amplitude<->centre trade, +3..+4 MHz on wide
 #               glycerol; both measured 2026-08-19/20).
+#   flat_shared ONE constant offset for the whole fit, even when windowed —
+#               the CALIBRATION (reference) baseline since 2026-08-25. A
+#               calibration frame is two bright sidebands on one dark
+#               level; giving each side its own offset lets the offset
+#               trade against that side's peak WIDTH (opposite directions
+#               per side, worst at the 8 GHz sweep edge where the
+#               sidebands crowd: -0.036/+0.020 px), which bends the
+#               degree-2 width-vs-pixel calibration polynomial and
+#               fabricates ~+10 MHz of AS-S linewidth gap at the sample
+#               position through the at-position subtraction. Validated
+#               against the Figure 4(d) workbook chain (shared-offset cal
+#               fits: widths on Holmes, eta_b/eta_s 2.79 vs 2.78, AS-S
+#               gaps ~3 MHz). Peak CENTRES are insensitive to this choice
+#               — shifts and splits do not move.
 # Costs ~10% in single-frame distance precision. Validated on liquids only:
 # cornea splits are already unbiased and get WORSE with a background term.
-BACKGROUNDS = ["flat", "linear", "reflection"]
+BACKGROUNDS = ["flat", "linear", "reflection", "flat_shared"]
 
 # Legacy background names (removed 2026-08-20): the per-peak variants are now
 # simply flat/linear under a windowed fit.

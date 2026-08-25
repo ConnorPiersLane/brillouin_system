@@ -49,5 +49,10 @@ rel_height = 0.5
 wlen_pixels = 40
 fitting_model = "lorentzian_x_psf"
 use_window = true
-background = "flat"
+# ONE shared offset for calibration frames (2026-08-25): per-peak offsets
+# trade against the sideband widths at the sweep edges and fabricate
+# ~+10 MHz of AS-S linewidth gap through the width-vs-px polynomial.
+# Centres (shifts/splits) are insensitive. See BACKGROUNDS in
+# peak_fitting_config/find_peaks_config.py.
+background = "flat_shared"
 beta = 3.0
