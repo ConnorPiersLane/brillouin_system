@@ -24,11 +24,6 @@ dark_median_method = "Median pixel count of raw frames (2026-8-13: 200.2, 2026-8
 
 em_excess_noise_factor = 2.0
 
-[psf]
-psf_sigma_px = 0.25
-psf_tau_left_px = 0.4
-psf_tau_right_px = 0.2
-psf_tau_outer_left_px = 0.5
-psf_tau_outer_right_px = 0.0
-psf_measured = "2026-07"
-psf_method = "MEASUREMENT RECORD (the working kernel the fitter uses lives in find_peaks_config.toml [global]; the GUI shows these values in brackets and never writes them). Fine EOM sweeps: grid over (sigma, tau_l, tau_r) minimizing the per-pixel residual sine of the calibration tracks (from ~7 MHz to ~2 MHz rms); stable across 6 calibrations over 7 weeks. A re-measurement updates BOTH files. See measure_psf_kernel.py."
+# NOTE: a [psf] section lived here until 2026-08-24 (user decision): the PSF
+# belongs to the PEAKS, not the camera readout chain - record + measurement
+# script now in spectrum_fitting/peak_fitting_config/ (psf_measurement.py).

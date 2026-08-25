@@ -1,9 +1,13 @@
-"""Measured characteristics of THE camera — one home for every number.
+"""Measured characteristics of THE camera — the pure readout chain.
 
-Everything in this package describes the physical camera (Andor iXon Ultra
-897, DU897_BV serial 9303), NOT fitting configuration: each value was
-measured on the instrument, is frozen between measurements, and must be
-re-measured after a hardware / readout-mode / ROI change. The rule
+Everything in this package describes the physical camera's READOUT CHAIN
+(Andor iXon Ultra 897, DU897_BV serial 9303): gain, read noise, dark
+level. NOT fitting configuration, and NOT the PSF — the PSF is a property
+of how the spectral lines land on the sensor and belongs to the peaks
+(user rule 2026-08-24: record + measurement script live in
+spectrum_fitting/peak_fitting_config/psf_measurement.py). Each value here
+was measured on the instrument, is frozen between measurements, and must
+be re-measured after a hardware / readout-mode change. The rule
 (2026-08-20): any parameter that has to be FITTED or OBTAINED from a
 dedicated measurement is written in ccd_characteristics.toml, and the
 script that obtains it lives in measurement_scripts/ next to it — so the
@@ -14,14 +18,12 @@ Layout:
     measurement_scripts/       one runnable script per number:
         measure_gain_photon_transfer.py   sensitivity g [e-/count] (+ eps)
         measure_read_noise_and_dark.py    read noise + dark median [counts]
-        measure_psf_kernel.py             PSF sigma / tau [px]
 
-Consumers read the ThreadSafeConfig instances below (`ccd_config`,
-`psf_measurement_config`) — noise_analysis for g / read noise / dark level, the
-spectrum fitter for the PSF kernel. Scan-local measurements still take
-precedence where they exist (a scan's own dark stack beats the TOML dark
-median / read noise — same philosophy everywhere: per-scan at live
-settings wins, the TOML is the documented reference and fallback).
+Consumers read `ccd_config` below (noise_analysis: g / read noise / dark
+level). Scan-local measurements still take precedence where they exist (a
+scan's own dark stack beats the TOML dark median / read noise — same
+philosophy everywhere: per-scan at live settings wins, the TOML is the
+documented reference and fallback).
 """
 from __future__ import annotations
 
@@ -78,38 +80,6 @@ class CcdCharacteristics:
     dark_median_method: str = ""
 
 
-@dataclass
-class PsfMeasurement:
-    """[psf] section: the MEASURED camera PSF kernel — a measurement record.
-
-    The WORKING kernel the fitter uses lives in the fitting config's
-    [global] section (SlineFromFrameConfig.psf_* — one fitting config, no
-    nested sub-config; user decision 2026-08-20). This record keeps the
-    measured values + provenance so experimentation over there can never
-    lose the measurement; the config GUI shows these in brackets and never
-    writes them. A re-measurement (measurement_scripts/measure_psf_kernel
-    .py) updates BOTH files.
-
-      psf_sigma_px     Gaussian charge-diffusion blur.
-      psf_tau_*_px     one-sided exponential readout smear, per peak, toward
-                       higher pixel numbers (the charge-transfer direction).
-    Measured 2026-07 on the fine EOM sweeps: 0.25 / 0.40 / 0.20 px, stable
-    across 6 calibrations over 7 weeks. The outer taus (opt-in n_peaks=4
-    fit only) were measured 2026-08-20 from the outer calibration lines of
-    four 4-peak-ROI sessions — PROVISIONAL (per-frame sigma/tau/gamma are
-    degenerate; sweep medians only): fine for positions and intensities,
-    do not hang width claims on outer-peak lineshapes. Re-measure after
-    any camera/ROI change.
-    """
-    psf_sigma_px: float = 0.25
-    psf_tau_left_px: float = 0.40
-    psf_tau_right_px: float = 0.20
-    psf_tau_outer_left_px: float = 0.50
-    psf_tau_outer_right_px: float = 0.0
-    psf_measured: str = ""
-    psf_method: str = ""
-
-
 def _load_section(path: Path, section: str, cls):
     with path.open("rb") as f:
         data = tomli.load(f)
@@ -122,13 +92,9 @@ def load_ccd_characteristics(path: Path = CCD_TOML_PATH) -> CcdCharacteristics:
     return _load_section(path, "ccd", CcdCharacteristics)
 
 
-def load_psf_measurement(path: Path = CCD_TOML_PATH) -> PsfMeasurement:
-    return _load_section(path, "psf", PsfMeasurement)
-
-
 def save_ccd_section(section: str, config: ThreadSafeConfig,
                      path: Path = CCD_TOML_PATH):
-    """Write one section ('ccd' or 'psf') back to the TOML."""
+    """Write one section ('ccd') back to the TOML."""
     with path.open("rb") as f:
         data = tomli.load(f)
     data[section] = asdict(config.get_raw())
@@ -136,6 +102,5 @@ def save_ccd_section(section: str, config: ThreadSafeConfig,
         tomli_w.dump(data, f)
 
 
-# Global instances
+# Global instance
 ccd_config = LazyThreadSafeConfig(lambda: load_ccd_characteristics(CCD_TOML_PATH))
-psf_measurement_config = LazyThreadSafeConfig(lambda: load_psf_measurement(CCD_TOML_PATH))

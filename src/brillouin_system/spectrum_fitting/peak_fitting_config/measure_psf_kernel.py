@@ -1,10 +1,13 @@
 """Measure the camera PSF kernel (sigma, tau_left, tau_right) [px].
 
-Results: the [psf] section of ccd_characteristics.toml. Measured 2026-07
-on the fine EOM sweeps: sigma = 0.25, tau_left = 0.40, tau_right = 0.20 px,
-stable across 6 calibrations over 7 weeks (and the sigma/tau values were
-re-confirmed alignment-stable across 3 months in the 2026-08 background-
-model work). Re-measure after any camera / ROI / readout change.
+Results go to psf_measurement.py (the measurement record, next to this
+file — the PSF is PEAKS domain, not the camera readout chain; user rule
+2026-08-24) and to find_peaks_config.toml [global] (the working values
+the fitter uses). Measured 2026-07 on the fine EOM sweeps: sigma = 0.25,
+tau_left = 0.40, tau_right = 0.20 px, stable across 6 calibrations over
+7 weeks (and the sigma/tau values were re-confirmed alignment-stable
+across 3 months in the 2026-08 background-model work). Re-measure after
+any camera / ROI / readout change.
 
 THE METHOD, and why it looks like this
 --------------------------------------
@@ -134,8 +137,8 @@ def main(argv=None):
     print(f"\n==== Best kernel ====")
     print(f"sigma {sigma:.3f} px, tau_left {tl:.3f} px, tau_right {tr:.3f} px "
           f"-> rms {rms:.2f} MHz (baseline {base:.2f})")
-    print("\nA re-measurement updates BOTH files:")
-    print("ccd_characteristics.toml [psf] (the measurement record):")
+    print("\nA re-measurement updates BOTH:")
+    print("psf_measurement.py PSF_MEASURED (the measurement record):")
     print(f"psf_sigma_px = {sigma:.3g}")
     print(f"psf_tau_left_px = {tl:.3g}")
     print(f"psf_tau_right_px = {tr:.3g}")

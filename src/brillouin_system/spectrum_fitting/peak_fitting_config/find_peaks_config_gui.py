@@ -3,7 +3,9 @@ from PyQt5.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox, QCheckBox
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
-from brillouin_system.ccd_characteristics import psf_measurement_config
+from brillouin_system.spectrum_fitting.peak_fitting_config.psf_measurement import (
+    PSF_MEASURED,
+)
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
@@ -44,7 +46,7 @@ class FindPeaksConfigDialog(QDialog):
         # charge diffusion and the one-sided readout tail per peak. Part of
         # the [global] fitting config (one camera, one kernel, shared by
         # sample and reference fits). Not fitted per frame; the MEASURED
-        # record lives in ccd_characteristics [psf] (shown in brackets).
+        # record is psf_measurement.PSF_MEASURED (shown in brackets).
         return ["psf_sigma_px", "psf_tau_left_px", "psf_tau_right_px"]
 
     def na_field_names(self):
@@ -226,11 +228,11 @@ class FindPeaksConfigDialog(QDialog):
 
         # Camera PSF working values — part of the [global] fitting config,
         # shared by the sample and reference fits. The label shows the
-        # MEASURED value from ccd_characteristics [psf] in brackets: that
+        # MEASURED value from psf_measurement.PSF_MEASURED in brackets: that
         # record is never touched by the GUI, so the measurement cannot be
         # lost by experimentation here.
         layout.addWidget(QLabel("Camera PSF (shared by both fits)"))
-        measured = psf_measurement_config.get()
+        measured = PSF_MEASURED
         for key in self.pr_field_names():
             row = QHBoxLayout()
             ref = getattr(measured, key, None)
@@ -245,7 +247,7 @@ class FindPeaksConfigDialog(QDialog):
                 "Gaussian charge-diffusion blur and the one-sided readout "
                 "tails. Not fitted per frame; saved with the [global] "
                 "fitting config. The bracketed value is the MEASURED record "
-                "in ccd_characteristics.toml (fine EOM sweeps; see "
+                "(psf_measurement.py, fine EOM sweeps; see "
                 "measure_psf_kernel.py) — the GUI never writes it."
             )
             self.global_inputs[key] = edit

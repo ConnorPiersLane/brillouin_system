@@ -193,9 +193,10 @@ def resolve_fit_options(config) -> ResolvedFitOptions:
 # The camera PSF working values live in the [global] section below
 # (SlineFromFrameConfig) — ONE fitting config, no nested sub-config (user
 # decision 2026-08-20: "a config in a config is not a good design"). The
-# MEASURED kernel record (values + date + method) stays in
-# ccd_characteristics [psf], next to measure_psf_kernel.py; the GUI shows
-# it in brackets and never writes it.
+# MEASURED kernel record (values + date + method) is
+# psf_measurement.PSF_MEASURED in this package, next to
+# measure_psf_kernel.py (the PSF is peaks domain, not camera — user rule
+# 2026-08-24); the GUI shows it in brackets and never writes it.
 
 
 @dataclass
@@ -307,9 +308,10 @@ class SlineFromFrameConfig:
     # sample and reference fits (different kernels would define different
     # peak-centre conventions = the model-mixing artifact). Not fitted per
     # frame. Defaults = the MEASURED kernel; the measurement record
-    # (values + date + method) lives in ccd_characteristics [psf], next to
-    # measure_psf_kernel.py — re-measure after any camera/ROI change, and
-    # update both files. The outer taus serve the opt-in n_peaks=4 fit only
+    # (values + date + method) is psf_measurement.PSF_MEASURED in this
+    # package, next to measure_psf_kernel.py — re-measure after any
+    # camera/ROI change, and update both. The outer taus serve the opt-in
+    # n_peaks=4 fit only
     # (tail is a POSITION property, falling toward the readout side;
     # provisional — fine for positions/intensities, not width claims).
     psf_sigma_px: float = 0.25

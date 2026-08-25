@@ -432,8 +432,8 @@ class SpectrumFitter:
                         "psf_tau_right_px in the [global] section of the "
                         "find-peaks config. Measured "
                         "2026-07: 0.25 / 0.40 / 0.20 px (record in "
-                        "ccd_characteristics [psf]). With all three at 0 "
-                        "this model is just 'lorentzian'."
+                        "peak_fitting_config/psf_measurement.py). With all "
+                        "three at 0 this model is just 'lorentzian'."
                     )
                 # Per-peak tails by left-to-right POSITION (the tail is a
                 # position property of the readout, falling toward higher
