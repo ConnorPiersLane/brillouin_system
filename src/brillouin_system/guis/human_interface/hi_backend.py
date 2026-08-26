@@ -62,6 +62,12 @@ class HiBackend:
         # the template, calibration or row band changes.
         self._reflection_mapper: ReflectionBackgroundMapper | None = None
         self._reflection_mapper_key = None
+        # Strong ref to the calculator the cached mapper was built from: the
+        # mapper itself only copies the polynomials, and the cache key uses
+        # id(calculator) — without this ref a replaced calculator could be
+        # garbage collected and its id reused by the next one, letting a
+        # stale key match and the old registration survive a recalibration.
+        self._reflection_mapper_calc = None
 
         # Devices
         if use_dummy:
@@ -376,6 +382,7 @@ class HiBackend:
                 rows=rows,
                 g_margin_ghz=margin)
             self._reflection_mapper_key = key
+            self._reflection_mapper_calc = self.calibration_calculator
         return self._reflection_mapper.render(px)
 
     def update_calibration_calculator(self):

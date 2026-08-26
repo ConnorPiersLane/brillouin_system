@@ -1,10 +1,14 @@
 """Viewer for the reflection background the prmr fits will use.
 
 Top: the template's 2D frame (the stored bias-subtracted mean image).
-Bottom: its row-band sline — summed with the row count the live fitting
-config uses, selected on the template's OWN frame, exactly as the mapper
-does at fit time — with the session's calibration sideband positions marked
-(the frequency anchor of the template).
+Bottom: its row-band sline, with the session's calibration sideband
+positions marked (the frequency anchor of the template).
+
+At fit time the template is collapsed over the SAMPLE scan's row band
+(user decision 2026-08-26 — see ReflectionBackground.sline). A manual
+config band is exactly that band, so the viewer shows it. An auto band is
+located per scan on the sample frames and cannot be known from the template
+alone, so the viewer then shows the all-rows sum and says so.
 """
 from __future__ import annotations
 
@@ -66,15 +70,16 @@ class ReflectionBackgroundViewer(QWidget):
 
         self._plot()
 
-    def _n_rows(self) -> int:
-        """The row COUNT of the live fitting config — the band itself is
-        re-selected on the template's own frame (its y alignment)."""
+    def _band_rows(self) -> list[int] | None:
+        """The ROW INDICES of the live fitting config, or None when the band
+        cannot be known here (auto mode locates it per scan, on the sample
+        frames — the viewer then falls back to the all-rows sum)."""
         try:
-            return len(SpectrumFitter().get_selected_rows(self.background.frame))
+            return SpectrumFitter().get_selected_rows()
         except Exception as e:
-            log.warning(f"[ReflectionBackgroundViewer] Could not resolve the "
-                        f"configured row band ({e}) — showing all rows.")
-            return self.background.frame.shape[0]
+            log.info(f"[ReflectionBackgroundViewer] Row band not available "
+                     f"from the config alone ({e}) — showing all rows.")
+            return None
 
     def _plot(self):
         bg = self.background
@@ -84,13 +89,16 @@ class ReflectionBackgroundViewer(QWidget):
         show_frame(self.figure, ax_frame, bg.frame,
                    title="Template frame (bias-subtracted mean)")
 
-        n_rows = self._n_rows()
+        rows = self._band_rows()
         try:
-            sline = bg.sline(n_rows)
-            band_label = f"Row-band sline ({n_rows} rows)"
+            sline = bg.sline(rows)
+            band_label = (f"Row-band sline (rows {min(rows)}-{max(rows)})"
+                          if rows is not None else
+                          "Sline (all rows — auto band is per-scan)")
         except ValueError as e:
-            log.warning(f"[ReflectionBackgroundViewer] Row band not locatable "
-                        f"on the template frame ({e}) — showing the full sum.")
+            log.warning(f"[ReflectionBackgroundViewer] None of the configured "
+                        f"rows exist on the template frame ({e}) — showing "
+                        f"the full sum.")
             sline = bg.sline(None)
             band_label = "Sline (all rows)"
         ax_sline.plot(bg.px, sline, "-", color="0.3", lw=1.0,
