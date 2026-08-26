@@ -301,3 +301,64 @@ def test_reflection_fit_rejects_mismatched_axis():
     with pytest.raises(ValueError, match="same pixel axis"):
         fitter.fit(px, sline, is_reference_mode=False,
                    reflection_background=R[:-5])
+
+
+# ---------------- registration reach (g_margin_ghz) ----------------
+
+def test_default_margin_clips_beyond_sweep():
+    """A satellite beyond the calibrated sweep + default margin renders 0
+    (registration not trusted out there), even though the template frame
+    has real light at those pixels."""
+    bg = make_background()
+    # add a high-shift satellite at g = 9.6 on the left order
+    x96 = float(x_of_g(XL_A, 9.6))
+    bg = ReflectionBackground(
+        frame=bg.frame + np.outer(
+            np.exp(-0.5 * ((np.arange(bg.frame.shape[0]) - 10.0) / 2.5) ** 2),
+            bump(bg.px, x96, a=500.0)),
+        cal_freqs=bg.cal_freqs, cal_left_px=bg.cal_left_px,
+        cal_right_px=bg.cal_right_px, meta=bg.meta)
+    mapper = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
+                                        n_rows=None)
+    px = bg.px
+    r = mapper.render(px)
+    g = np.polyval(mapper.freq_left, px)
+    beyond = (g > 8.7) & (px <= mapper._mid_px(px))
+    assert np.all(r[beyond] == 0.0)
+
+
+def test_wider_margin_renders_beyond_sweep():
+    """g_margin_ghz = 2.0 reaches 10 GHz on a 4-8 sweep: the 9.6 GHz
+    satellite is rendered at its calibrated pixel (identity mapping)."""
+    base = make_background()
+    x96 = float(x_of_g(XL_A, 9.6))
+    bg = ReflectionBackground(
+        frame=base.frame + np.outer(
+            np.exp(-0.5 * ((np.arange(base.frame.shape[0]) - 10.0) / 2.5) ** 2),
+            bump(base.px, x96, a=500.0)),
+        cal_freqs=base.cal_freqs, cal_left_px=base.cal_left_px,
+        cal_right_px=base.cal_right_px, meta=base.meta)
+    mapper = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
+                                        n_rows=None, g_margin_ghz=2.0)
+    assert mapper.g_hi == pytest.approx(10.0)
+    r = mapper.render(bg.px)
+    i96 = int(round(x96))
+    assert r[i96] > 100.0          # the satellite came through
+    # and the default-margin mapper still clips it
+    r0 = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
+                                    n_rows=None).render(bg.px)
+    assert r0[i96] == 0.0
+
+
+def test_margin_must_be_positive():
+    bg = make_background()
+    with pytest.raises(ValueError, match="positive"):
+        ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
+                                   g_margin_ghz=0.0)
+
+
+def test_config_carries_reflection_margin_default():
+    from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
+        FIND_PEAKS_TOML_PATH, load_config_section)
+    cfg = load_config_section(FIND_PEAKS_TOML_PATH, "sample")
+    assert cfg.reflection_margin_ghz == pytest.approx(0.7)

@@ -132,7 +132,9 @@ def _reflection_mapper_if_required(fitter: SpectrumFitter,
     rows = fitter.get_selected_rows(first_frame)
     return ReflectionBackgroundMapper(
         background, calibration_calculator,
-        n_rows=len(rows))
+        n_rows=len(rows),
+        g_margin_ghz=getattr(fitter.sample_config,
+                             "reflection_margin_ghz", None))
 
 
 def fit_axial_scan(scan: AxialScan,

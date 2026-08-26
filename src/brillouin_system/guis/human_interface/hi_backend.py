@@ -361,11 +361,15 @@ class HiBackend:
         sline_config = self.spectrum_fitter.sline_config
         n_rows = (sline_config.n_rows if sline_config.row_selection == "auto"
                   else len(sline_config.selected_rows))
-        key = (id(background), id(self.calibration_calculator), n_rows)
+        margin = getattr(self.spectrum_fitter.sample_config,
+                         "reflection_margin_ghz", None)
+        key = (id(background), id(self.calibration_calculator), n_rows,
+               margin)
         if self._reflection_mapper is None or self._reflection_mapper_key != key:
             self._reflection_mapper = ReflectionBackgroundMapper(
                 background, self.calibration_calculator,
-                n_rows=n_rows)
+                n_rows=n_rows,
+                g_margin_ghz=margin)
             self._reflection_mapper_key = key
         return self._reflection_mapper.render(px)
 

@@ -280,6 +280,16 @@ class SampleFindPeaksConfig(FindPeaksConfig):
     na_beam_diameter_mm: float = 0.0
     na_focal_length_mm: float = 0.0
     na_n_sample: float = 1.33
+    # How far beyond the calibrated EOM sweep the reflection-background
+    # registration is trusted, per side [GHz] (prmr fits only; outside the
+    # trusted range the rendered template is 0). 0.7 = the validated
+    # production default. Raise DELIBERATELY for high-shift samples whose
+    # peaks sit beyond the sweep — e.g. 2.0 on a 4-8 GHz sweep reaches
+    # 10 GHz (plastic at 9.6) — accepting that the quadratic track
+    # registrations then extrapolate unverified; see the
+    # ReflectionBackgroundMapper docstring for the measured behaviour and
+    # caveats (2026-08-25).
+    reflection_margin_ghz: float = 0.7
 
     def __post_init__(self):
         super().__post_init__()
@@ -287,6 +297,11 @@ class SampleFindPeaksConfig(FindPeaksConfig):
             raise ValueError(
                 f"Unknown na_weighting '{self.na_weighting}'. "
                 f"Choose one of {NA_WEIGHTINGS}."
+            )
+        if not self.reflection_margin_ghz > 0.0:
+            raise ValueError(
+                f"reflection_margin_ghz must be positive "
+                f"(got {self.reflection_margin_ghz})."
             )
 
 

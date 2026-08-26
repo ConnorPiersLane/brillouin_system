@@ -62,6 +62,8 @@ DEFAULT_REFLECTION_BG = REFLECTION_BG_DATA_DIR / "reflection_bg_2026-08-19_4pk.n
 
 # Track validity beyond the swept EOM range: the 4-8 GHz sweeps tolerate this
 # much extrapolation of the quadratic tracks (the run_bg19 3.3-8.7 GHz window).
+# This is the PRODUCTION default; ReflectionBackgroundMapper(g_margin_ghz=...)
+# widens it deliberately for high-shift samples — see the mapper docstring.
 G_MARGIN_GHZ = 0.7
 
 LEFT, RIGHT = 0, 1
@@ -241,13 +243,38 @@ class ReflectionBackgroundMapper:
     of the axis. The split pixel is where the two tracks report the same
     offset (g_left == g_right) — the symmetry point of the order pair —
     computed on the given axis, so no peak positions are needed.
+
+    g_margin_ghz — how far beyond the calibrated sweep the registration is
+    trusted, per side (None = the production default G_MARGIN_GHZ = 0.7;
+    outside the trusted range the render is 0). Widen it DELIBERATELY for
+    high-shift samples whose peaks sit beyond the sweep: e.g. 2.0 on a
+    4-8 GHz sweep reaches 10 GHz (plastic sits at 9.6). Measured 2026-08-25
+    on the 8-24 plastic session: with 2.0 the template becomes active
+    (s ~2.5e-3, in-window rms improves ~10%) but the peaks near the order
+    gap gain little (split moves ~0.3 MHz). Caveats of extrapolating: BOTH
+    quadratic track registrations run beyond their fitted range with no
+    elastic reference to verify them out there (same-session template =
+    near-identity mapping, safest; cross-session errors do not cancel);
+    near FSR/2 the two orders' light overlaps, where one-track-per-side
+    rendering is weakest; and a Brillouin-active reflection plane puts its
+    OWN sample lines into the template mid-gap (the 8-24 plastic-plane
+    template carries plastic lines at px 97/103) — prefer a non-Brillouin-
+    active plane template when extrapolating.
     """
 
     def __init__(self, background: ReflectionBackground, calibration,
-                 n_rows: int | None = None):
+                 n_rows: int | None = None,
+                 g_margin_ghz: float | None = None):
         self.background = background
         self.freq_left, self.freq_right = _freq_polys(calibration)
         self._sline = background.sline(n_rows)
+        margin = G_MARGIN_GHZ if g_margin_ghz is None else float(g_margin_ghz)
+        if not margin > 0.0:
+            raise ValueError(
+                f"g_margin_ghz must be positive (got {margin})."
+            )
+        self.g_lo = float(np.min(background.cal_freqs)) - margin
+        self.g_hi = float(np.max(background.cal_freqs)) + margin
 
     def _mid_px(self, px: np.ndarray) -> float:
         d = np.polyval(self.freq_left, px) - np.polyval(self.freq_right, px)
@@ -272,7 +299,7 @@ class ReflectionBackgroundMapper:
                  (RIGHT, self.freq_right, px > mid))
         for order, fpoly, side in sides:
             g = np.polyval(fpoly, px)
-            ok = side & (g >= bg.g_lo) & (g <= bg.g_hi) & np.isfinite(g)
+            ok = side & (g >= self.g_lo) & (g <= self.g_hi) & np.isfinite(g)
             if not np.any(ok):
                 continue
             c = bg.px_of_g(order)

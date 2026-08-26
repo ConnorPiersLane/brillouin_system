@@ -40,6 +40,12 @@ na_collection = 0.42
 na_beam_diameter_mm = 5.5
 na_focal_length_mm = 10.0
 na_n_sample = 1.33
+# Reflection-template registration reach beyond the calibrated sweep, per
+# side [GHz]. 0.7 = validated production default; raise deliberately (e.g.
+# 2.0 -> 10 GHz on a 4-8 sweep) for high-shift samples like plastic (9.6) —
+# the track registration then extrapolates unverified (see
+# ReflectionBackgroundMapper).
+reflection_margin_ghz = 0.7
 
 [reference]
 prominence_fraction = 0.05
