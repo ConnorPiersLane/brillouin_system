@@ -284,10 +284,26 @@ class AxialScanViewer(QWidget):
                 self.ax_img.axvline(px, color="w", ls=":", lw=0.8, alpha=0.7)
 
     def plot_spectrum(self):
-        fit: FittedSpectrum = self.list_analyzed_spectras[self.current_index].fitted_spectrum
+        analyzed = self.list_analyzed_spectras[self.current_index]
+        fit: FittedSpectrum = analyzed.fitted_spectrum
         z = self.axial_scan.measurements[self.current_index].lens_zaber_position
+
+        shifts = analyzed.analyzed_shifts
+
+        def mhz(val):
+            return f"{val * 1000:.1f}" if val is not None else "N/A"
+
+        info = (
+            f"Shift (GHz): L {fmt(shifts.freq_shift_left_peak_ghz, 4)}   "
+            f"R {fmt(shifts.freq_shift_right_peak_ghz, 4)}   "
+            f"dist {fmt(shifts.freq_shift_peak_distance_ghz, 4)}\n"
+            f"Linewidth sample (MHz): L {mhz(shifts.linewidth_left_peak_ghz)}   "
+            f"R {mhz(shifts.linewidth_right_peak_ghz)}"
+        )
+
         plot_fitted_spectrum(self.ax_spec, fit,
-                             title=f"Spectrum at Z = {round(z)} µm")
+                             title=f"Spectrum at Z = {round(z)} µm",
+                             info_text=info)
 
     def plot_axial_scan(self):
         self.ax_axial.cla()

@@ -45,7 +45,8 @@ def _mask_spans(x: np.ndarray, mask: np.ndarray):
     return spans
 
 
-def plot_fitted_spectrum(ax, fit: FittedSpectrum, title: str | None = None):
+def plot_fitted_spectrum(ax, fit: FittedSpectrum, title: str | None = None,
+                         info_text: str | None = None):
     """Spectrum + fit with the used pixels made unmissable: the fit windows
     are shaded and the used points drawn as filled orange markers on top of
     the open gray data circles."""
@@ -68,6 +69,12 @@ def plot_fitted_spectrum(ax, fit: FittedSpectrum, title: str | None = None):
         for px in (fit.left_peak_center_px, fit.right_peak_center_px):
             if px is not None and np.isfinite(px):
                 ax.axvline(px, color="#d62728", ls=":", lw=0.8, alpha=0.6)
+
+    if info_text:
+        ax.text(0.01, 0.97, info_text, transform=ax.transAxes,
+                ha="left", va="top", fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="0.7",
+                          alpha=0.85))
 
     if title:
         ax.set_title(title, fontsize=10)
