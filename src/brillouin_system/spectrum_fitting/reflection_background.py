@@ -56,9 +56,14 @@ import numpy as np
 
 from brillouin_system.spectrum_fitting.row_selection import select_rows
 
-# Packaged default template (built by build_reflection_background.py).
+# Packaged default template. Since 2026-08-26 (user decision) this is the
+# FIRST scan of the 8-19 4-peak reflection plane (single-scan
+# background_from_scan build, validated on the 8-26 water-glycerol session).
+# The previous all-scans average stays packaged as
+# reflection_bg_2026-08-19_4pk.npz.
 REFLECTION_BG_DATA_DIR = Path(__file__).parent / "reflection_background_data"
-DEFAULT_REFLECTION_BG = REFLECTION_BG_DATA_DIR / "reflection_bg_2026-08-19_4pk.npz"
+DEFAULT_REFLECTION_BG = (REFLECTION_BG_DATA_DIR
+                         / "reflection_bg_2026-08-19_4pk_first.npz")
 
 # Track validity beyond the swept EOM range: the 4-8 GHz sweeps tolerate this
 # much extrapolation of the quadratic tracks (the run_bg19 3.3-8.7 GHz window).
