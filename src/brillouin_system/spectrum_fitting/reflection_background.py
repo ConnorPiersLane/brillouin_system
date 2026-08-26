@@ -40,11 +40,16 @@ mapping, including both dispersion Jacobians. Consequences:
   the AS peak centre at ~5 MHz/px (measured 2026-08-19), while calibration
   registration is good to ~0.1-0.2 px. The fit must never choose the shift.
 
-Y alignment: the vertical line position also moves with alignment, so the
-template stores the full 2D frame and its row band is selected from ITS OWN
-frame (row_selection.select_rows) with the row count the sample sline uses —
-the mirror of what SpectrumFitter does on the sample side. Any residual
-row-capture difference is a pure scale and lands in the fitted s.
+Y alignment: the template stores the full 2D frame and is collapsed at apply
+time over the SAME ROW INDICES the sample sline sums (user decision
+2026-08-26, replacing the old auto-centred-on-its-own-pattern band). The
+stray light contaminating a sample sline is whatever part of the pattern
+falls INSIDE the sample's row band — the pattern's own vertical position can
+differ from the line's (measured 8-26: plane image at rows 4-16, sample line
+at 8-20), and collapsing the template on its own band would then hand the
+fit the wrong shape share. With identical rows, a row-band change moves
+sample and template together and any residual capture difference is a pure
+scale, landing in the fitted s.
 """
 from __future__ import annotations
 
@@ -53,8 +58,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-
-from brillouin_system.spectrum_fitting.row_selection import select_rows
 
 # Packaged default template (built by build_reflection_background.py).
 REFLECTION_BG_DATA_DIR = Path(__file__).parent / "reflection_background_data"
@@ -126,20 +129,31 @@ class ReflectionBackground:
 
     # ---------------- y alignment ----------------
 
-    def sline(self, n_rows: int | None = None) -> np.ndarray:
-        """Row-band sum of the template frame.
+    def sline(self, rows=None) -> np.ndarray:
+        """Sum of the template frame over the given ROW INDICES.
 
-        The band is selected on the template's OWN frame (the pattern's own
-        vertical position), with the same row count the sample sline uses.
-        n_rows=None sums all rows.
+        rows must be the SAME rows the sample sline sums (the fitter's
+        get_selected_rows) — the contamination in a sample sline is the part
+        of the pattern inside that band, not the pattern's own best band.
+        rows=None sums all rows. Rows outside the template frame are ignored
+        (a smaller-ROI template contributes what it has).
         """
-        key = int(n_rows) if n_rows is not None else None
+        if rows is None:
+            key = None
+        else:
+            key = tuple(int(r) for r in rows)
         if key not in self._slines:
             if key is None:
                 self._slines[key] = self.frame.sum(axis=0)
             else:
-                rows = select_rows(self.frame, key)
-                self._slines[key] = self.frame[rows, :].sum(axis=0)
+                height = self.frame.shape[0]
+                use = [r for r in key if 0 <= r < height]
+                if not use:
+                    raise ValueError(
+                        f"None of the requested rows {list(key)} exist in the "
+                        f"template frame (height {height})."
+                    )
+                self._slines[key] = self.frame[use, :].sum(axis=0)
         return self._slines[key]
 
     # ---------------- persistence ----------------
@@ -234,10 +248,11 @@ class ReflectionBackgroundMapper:
 
     Takes the session's calibration (CalibrationCalculator,
     CalibrationPolyfitParameters, or a (freq_left, freq_right) coefficient
-    pair) and the row count of the session's sline. render(px) then returns
-    the background on that pixel axis, ready to pass to SpectrumFitter.fit
-    as reflection_background (background='reflection' / the 'prmr'
-    preset).
+    pair) and the ROW INDICES of the session's sline (the same rows the
+    sample frames are summed over — see ReflectionBackground.sline).
+    render(px) then returns the background on that pixel axis, ready to pass
+    to SpectrumFitter.fit as reflection_background
+    (background='reflection' / the 'prmr' preset).
 
     Each order is rendered through its own track and confined to its own side
     of the axis. The split pixel is where the two tracks report the same
@@ -263,11 +278,11 @@ class ReflectionBackgroundMapper:
     """
 
     def __init__(self, background: ReflectionBackground, calibration,
-                 n_rows: int | None = None,
+                 rows=None,
                  g_margin_ghz: float | None = None):
         self.background = background
         self.freq_left, self.freq_right = _freq_polys(calibration)
-        self._sline = background.sline(n_rows)
+        self._sline = background.sline(rows)
         margin = G_MARGIN_GHZ if g_margin_ghz is None else float(g_margin_ghz)
         if not margin > 0.0:
             raise ValueError(

@@ -398,7 +398,7 @@ class AxialScanViewer(QWidget):
             np.asarray(self.axial_scan.measurements[0].frame_andor))
         mapper = ReflectionBackgroundMapper(
             background, self.calc,
-            n_rows=len(rows),
+            rows=rows,
             g_margin_ghz=getattr(self.fitter.sample_config,
                                  "reflection_margin_ghz", None))
         return mapper.render(px)

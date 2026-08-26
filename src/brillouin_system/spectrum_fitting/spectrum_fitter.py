@@ -68,7 +68,7 @@ def config_requires_reflection_background(config) -> bool:
     """True if fits with this config need the mapped reflection background.
 
     Callers then build it per scan: ReflectionBackgroundMapper(
-    get_current_background(), calibration, n_rows).render(px) and pass the
+    get_current_background(), calibration, rows).render(px) and pass the
     result to fit() as reflection_background — when get_current_background()
     is None (nothing loaded, no fallback), pass None and fit() warns and
     degrades to per-peak flat offsets.

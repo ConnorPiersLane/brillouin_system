@@ -2,6 +2,8 @@
 pixel_offset_left = 0
 pixel_offset_right = 0
 selected_rows = [
+    5,
+    6,
     7,
     8,
     9,
@@ -13,8 +15,6 @@ selected_rows = [
     15,
     16,
     17,
-    18,
-    19,
 ]
 row_selection = "manual"
 n_rows = 13
@@ -34,17 +34,12 @@ wlen_pixels = 10
 fitting_model = "lorentzian_x_psf"
 use_window = true
 background = "reflection"
-beta = 3.0
-na_weighting = "uniform_gaussian"
-na_collection = 0.42
+beta = 4.0
+na_weighting = "uniform"
+na_collection = 0.14
 na_beam_diameter_mm = 5.5
 na_focal_length_mm = 10.0
 na_n_sample = 1.33
-# Reflection-template registration reach beyond the calibrated sweep, per
-# side [GHz]. 0.7 = validated production default; raise deliberately (e.g.
-# 2.0 -> 10 GHz on a 4-8 sweep) for high-shift samples like plastic (9.6) —
-# the track registration then extrapolates unverified (see
-# ReflectionBackgroundMapper).
 reflection_margin_ghz = 0.7
 
 [reference]
@@ -55,10 +50,5 @@ rel_height = 0.5
 wlen_pixels = 40
 fitting_model = "lorentzian_x_psf"
 use_window = true
-# ONE shared offset for calibration frames (2026-08-25): per-peak offsets
-# trade against the sideband widths at the sweep edges and fabricate
-# ~+10 MHz of AS-S linewidth gap through the width-vs-px polynomial.
-# Centres (shifts/splits) are insensitive. See BACKGROUNDS in
-# peak_fitting_config/find_peaks_config.py.
 background = "flat_shared"
 beta = 3.0

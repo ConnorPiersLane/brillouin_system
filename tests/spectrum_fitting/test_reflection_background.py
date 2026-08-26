@@ -80,7 +80,7 @@ def make_background(track_l=XL_A, track_r=XR_A, n_px=200, n_rows_frame=27):
 def test_identity_mapping_reproduces_own_sline():
     bg = make_background()
     mapper = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                        n_rows=None)
+                                        rows=None)
     px = bg.px
     R = mapper.render(px)
     sline = bg.sline(None)
@@ -95,7 +95,7 @@ def test_realignment_transfer_lands_bumps_at_calibrated_pixels():
     # must land where session B's calibration puts its frequency.
     bg = make_background()
     mapper = ReflectionBackgroundMapper(bg, freq_polys(XL_B, XR_B),
-                                        n_rows=None)
+                                        rows=None)
     px = np.arange(0.0, 200.0)
     R = mapper.render(px)
     for track, g in ((XL_B, 4.0), (XL_B, 6.8), (XR_B, 4.0), (XR_B, 6.8)):
@@ -112,9 +112,9 @@ def test_transfer_conserves_bump_integral():
     bg = make_background()
     pxA = bg.px
     R_A = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                     n_rows=None).render(pxA)
+                                     rows=None).render(pxA)
     R_B = ReflectionBackgroundMapper(bg, freq_polys(XL_B, XR_B),
-                                     n_rows=None).render(pxA)
+                                     rows=None).render(pxA)
     for track_a, track_b in ((XL_A, XL_B),):
         ca = float(x_of_g(track_a, 4.0))
         cb = float(x_of_g(track_b, 4.0))
@@ -132,19 +132,30 @@ def test_smaller_roi_needs_no_bookkeeping():
     fl, fr = freq_polys(XL_A, XR_A)
     px = np.arange(55.0, 140.0)
     R = mapper_render = ReflectionBackgroundMapper(
-        bg, (fl, fr), n_rows=None).render(px)
+        bg, (fl, fr), rows=None).render(px)
     c40 = float(x_of_g(XL_A, 4.0))
     window = (px > c40 - 4) & (px < c40 + 4)
     assert R[window].max() > 0
     assert len(R) == len(px)
 
 
-def test_row_band_follows_template_frame():
-    bg = make_background()
+def test_sline_sums_exactly_the_requested_rows():
+    # The template collapses over the SAME row indices the sample sline
+    # sums (2026-08-26): the contamination in a sample sline is the part of
+    # the pattern inside that band, wherever the pattern's own centre sits.
+    bg = make_background()  # row profile centred on row 10
     full = bg.sline(None)
-    band = bg.sline(11)
-    # The 11-row band around the profile centroid captures most of the light.
-    assert 0.9 < band.sum() / full.sum() <= 1.0
+    on_band = bg.sline(range(5, 16))     # 11 rows around the pattern
+    off_band = bg.sline(range(16, 27))   # 11 rows in the pattern's tail
+    assert 0.9 < on_band.sum() / full.sum() <= 1.0
+    assert off_band.sum() / full.sum() < 0.05
+    assert np.allclose(bg.sline([9, 10, 11]),
+                       bg.frame[9:12, :].sum(axis=0))
+    # Rows beyond the template frame are ignored, not an error...
+    assert np.allclose(bg.sline(range(20, 40)), bg.sline(range(20, 27)))
+    # ...unless nothing overlaps at all.
+    with pytest.raises(ValueError, match="exist in the template"):
+        bg.sline(range(50, 60))
 
 
 def test_mapper_rejects_calibration_without_polys():
@@ -172,9 +183,10 @@ def test_packaged_default_loads():
     # calibration points (the same form a session calibration provides).
     own_polys = (np.polyfit(bg.cal_left_px, bg.cal_freqs, 2),
                  np.polyfit(bg.cal_right_px, bg.cal_freqs, 2))
-    mapper = ReflectionBackgroundMapper(bg, own_polys, n_rows=11)
+    rows = list(range(3, 14))
+    mapper = ReflectionBackgroundMapper(bg, own_polys, rows=rows)
     R = mapper.render(bg.px)
-    sline = bg.sline(11)
+    sline = bg.sline(rows)
     valid = R != 0.0
     assert valid.sum() > 10
     err = np.abs(R[valid] - sline[valid])
@@ -256,7 +268,7 @@ def test_config_requires_reflection_background_helper():
 def test_reflection_fit_recovers_truth_and_shared_scale():
     bg = make_background()
     R = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                   n_rows=None).render(np.arange(0.0, 200.0))
+                                   rows=None).render(np.arange(0.0, 200.0))
     px, sline, (cen_l, cen_r) = make_sample(R, s_true=0.05)
     fitter = make_fitter()
     result = fitter.fit(px, sline, is_reference_mode=False,
@@ -278,7 +290,7 @@ def test_reflection_fit_without_template_warns_and_degrades():
     # (no error, no silent default template).
     bg = make_background()
     R = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                   n_rows=None).render(np.arange(0.0, 200.0))
+                                   rows=None).render(np.arange(0.0, 200.0))
     px, sline, (cen_l, cen_r) = make_sample(R)
     fitter = make_fitter()
     result = fitter.fit(px, sline, is_reference_mode=False)
@@ -295,7 +307,7 @@ def test_reflection_fit_without_template_warns_and_degrades():
 def test_reflection_fit_rejects_mismatched_axis():
     bg = make_background()
     R = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                   n_rows=None).render(np.arange(0.0, 200.0))
+                                   rows=None).render(np.arange(0.0, 200.0))
     px, sline, _ = make_sample(R)
     fitter = make_fitter()
     with pytest.raises(ValueError, match="same pixel axis"):
@@ -319,7 +331,7 @@ def test_default_margin_clips_beyond_sweep():
         cal_freqs=bg.cal_freqs, cal_left_px=bg.cal_left_px,
         cal_right_px=bg.cal_right_px, meta=bg.meta)
     mapper = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                        n_rows=None)
+                                        rows=None)
     px = bg.px
     r = mapper.render(px)
     g = np.polyval(mapper.freq_left, px)
@@ -339,14 +351,14 @@ def test_wider_margin_renders_beyond_sweep():
         cal_freqs=base.cal_freqs, cal_left_px=base.cal_left_px,
         cal_right_px=base.cal_right_px, meta=base.meta)
     mapper = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                        n_rows=None, g_margin_ghz=2.0)
+                                        rows=None, g_margin_ghz=2.0)
     assert mapper.g_hi == pytest.approx(10.0)
     r = mapper.render(bg.px)
     i96 = int(round(x96))
     assert r[i96] > 100.0          # the satellite came through
     # and the default-margin mapper still clips it
     r0 = ReflectionBackgroundMapper(bg, freq_polys(XL_A, XR_A),
-                                    n_rows=None).render(bg.px)
+                                    rows=None).render(bg.px)
     assert r0[i96] == 0.0
 
 

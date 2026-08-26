@@ -358,17 +358,22 @@ class HiBackend:
                 "Background 'reflection' requires a calibration to "
                 "register the reflection background, but none is loaded."
             )
-        sline_config = self.spectrum_fitter.sline_config
-        n_rows = (sline_config.n_rows if sline_config.row_selection == "auto"
-                  else len(sline_config.selected_rows))
+        try:
+            # The SAME rows the sample sline sums (manual: the config band;
+            # auto: the band frozen by auto_select_rows). Before an auto band
+            # exists there is nothing to sum the template over — skip the
+            # term for this frame, the next fitted frame freezes the band.
+            rows = self.spectrum_fitter.get_selected_rows()
+        except ValueError:
+            return None
         margin = getattr(self.spectrum_fitter.sample_config,
                          "reflection_margin_ghz", None)
-        key = (id(background), id(self.calibration_calculator), n_rows,
+        key = (id(background), id(self.calibration_calculator), tuple(rows),
                margin)
         if self._reflection_mapper is None or self._reflection_mapper_key != key:
             self._reflection_mapper = ReflectionBackgroundMapper(
                 background, self.calibration_calculator,
-                n_rows=n_rows,
+                rows=rows,
                 g_margin_ghz=margin)
             self._reflection_mapper_key = key
         return self._reflection_mapper.render(px)
