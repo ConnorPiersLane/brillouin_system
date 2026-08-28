@@ -48,6 +48,9 @@ class HiSignaller(QObject):
     calibration_result_ready = pyqtSignal(object)
     send_update_stored_axial_scans = pyqtSignal(list)
     axial_scan_data_ready = pyqtSignal(object)
+    # Outcome of a Load/Take Ref. Bkg. request: a short status label, or
+    # an "ERROR: ..." string the frontend shows in a message box.
+    ref_bkg_state = pyqtSignal(str)
     send_axial_scans_to_save = pyqtSignal(list)
     send_message_to_frontend = pyqtSignal(str, str)
     new_andor_display_ready = pyqtSignal()
@@ -444,6 +447,20 @@ class HiSignaller(QObject):
             self.axial_scan_data_ready.emit(scan_data)
         else:
             log.warning(f"Requested scan index {index} not found.")
+
+    @pyqtSlot(str)
+    def handle_load_ref_bkg_from_file(self, path: str):
+        """Load/build a reflection background from a file — runs in the
+        backend thread so the calibration re-fit never blocks the GUI."""
+        self.ref_bkg_state.emit(
+            self.backend.load_reflection_background_from_file(path))
+
+    @pyqtSlot(int)
+    def handle_load_ref_bkg_from_scan(self, index: int):
+        """Adopt a stored scan (a just-taken 'Take Ref. Bkg.' capture) as
+        the live reflection background."""
+        self.ref_bkg_state.emit(
+            self.backend.load_reflection_background_from_scan(index))
 
     @pyqtSlot()
     def delegate_find_reflection_plane(self):

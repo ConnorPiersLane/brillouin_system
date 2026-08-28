@@ -230,11 +230,14 @@ def test_flat_shared_single_offset_for_reference_fits():
     assert abs(result.right_peak_width_px - GAMMA) < 0.05
 
 
-def test_packaged_reference_background_is_flat_shared():
-    # The shipped [reference] config carries the shared-offset baseline —
-    # the production convention validated against the Figure 4(d)
-    # workbook chain (2026-08-25).
+def test_packaged_reference_background_is_flat():
+    # The shipped [reference] config carries per-sideband offsets ('flat')
+    # — the production convention (user decision 2026-08-27, superseding
+    # the 08-25 flat_shared choice; on current-era data flat gives L-R
+    # width gaps near zero). NOTE: absolute widths are convention-pinned —
+    # comparisons against the Figure 4(d) workbook chain (flat_shared era)
+    # need a same-scan refit anchor.
     from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
         FIND_PEAKS_TOML_PATH, load_config_section)
     cfg = load_config_section(FIND_PEAKS_TOML_PATH, "reference")
-    assert cfg.background == "flat_shared"
+    assert cfg.background == "flat"

@@ -385,6 +385,68 @@ class HiBackend:
             self._reflection_mapper_calc = self.calibration_calculator
         return self._reflection_mapper.render(px)
 
+    # -------- Reflection background loading (live sample fits) --------
+
+    def load_reflection_background_from_file(self, path: str) -> str:
+        """Make a saved .npz template or an .h5 scan the live reflection
+        background. Returns a short status label, or 'ERROR: ...'."""
+        name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
+        try:
+            from brillouin_system.spectrum_fitting.reflection_background import (
+                ReflectionBackground, set_current_background)
+            if str(path).lower().endswith(".npz"):
+                set_current_background(ReflectionBackground.load(path))
+                log.info(f"[Backend] Live reflection background loaded "
+                         f"from template {name}.")
+                return name
+            from brillouin_system.saving_and_loading.known_dataclasses_lookup import (
+                known_classes)
+            from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+                dict_to_dataclass_tree, load_dict_from_hdf5)
+            loaded = dict_to_dataclass_tree(load_dict_from_hdf5(path),
+                                            known_classes)
+            scans = loaded if isinstance(loaded, list) else [loaded]
+            # Prefer a background capture; fall back to the last scan.
+            bg_scans = [s for s in scans
+                        if "reflection" in str(getattr(s, "id", ""))]
+            scan = (bg_scans or scans)[-1]
+            return self._adopt_scan_as_reflection_background(
+                scan, f"{name} ({scan.id})")
+        except Exception as e:
+            log.exception("[Backend] Failed to load the reflection "
+                          "background")
+            return f"ERROR: could not load {name}: {type(e).__name__}: {e}"
+
+    def load_reflection_background_from_scan(self, index: int) -> str:
+        """Adopt stored scan #index (a 'Take Ref. Bkg.' capture) as the
+        live reflection background. Returns a status label or 'ERROR:'."""
+        scan = self.get_axial_scan_data(index)
+        if scan is None:
+            return f"ERROR: scan index {index} not found."
+        return self._adopt_scan_as_reflection_background(
+            scan, f"scan {index} - {scan.id}")
+
+    def _adopt_scan_as_reflection_background(self, scan, label: str) -> str:
+        try:
+            from brillouin_system.spectrum_fitting.build_reflection_background import (
+                background_from_scan)
+            from brillouin_system.spectrum_fitting.reflection_background import (
+                set_current_background)
+            log.info(f"[Backend] Building the reflection background from "
+                     f"scan '{scan.id}' ({len(scan.measurements)} "
+                     f"frames)...")
+            set_current_background(background_from_scan(scan, source=label))
+            log.info(f"[Backend] Live reflection background set ({label}) "
+                     f"— sample fits with a 'reflection' background now "
+                     f"use it.")
+            return label
+        except Exception as e:
+            log.exception("[Backend] Failed to build the reflection "
+                          "background")
+            return (f"ERROR: could not build a background from "
+                    f"'{getattr(scan, 'id', '?')}': "
+                    f"{type(e).__name__}: {e}")
+
     def update_calibration_calculator(self):
         if self.calibration_data is None:
             self.calibration_poly_fit_params = None

@@ -116,6 +116,8 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
+    load_ref_bkg_from_file_requested = pyqtSignal(str)
+    load_ref_bkg_from_scan_requested = pyqtSignal(int)
     calibrate_laser_camera_position_requested = pyqtSignal()
 
     # Saving Signals
@@ -203,6 +205,10 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
+        self.load_ref_bkg_from_file_requested.connect(
+            self.brillouin_signaller.handle_load_ref_bkg_from_file)
+        self.load_ref_bkg_from_scan_requested.connect(
+            self.brillouin_signaller.handle_load_ref_bkg_from_scan)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
@@ -219,6 +225,7 @@ class HiFrontend(QWidget):
 
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
+        self.brillouin_signaller.ref_bkg_state.connect(self.update_ref_bkg_label)
 
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
@@ -389,9 +396,28 @@ class HiFrontend(QWidget):
         row_layout.addWidget(self.fitting_config_btn)
         row_layout.addWidget(self.do_live_fitting_checkbox)
 
+        # Reflection background for live sample fits: without one loaded,
+        # a 'reflection' sample config warns once and fits per-peak flat
+        # offsets only. 'Take Ref. Bkg.' auto-loads its scan when done.
+        self.load_ref_bkg_btn = QPushButton("Load Ref. Bkg.")
+        self.load_ref_bkg_btn.setToolTip(
+            "Load a reflection background for live sample fitting — a "
+            "saved .npz template, or an .h5 scan (built the same way the "
+            "analyzer's Load Background does).")
+        self.load_ref_bkg_btn.clicked.connect(self.on_load_ref_bkg_clicked)
+
+        self.ref_bkg_label = QLabel("Ref. bkg: none")
+        self.ref_bkg_label.setStyleSheet("color: gray")
+
+        bkg_row = QHBoxLayout()
+        bkg_row.addWidget(self.load_ref_bkg_btn)
+        bkg_row.addWidget(self.ref_bkg_label)
+        bkg_row.addStretch()
+
         # Vertical layout for the group box
         layout = QVBoxLayout()
         layout.addLayout(row_layout)
+        layout.addLayout(bkg_row)
 
         group = QGroupBox("Fitting")
         group.setLayout(layout)
@@ -608,13 +634,14 @@ class HiFrontend(QWidget):
         self.axial_btn2 = QPushButton("Find -> Scan")
         self.axial_btn2.clicked.connect(lambda: self.take_axial_step_scan(find_reflection_plane=True))
 
-        self.take_background_btn = QPushButton("Take Background")
+        self.take_background_btn = QPushButton("Take Ref. Bkg.")
         self.take_background_btn.setToolTip(
             "Records Num Meas frames at the CURRENT position through the "
             "normal scan pipeline (step 0), named 'reflection_background', "
             "stored and saved like any scan. Position at the reflection "
-            "plane first. The analyzer's 'Load Background' builds the prmr "
-            "fitting template from it.")
+            "plane first. When the scan completes it is AUTOMATICALLY "
+            "loaded as the live reflection background for sample fitting "
+            "(see the Fitting group's status label).")
         self.take_background_btn.clicked.connect(self.take_background_scan)
 
         btn_row = QHBoxLayout()
@@ -1463,6 +1490,22 @@ class HiFrontend(QWidget):
         self.shift_scan_combo.clear()
         self.shift_scan_combo.addItems(scan_list)
 
+        # A just-finished 'Take Ref. Bkg.' scan: ask the backend to adopt
+        # it as the live reflection background (built backend-side).
+        if getattr(self, "_pending_ref_bkg_autoload", False) and scan_list:
+            last = scan_list[-1]
+            if "reflection_background" in str(last):
+                self._pending_ref_bkg_autoload = False
+                try:
+                    self.ref_bkg_label.setText("Ref. bkg: loading…")
+                    self.ref_bkg_label.setStyleSheet("color: gray")
+                    self.load_ref_bkg_from_scan_requested.emit(
+                        int(str(last).split(" - ")[0]))
+                except Exception:
+                    log.exception("[Brillouin Viewer] Ref. bkg auto-load: "
+                                  "could not parse the scan index from "
+                                  f"'{last}'")
+
     def on_show_axial_scan_clicked(self):
         selected_scan = self.shift_scan_combo.currentText()
         if not selected_scan:
@@ -1477,7 +1520,11 @@ class HiFrontend(QWidget):
         """Open the scan in the analyzer viewer — the same viewer the data
         analyzer uses: the scan is re-fitted against its own re-fitted
         calibration under the LIVE configs, frame browser + spectrum fit +
-        shift-vs-frame-index profile."""
+        shift-vs-frame-index profile.
+
+        (The 'Take Ref. Bkg.' auto-load no longer routes through here —
+        it goes frontend → signaller → backend via
+        load_ref_bkg_from_scan_requested.)"""
         log.info(f"[Brillouin Viewer] Opening scan {scan_data.id} "
                  f"({len(scan_data.measurements)} frames) — re-fitting with "
                  f"the live configs...")
@@ -1598,13 +1645,17 @@ class HiFrontend(QWidget):
     def take_background_scan(self):
         """A reflection-background capture IS a normal axial scan: N frames
         at the current position (step 0), fixed id 'reflection_background',
-        registered and saved like any other scan — no separate pipeline."""
+        registered and saved like any other scan — no separate pipeline.
+        When the scan appears in the registry it is auto-loaded as the
+        live reflection background (see receive_axial_scan_list)."""
         try:
             n_meas = int(self.axial_num_input.text())
+            self._pending_ref_bkg_autoload = True
 
             log.info(f"[Brillouin Viewer] Background Scan Request | "
                      f"id: reflection_background, N: {n_meas}, step 0 µm "
-                     f"(position at the reflection plane first)")
+                     f"(position at the reflection plane first) — will "
+                     f"auto-load as the live reflection background")
 
             request = RequestAxialStepScan(
                 id="reflection_background",
@@ -1619,6 +1670,33 @@ class HiFrontend(QWidget):
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate background scan: {e}")
 
+
+    # -------- Reflection background for live sample fitting --------
+    # House pattern: the frontend only emits requests; the signaller runs
+    # the load/build in the backend thread and reports back via
+    # ref_bkg_state (so the GUI never blocks on a calibration re-fit).
+
+    def on_load_ref_bkg_clicked(self):
+        """Pick a saved .npz template or an .h5 scan file and ask the
+        backend to make it the live reflection background."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Reflection Background", "",
+            "Background (*.npz *.h5);;Template (*.npz);;Scan (*.h5)")
+        if not path:
+            return
+        self.ref_bkg_label.setText("Ref. bkg: loading…")
+        self.ref_bkg_label.setStyleSheet("color: gray")
+        self.load_ref_bkg_from_file_requested.emit(path)
+
+    def update_ref_bkg_label(self, status: str):
+        """Backend outcome of a Load/Take Ref. Bkg. request."""
+        if status.startswith("ERROR"):
+            self.ref_bkg_label.setText("Ref. bkg: failed")
+            self.ref_bkg_label.setStyleSheet("color: red")
+            QMessageBox.critical(self, "Load Ref. Bkg. Failed", status)
+        else:
+            self.ref_bkg_label.setText(f"Ref. bkg: {status}")
+            self.ref_bkg_label.setStyleSheet("color: green")
 
     def take_sweep_scan(self):
         try:
