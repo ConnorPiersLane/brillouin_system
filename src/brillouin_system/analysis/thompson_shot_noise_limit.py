@@ -44,7 +44,10 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     sline_from_frame_config,
 )
 from brillouin_system.spectrum_fitting.psf import detected_hwhm_px
-from brillouin_system.spectrum_fitting.spectrum_fitter import is_psf_fit
+from brillouin_system.spectrum_fitting.spectrum_fitter import (
+    is_dho_fit,
+    is_psf_fit,
+)
 
 # Thompson's photon term s^2/N is derived for a GAUSSIAN profile. Brillouin
 # peaks are Lorentzian and the HWHM is passed in place of s; a Lorentzian's
@@ -229,13 +232,40 @@ def theoretical_precision(fs: FittedSpectrum,
     a_r = abs(calc.df_right_peak(px=fs.right_peak_center_px, dpx=1))
 
     # s is the width of the photon distribution AS DETECTED, not the fitted
-    # Lorentzian core: for a PSF-convolved fit the fitted gamma is the core
-    # BEFORE the camera PSF, but the photons arrive spread by
+    # core: for a PSF-convolved fit the fitted gamma is the core BEFORE the
+    # camera PSF, but the photons arrive spread by
     # Lorentzian (x) Gauss(sigma) (x) tail(tau) — a few-to-ten percent wider
     # at production widths. The pixel top-hat stays OUT of s (it is the
     # separate a^2/12 pixelation term). For a plain-Lorentzian fit the
-    # fitted width already IS the detected width.
-    if is_psf_fit(fs.model):
+    # fitted width already IS the detected width. A DHO fit's width is the
+    # ACOUSTIC core only — the VIPA instrument Lorentzian was folded into
+    # its kernel — so it is added back first (Lorentzian widths add) before
+    # the camera spread, from the same calibration width polynomial the fit
+    # used; without a width model (a stored DHO tag analyzed against an old
+    # calibration) the acoustic width is used as-is (optimistic bound).
+    if is_dho_fit(fs.model):
+        k = sline_from_frame_config.get()
+        p = calc.p
+
+        def vipa_hwhm(coeffs, width_dpx, px):
+            if coeffs is None or not np.all(
+                    np.isfinite(np.asarray(coeffs, dtype=float))):
+                return 0.0
+            return abs(float(width_dpx(px)))
+
+        w_l = detected_hwhm_px(
+            fs.left_peak_width_px + vipa_hwhm(
+                p.calibration_width_left_peak,
+                calc.calibration_width_left_peak_dpx,
+                fs.left_peak_center_px),
+            k.psf_sigma_px, k.psf_tau_left_px)
+        w_r = detected_hwhm_px(
+            fs.right_peak_width_px + vipa_hwhm(
+                p.calibration_width_right_peak,
+                calc.calibration_width_right_peak_dpx,
+                fs.right_peak_center_px),
+            k.psf_sigma_px, k.psf_tau_right_px)
+    elif is_psf_fit(fs.model):
         k = sline_from_frame_config.get()
         w_l = detected_hwhm_px(fs.left_peak_width_px,
                                k.psf_sigma_px, k.psf_tau_left_px)

@@ -353,6 +353,48 @@ def test_psf_fit_bound_uses_the_detected_width():
     assert t_psf.distance_total_mhz > t_plain.distance_total_mhz
 
 
+def test_dho_fit_bound_adds_back_the_vipa_width():
+    """A DHO fit's width is the ACOUSTIC core only (its kernel holds the
+    VIPA Lorentzian), so the bound must add the calibration width back
+    before the camera spread — landing exactly where a PSF-tagged fit with
+    the combined core width lands, and wider than the acoustic width alone
+    would suggest."""
+    from dataclasses import replace
+    g_vipa = 0.4
+    calc = _linear_calculator()
+    calc.p = replace(
+        calc.p,
+        calibration_width_left_peak=np.array([g_vipa]),
+        calibration_width_right_peak=np.array([g_vipa]),
+    )
+    fs_base = _fitted_two_peaks()
+    photons = PixelCountsAndPhotons.from_fit(fs_base, preamp_gain=1.0,
+                                             emccd_gain=0)
+
+    fs_dho = replace(fs_base, model="2dho_x_psf_window")
+    fs_psf_combined = replace(
+        fs_base, model="2lorentzian_x_psf_window",
+        left_peak_width_px=fs_base.left_peak_width_px + g_vipa,
+        right_peak_width_px=fs_base.right_peak_width_px + g_vipa)
+    fs_psf_acoustic = replace(fs_base, model="2lorentzian_x_psf_window")
+
+    t_dho = _bound(fs_dho, photons, calc)
+    t_combined = _bound(fs_psf_combined, photons, calc)
+    t_acoustic = _bound(fs_psf_acoustic, photons, calc)
+
+    assert t_dho.left_peak_photons_mhz == pytest.approx(
+        t_combined.left_peak_photons_mhz)
+    assert t_dho.right_peak_photons_mhz == pytest.approx(
+        t_combined.right_peak_photons_mhz)
+    assert t_dho.left_peak_photons_mhz > t_acoustic.left_peak_photons_mhz
+
+    # Without a width model (old calibration) the bound degrades to the
+    # acoustic width instead of failing.
+    t_no_widths = _bound(fs_dho, photons, _linear_calculator())
+    assert t_no_widths.left_peak_photons_mhz == pytest.approx(
+        t_acoustic.left_peak_photons_mhz)
+
+
 def test_failed_fit_has_no_distance_precision():
     calc = _linear_calculator()
     fs = FittedSpectrum(is_success=False, x_pixels=np.arange(3), sline=np.zeros(3))
