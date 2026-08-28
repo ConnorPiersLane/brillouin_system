@@ -31,7 +31,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import GraphicsLayoutWidget, TextItem
 
-from PyQt5.QtGui import QDoubleValidator, QIntValidator
+from PyQt5.QtGui import QDoubleValidator, QFont, QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QMessageBox
@@ -947,6 +947,9 @@ class HiFrontend(QWidget):
             color=(0, 0, 0),
             anchor=(1, 0)
         )
+        _live_fit_font = QFont()
+        _live_fit_font.setPointSize(7)
+        self.live_fit_text.setFont(_live_fit_font)
         self.live_fit_text.setZValue(10)
         self.spec_plot.addItem(self.live_fit_text, ignoreBounds=True)
 
@@ -1324,48 +1327,60 @@ class HiFrontend(QWidget):
             lw_left = getattr(dr, "linewidth_left_peak", None)
             lw_right = getattr(dr, "linewidth_right_peak", None)
 
-            # Top line: per-peak shifts + the combined shift when the
-            # calibration provides them, otherwise the plain shift.
-            sh_l = getattr(dr, "shift_left_peak", None)
-            sh_r = getattr(dr, "shift_right_peak", None)
-            if sh_l is not None and sh_r is not None:
-                text = "L: {}  R: {}  Shift: {}".format(
-                    self._fmt_plot_val(sh_l),
-                    self._fmt_plot_val(sh_r),
-                    self._fmt_plot_val(freq_shift),
-                )
-            else:
-                text = "Freq shift: {}".format(
-                    self._fmt_plot_val(freq_shift))
-            text += "\nLeft HWHM: {}\nRight HWHM: {}".format(
-                self._fmt_plot_mhz(left_hwhm),
-                self._fmt_plot_mhz(right_hwhm),
-            )
-            # Instrument-subtracted sample width vs the LAST calibration —
-            # only shown when the backend could compute it (sample mode,
-            # PSF-kernel fit, calibration with a width model).
-            if lw_left is not None and lw_right is not None:
-                text += "\nSample Γ (last calib): {} / {}".format(
-                    self._fmt_plot_mhz(lw_left),
-                    self._fmt_plot_mhz(lw_right),
-                )
-            # Live alignment meters: the L−R differences, signed.
-            def _signed_mhz(a, b):
+            # Compact 3-line overview.
+            # 1: L / R / combined shift in GHz ('NA' = cone-corrected)
+            # 2: raw HWHMs + deconvolved sample Γ, all MHz
+            # 3: the L−R alignment meters (shift lean, width asymmetry)
+            def _g(v):
+                try:
+                    v = float(v)
+                    if np.isfinite(v):
+                        return f"{v:.4f}"
+                except Exception:
+                    pass
+                return "—"
+
+            def _m(v):
+                try:
+                    v = 1e3 * float(v)
+                    if np.isfinite(v):
+                        return f"{v:.0f}"
+                except Exception:
+                    pass
+                return "—"
+
+            def _d(a, b):
                 try:
                     d = 1e3 * (float(a) - float(b))
                     if np.isfinite(d):
-                        return f"{d:+.1f} MHz"
+                        return f"{d:+.1f}"
                 except Exception:
                     pass
                 return None
 
-            sh = _signed_mhz(getattr(dr, "shift_left_peak", None),
-                             getattr(dr, "shift_right_peak", None))
-            if sh is not None:
-                text += f"\nL−R shift: {sh}"
-            hw = _signed_mhz(left_hwhm, right_hwhm)
-            if hw is not None:
-                text += f"\nL−R HWHM: {hw}"
+            sh_l = getattr(dr, "shift_left_peak", None)
+            sh_r = getattr(dr, "shift_right_peak", None)
+            na_tag = " NA" if getattr(dr, "na_corrected", False) else ""
+            if sh_l is not None and sh_r is not None:
+                text = (f"L {_g(sh_l)}  R {_g(sh_r)}  "
+                        f"S {_g(freq_shift)} GHz{na_tag}")
+            else:
+                text = f"Shift {_g(freq_shift)} GHz{na_tag}"
+
+            line2 = f"HWHM {_m(left_hwhm)}/{_m(right_hwhm)}"
+            if lw_left is not None and lw_right is not None:
+                line2 += f"  Γ {_m(lw_left)}/{_m(lw_right)}"
+            text += "\n" + line2 + " MHz"
+
+            meters = []
+            ds = _d(sh_l, sh_r)
+            if ds is not None:
+                meters.append(f"Δshift {ds}")
+            dw = _d(left_hwhm, right_hwhm)
+            if dw is not None:
+                meters.append(f"Δwidth {dw}")
+            if meters:
+                text += "\nL−R: " + "  ".join(meters) + " MHz"
             self.live_fit_text.setText(text)
             self.live_fit_text.setVisible(True)
 

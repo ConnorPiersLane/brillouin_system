@@ -385,6 +385,28 @@ class HiBackend:
             self._reflection_mapper_calc = self.calibration_calculator
         return self._reflection_mapper.render(px)
 
+    def _na_shift_ratio(self) -> float | None:
+        """The post-hoc NA cone factor for the CURRENT sample config,
+        cached on the NA parameters (the integral is not free per frame).
+        None when unconfigured/uncomputable — display stays raw then."""
+        cfg = self.spectrum_fitter.sample_config
+        key = (getattr(cfg, "na_weighting", None),
+               getattr(cfg, "na_collection", None),
+               getattr(cfg, "na_beam_diameter_mm", None),
+               getattr(cfg, "na_focal_length_mm", None),
+               getattr(cfg, "na_n_sample", None))
+        cached = getattr(self, "_na_ratio_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            from brillouin_system.spectrum_fitting.na_lineshape import (
+                na_mean_shift_ratio)
+            ratio = float(na_mean_shift_ratio(cfg))
+        except Exception:
+            ratio = None
+        self._na_ratio_cache = (key, ratio)
+        return ratio
+
     # -------- Reflection background loading (live sample fits) --------
 
     def load_reflection_background_from_file(self, path: str) -> str:
@@ -554,6 +576,22 @@ class HiBackend:
             except Exception:
                 shift_lp_ghz, shift_rp_ghz = None, None
 
+        # Post-hoc NA cone correction on the displayed SHIFTS (sample mode
+        # only — never inside the fit, and never on the reference/EOM
+        # frequencies). Widths stay uncorrected (the NA width term is a
+        # flat sub-MHz analysis-side correction).
+        na_corrected = False
+        if not self.is_reference_mode:
+            ratio = self._na_shift_ratio()
+            if ratio is not None and ratio != 1.0:
+                na_corrected = True
+                if freq_shift_ghz is not None:
+                    freq_shift_ghz = freq_shift_ghz / ratio
+                if shift_lp_ghz is not None:
+                    shift_lp_ghz = shift_lp_ghz / ratio
+                if shift_rp_ghz is not None:
+                    shift_rp_ghz = shift_rp_ghz / ratio
+
         if fitting.is_success:
             return DisplayResults(
                 is_fitting_available=True,
@@ -571,6 +609,7 @@ class HiBackend:
                 linewidth_right_peak=linewidth_rp_ghz,
                 shift_left_peak=shift_lp_ghz,
                 shift_right_peak=shift_rp_ghz,
+                na_corrected=na_corrected,
             )
         else:
             return DisplayResults(

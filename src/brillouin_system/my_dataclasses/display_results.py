@@ -26,3 +26,6 @@ class DisplayResults:
     # view can show the L-R shift difference (the alignment "lean" meter).
     shift_left_peak: float | None = None
     shift_right_peak: float | None = None
+    # True when the shifts above carry the post-hoc NA cone correction
+    # (sample mode only; the correction never enters the fit itself).
+    na_corrected: bool = False
