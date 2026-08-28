@@ -8,9 +8,11 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 
 def show_frame(fig, ax, frame: np.ndarray, colorbar=None,
-               title: str = "Andor Frame (raw)"):
+               title: str = "Andor Frame (raw)", cax=None):
     """Draw a raw camera frame with percentile contrast; returns the colorbar
-    (pass it back on the next call so it is reused, not stacked)."""
+    (pass it back on the next call so it is reused, not stacked). cax draws
+    the colorbar into that dedicated axes instead of shrinking ax — use it
+    when ax must stay x-aligned with another plot."""
     ax.cla()
     frame = np.asarray(frame, dtype=float)
     vmin, vmax = np.percentile(frame, [1.0, 99.7])
@@ -19,7 +21,10 @@ def show_frame(fig, ax, frame: np.ndarray, colorbar=None,
     im = ax.imshow(frame, cmap="magma", aspect="auto", interpolation="none",
                    origin="upper", vmin=vmin, vmax=vmax)
     if colorbar is None:
-        colorbar = fig.colorbar(im, ax=ax, pad=0.01, label="Counts")
+        if cax is not None:
+            colorbar = fig.colorbar(im, cax=cax, label="Counts")
+        else:
+            colorbar = fig.colorbar(im, ax=ax, pad=0.01, label="Counts")
     else:
         colorbar.update_normal(im)
     ax.set_title(title, fontsize=10)

@@ -65,7 +65,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 #todo: fix sample mode closing shutter.
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
 include_eye_tracking = False
 use_eye_tracker_dummy = False
@@ -836,6 +836,16 @@ class HiFrontend(QWidget):
             pass
         return "—"
 
+    def _fmt_plot_mhz(self, value_ghz):
+        """A GHz value rendered in MHz (widths read better in MHz)."""
+        try:
+            value = 1e3 * float(value_ghz)
+            if np.isfinite(value):
+                return f"{value:.1f} MHz"
+        except Exception:
+            pass
+        return "—"
+
     # --- inside HiFrontend ---
     def create_andor_display_group(self):
         # White theme + fast options
@@ -1284,14 +1294,52 @@ class HiFrontend(QWidget):
             freq_shift = getattr(dr, "freq_shift_ghz", None)
             left_hwhm = getattr(dr, "hwhm_left_peak", None)
             right_hwhm = getattr(dr, "hwhm_right_peak", None)
+            lw_left = getattr(dr, "linewidth_left_peak", None)
+            lw_right = getattr(dr, "linewidth_right_peak", None)
 
-            self.live_fit_text.setText(
-                "Freq shift: {}\nLeft HWHM: {}\nRight HWHM: {}".format(
+            # Top line: per-peak shifts + the combined shift when the
+            # calibration provides them, otherwise the plain shift.
+            sh_l = getattr(dr, "shift_left_peak", None)
+            sh_r = getattr(dr, "shift_right_peak", None)
+            if sh_l is not None and sh_r is not None:
+                text = "L: {}  R: {}  Shift: {}".format(
+                    self._fmt_plot_val(sh_l),
+                    self._fmt_plot_val(sh_r),
                     self._fmt_plot_val(freq_shift),
-                    self._fmt_plot_val(left_hwhm),
-                    self._fmt_plot_val(right_hwhm),
                 )
+            else:
+                text = "Freq shift: {}".format(
+                    self._fmt_plot_val(freq_shift))
+            text += "\nLeft HWHM: {}\nRight HWHM: {}".format(
+                self._fmt_plot_mhz(left_hwhm),
+                self._fmt_plot_mhz(right_hwhm),
             )
+            # Instrument-subtracted sample width vs the LAST calibration —
+            # only shown when the backend could compute it (sample mode,
+            # PSF-kernel fit, calibration with a width model).
+            if lw_left is not None and lw_right is not None:
+                text += "\nSample Γ (last calib): {} / {}".format(
+                    self._fmt_plot_mhz(lw_left),
+                    self._fmt_plot_mhz(lw_right),
+                )
+            # Live alignment meters: the L−R differences, signed.
+            def _signed_mhz(a, b):
+                try:
+                    d = 1e3 * (float(a) - float(b))
+                    if np.isfinite(d):
+                        return f"{d:+.1f} MHz"
+                except Exception:
+                    pass
+                return None
+
+            sh = _signed_mhz(getattr(dr, "shift_left_peak", None),
+                             getattr(dr, "shift_right_peak", None))
+            if sh is not None:
+                text += f"\nL−R shift: {sh}"
+            hw = _signed_mhz(left_hwhm, right_hwhm)
+            if hw is not None:
+                text += f"\nL−R HWHM: {hw}"
+            self.live_fit_text.setText(text)
             self.live_fit_text.setVisible(True)
 
             # Keep text in upper-right corner of current view

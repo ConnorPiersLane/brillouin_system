@@ -73,7 +73,8 @@ def config_requires_reflection_background(config) -> bool:
     is None (nothing loaded, no fallback), pass None and fit() warns and
     degrades to per-peak flat offsets.
     """
-    return resolved_background(config) == "reflection"
+    return resolved_background(config) in ("reflection",
+                                           "reflection_per_peak")
 
 
 # One-shot: a prmr fit without a loaded template degrades to per-peak flat
@@ -265,6 +266,31 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
         p0 = [offset0] * n_parts + [1e-3]
         lo = [0.0] * n_parts + [0.0]
         hi = [np.inf] * n_parts + [1.0]
+        return func, p0, lo, hi, n
+
+    if background == "reflection_per_peak":
+        # EXPERIMENTAL QC variant: per-peak offset + per-peak template scale
+        # (layout: n offsets then n scales). Rejected for production
+        # 2026-08-20 — see BACKGROUNDS in find_peaks_config.
+        if reflection_bg is None:
+            raise ValueError(
+                "Background 'reflection_per_peak' needs the mapped "
+                "reflection background — pass reflection_background to fit()."
+            )
+        px_ref, r_ref = reflection_bg
+
+        def func(x, *params):
+            x = np.asarray(x, dtype=float)
+            r = np.interp(x, px_ref, r_ref, left=0.0, right=0.0)
+            out = np.zeros_like(x)
+            for i, m in enumerate(segments(x)):
+                out = out + m * (params[i] + params[n_parts + i] * r)
+            return out
+
+        n = 2 * n_parts
+        p0 = [offset0] * n_parts + [1e-3] * n_parts
+        lo = [0.0] * n
+        hi = [np.inf] * n_parts + [1.0] * n_parts
         return func, p0, lo, hi, n
 
     raise ValueError(f"Unknown background '{background}'.")
@@ -568,12 +594,13 @@ class SpectrumFitter:
         px = np.asarray(px, dtype=np.float64)
         sline = np.asarray(sline, dtype=np.float64)
 
-        if background == "reflection" and reflection_background is None:
+        if (background in ("reflection", "reflection_per_peak")
+                and reflection_background is None):
             # NO fallback template (user decision 2026-08-24: a
             # stale-alignment default is worse than no correction).
             _warn_missing_reflection_background()
             background = "flat"
-        if background == "reflection":
+        if background in ("reflection", "reflection_per_peak"):
             reflection_background = np.asarray(reflection_background,
                                              dtype=np.float64)
             if reflection_background.shape != px.shape:
@@ -715,6 +742,11 @@ class SpectrumFitter:
             elif use_window and background == "reflection":
                 offs = bg_params[:-1]
                 bg_params = [offs[i] for i in perm] + bg_params[-1:]
+            elif use_window and background == "reflection_per_peak":
+                offs = bg_params[:n_found]
+                scales = bg_params[n_found:]
+                bg_params = ([offs[i] for i in perm]
+                             + [scales[i] for i in perm])
 
         centers = [p[1] for p in peak_params]
         bg_at_peaks = np.atleast_1d(

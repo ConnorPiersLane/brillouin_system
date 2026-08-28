@@ -108,7 +108,13 @@ MODEL_PRESETS = {
 #               — shifts and splits do not move.
 # Costs ~10% in single-frame distance precision. Validated on liquids only:
 # cornea splits are already unbiased and get WORSE with a background term.
-BACKGROUNDS = ["flat", "linear", "reflection", "flat_shared"]
+# reflection_per_peak: EXPERIMENTAL QC variant — per-peak offsets plus a
+# SEPARATE template scale per peak. Rejected for production 2026-08-20
+# (freeing s per side re-opens the amplitude<->centre trade, splits
+# +3..+4 MHz on wide glycerol); kept selectable via the long-form config
+# for side-by-side tests only. Never put it in a preset.
+BACKGROUNDS = ["flat", "linear", "reflection", "reflection_per_peak",
+               "flat_shared"]
 
 # Legacy background names (removed 2026-08-20): the per-peak variants are now
 # simply flat/linear under a windowed fit.

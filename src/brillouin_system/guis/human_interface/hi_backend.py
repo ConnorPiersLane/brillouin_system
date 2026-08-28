@@ -459,6 +459,12 @@ class HiBackend:
 
 
     def get_display_results(self, frame: np.ndarray, fitting: FittedSpectrum) -> DisplayResults:
+        # Sample linewidth vs the LAST calibration — sample mode only.
+        # sample_linewidth_ghz itself returns (None, None) for non-PSF
+        # (plain lorentzian) fits and width-less calibrations, so the
+        # frontend can blank on None without knowing why.
+        linewidth_lp_ghz, linewidth_rp_ghz = None, None
+        shift_lp_ghz, shift_rp_ghz = None, None
         if self.is_reference_mode:
             freq_shift_ghz = self.microwave.get_frequency()
             hwhm_lp_ghz, hwhm_rp_ghz = self.get_hwhm_shift(fitting)
@@ -466,9 +472,25 @@ class HiBackend:
         elif fitting.is_success:
             freq_shift_ghz = self.get_freq_shift(fitting)
             hwhm_lp_ghz, hwhm_rp_ghz = self.get_hwhm_shift(fitting)
+            if self.calibration_calculator is not None:
+                linewidth_lp_ghz, linewidth_rp_ghz = (
+                    self.calibration_calculator.sample_linewidth_ghz(fitting))
         else:
             freq_shift_ghz = None
             hwhm_lp_ghz, hwhm_rp_ghz = None, None
+
+        # Per-peak frequencies from the calibration tracks (both modes) —
+        # the frontend shows their difference as the live lean meter.
+        if fitting.is_success and self.calibration_calculator is not None:
+            try:
+                shift_lp_ghz = float(self.calibration_calculator
+                                     .freq_left_peak(
+                                         fitting.left_peak_center_px))
+                shift_rp_ghz = float(self.calibration_calculator
+                                     .freq_right_peak(
+                                         fitting.right_peak_center_px))
+            except Exception:
+                shift_lp_ghz, shift_rp_ghz = None, None
 
         if fitting.is_success:
             return DisplayResults(
@@ -483,6 +505,10 @@ class HiBackend:
                 freq_shift_ghz=freq_shift_ghz,
                 hwhm_left_peak=hwhm_lp_ghz,
                 hwhm_right_peak=hwhm_rp_ghz,
+                linewidth_left_peak=linewidth_lp_ghz,
+                linewidth_right_peak=linewidth_rp_ghz,
+                shift_left_peak=shift_lp_ghz,
+                shift_right_peak=shift_rp_ghz,
             )
         else:
             return DisplayResults(

@@ -63,7 +63,7 @@ class ReflectionBackgroundViewer(QWidget):
         meta.setWordWrap(True)
         layout.addWidget(meta)
 
-        self.figure = Figure(figsize=(8, 6))
+        self.figure = Figure(figsize=(8, 6), constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(NavigationToolbar(self.canvas, self))
         layout.addWidget(self.canvas)
@@ -83,11 +83,18 @@ class ReflectionBackgroundViewer(QWidget):
 
     def _plot(self):
         bg = self.background
-        ax_frame = self.figure.add_subplot(211)
-        ax_sline = self.figure.add_subplot(212)
+        # The colorbar gets its own column so it does not shrink the frame
+        # axes: frame (top) and sline (bottom) then share one x axis and the
+        # pixel columns line up vertically.
+        gs = self.figure.add_gridspec(2, 2, width_ratios=[40, 1], wspace=0.03)
+        ax_frame = self.figure.add_subplot(gs[0, 0])
+        cax = self.figure.add_subplot(gs[0, 1])
+        ax_sline = self.figure.add_subplot(gs[1, 0], sharex=ax_frame)
 
         show_frame(self.figure, ax_frame, bg.frame,
-                   title="Template frame (bias-subtracted mean)")
+                   title="Template frame (bias-subtracted mean)", cax=cax)
+        ax_frame.set_xlabel("")
+        ax_frame.tick_params(labelbottom=False)
 
         rows = self._band_rows()
         try:
@@ -115,5 +122,4 @@ class ReflectionBackgroundViewer(QWidget):
         ax_sline.grid(True, alpha=0.3)
         ax_sline.legend(fontsize=8, loc="upper right")
 
-        self.figure.tight_layout()
         self.canvas.draw_idle()

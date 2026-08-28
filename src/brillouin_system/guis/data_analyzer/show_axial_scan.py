@@ -206,6 +206,13 @@ class AxialScanViewer(QWidget):
             "Number of synthetic frames the Monte Carlo re-fits.")
         nav_layout.addWidget(self.mc_spinner)
 
+        self.stats_btn = QPushButton("Show Statistics")
+        self.stats_btn.setToolTip(
+            "Frame statistics of this scan: shifts, distance, FWHM "
+            "linewidths, split and gap — mean (std).")
+        self.stats_btn.clicked.connect(self.on_show_statistics)
+        nav_layout.addWidget(self.stats_btn)
+
         nav_layout.addStretch()
         return nav_layout
 
@@ -354,6 +361,83 @@ class AxialScanViewer(QWidget):
     def on_right_clicked(self):
         if self.current_index < len(self.axial_scan.measurements) - 1:
             self.index_spinner.setValue(self.current_index + 1)
+
+    # ---------------- Scan statistics ----------------
+
+    def on_show_statistics(self):
+        """Frame statistics for the whole scan — mean (std) per quantity.
+
+        Shifts/distance in GHz, widths as sample FWHM (2x the deconvolved
+        HWHM, paper convention) in MHz, split and gap both as L − R.
+        """
+        def series(get):
+            vals = np.array(
+                [get(a.analyzed_shifts) if get(a.analyzed_shifts) is not None
+                 else np.nan for a in self.list_analyzed_spectras],
+                dtype=float)
+            return vals[np.isfinite(vals)]
+
+        lp = series(lambda s: s.freq_shift_left_peak_ghz)
+        rp = series(lambda s: s.freq_shift_right_peak_ghz)
+        dist = series(lambda s: s.freq_shift_peak_distance_ghz)
+        n_frames = len(self.list_analyzed_spectras)
+        if not len(lp) or not len(rp):
+            QMessageBox.warning(self, "Show Statistics",
+                                "No successful fits in this scan.")
+            return
+
+        # Split per frame (L - R), so its std is the frame scatter of the
+        # difference, not the quadrature of the two peaks' stds.
+        both = np.array(
+            [(s.freq_shift_left_peak_ghz, s.freq_shift_right_peak_ghz)
+             for s in (a.analyzed_shifts for a in self.list_analyzed_spectras)
+             if s.freq_shift_left_peak_ghz is not None
+             and s.freq_shift_right_peak_ghz is not None], dtype=float)
+        split = 1e3 * (both[:, 0] - both[:, 1])
+
+        lwL = series(lambda s: s.linewidth_left_peak_ghz)
+        lwR = series(lambda s: s.linewidth_right_peak_ghz)
+
+        def ghz(v):
+            return f"{v.mean():.4f} ({v.std():.4f}) GHz"
+
+        def mhz(v):
+            return f"{v.mean():+.2f} ({v.std():.2f}) MHz"
+
+        lines = [
+            f"Scan '{self.axial_scan.id}' — "
+            f"{len(lp)}/{n_frames} frames fitted",
+            "",
+            f"Left shift:    {ghz(lp)}",
+            f"Right shift:   {ghz(rp)}",
+            f"Distance:      {ghz(dist)}",
+        ]
+        if len(lwL) and len(lwR):
+            fwL, fwR = 2e3 * lwL, 2e3 * lwR
+            both_w = np.array(
+                [(s.linewidth_left_peak_ghz, s.linewidth_right_peak_ghz)
+                 for s in (a.analyzed_shifts
+                           for a in self.list_analyzed_spectras)
+                 if s.linewidth_left_peak_ghz is not None
+                 and s.linewidth_right_peak_ghz is not None], dtype=float)
+            gap = 2e3 * (both_w[:, 0] - both_w[:, 1])
+            lines += [
+                f"FWHM left:     {fwL.mean():.1f} ({fwL.std():.1f}) MHz",
+                f"FWHM right:    {fwR.mean():.1f} ({fwR.std():.1f}) MHz",
+                f"Left shift − right shift:  {mhz(split)}",
+                f"Left FWHM − right FWHM:    {mhz(gap)}",
+            ]
+        else:
+            lines += [
+                "FWHM left/right: n/a (no width model in this "
+                "calibration or non-PSF fit)",
+                f"Left shift − right shift:  {mhz(split)}",
+            ]
+
+        box = QMessageBox(self)
+        box.setWindowTitle(f"Scan Statistics — {self.axial_scan.id}")
+        box.setText("<pre>" + "\n".join(lines) + "</pre>")
+        box.exec_()
 
     # ---------------- SNR analysis ----------------
 
