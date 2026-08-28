@@ -34,7 +34,7 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 
 from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, \
-    config_requires_reflection_background
+    config_requires_reflection_background, config_requires_dho_axes
 from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackgroundMapper,
     get_current_background,
@@ -325,8 +325,10 @@ class HiBackend:
 
         try:
             reflection_bg = self._reflection_background_if_required(px)
+            dho_axes = self._dho_axes_if_required()
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode,
-                                            reflection_background=reflection_bg)
+                                            reflection_background=reflection_bg,
+                                            dho_axes=dho_axes)
         except Exception as e:
             log.info(f"Fitting error: {e}")
             return self.spectrum_fitter.get_empty_fitting(px, sline)
@@ -384,6 +386,24 @@ class HiBackend:
             self._reflection_mapper_key = key
             self._reflection_mapper_calc = self.calibration_calculator
         return self._reflection_mapper.render(px)
+
+    def _dho_axes_if_required(self):
+        """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
+
+        No degraded fallback (unlike the reflection template): without a
+        calibration the DHO cannot fit at all, so this raises — the live
+        loop catches it per frame and shows the unfitted sline until a
+        calibration is taken."""
+        if self.is_reference_mode:
+            return None
+        if not config_requires_dho_axes(self.spectrum_fitter.sample_config):
+            return None
+        if self.calibration_calculator is None:
+            raise ValueError(
+                "Model 'dho_x_psf' needs the current calibration's frequency "
+                "tracks and instrument widths, but no calibration is loaded."
+            )
+        return self.calibration_calculator.dho_axes()
 
     def _na_shift_ratio(self) -> float | None:
         """The post-hoc NA cone factor for the CURRENT sample config,

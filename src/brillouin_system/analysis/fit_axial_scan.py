@@ -24,8 +24,10 @@ from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackgroundMapper,
     get_current_background,
 )
+from brillouin_system.spectrum_fitting.dho import DhoAxes
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
+    config_requires_dho_axes,
     config_requires_reflection_background,
 )
 
@@ -78,6 +80,7 @@ def analyze_frame(frame: np.ndarray,
                   calibration_calculator: CalibrationCalculator,
                   system_state: SystemState,
                   reflection_mapper: ReflectionBackgroundMapper | None = None,
+                  dho_axes: DhoAxes | None = None,
                   ) -> AnalyzedSpectrum:
     """ONE frame in, ONE AnalyzedSpectrum out: fit, GHz, photons, bound.
 
@@ -93,7 +96,8 @@ def analyze_frame(frame: np.ndarray,
                      if reflection_mapper is not None else None)
     fitting = fitter.fit(px=px, sline=sline,
                          is_reference_mode=system_state.is_reference_mode,
-                         reflection_background=reflection_bg)
+                         reflection_background=reflection_bg,
+                         dho_axes=dho_axes)
 
     photons, theo = photons_and_bound(fitting, calibration_calculator,
                                       system_state)
@@ -137,6 +141,24 @@ def _reflection_mapper_if_required(fitter: SpectrumFitter,
                              "reflection_margin_ghz", None))
 
 
+def _dho_axes_if_required(fitter: SpectrumFitter,
+                          calibration_calculator: CalibrationCalculator,
+                          system_state: SystemState,
+                          ) -> DhoAxes | None:
+    """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
+
+    Unlike the reflection background there is NO degraded fallback: a DHO
+    without its frequency tracks and instrument widths is not fittable, so
+    a calibration that cannot supply them raises (loudly, before the scan
+    loop starts) instead of silently fitting a different model.
+    """
+    if system_state.is_reference_mode:
+        return None
+    if not config_requires_dho_axes(fitter.sample_config):
+        return None
+    return calibration_calculator.dho_axes()
+
+
 def fit_axial_scan(scan: AxialScan,
                    fitter: SpectrumFitter | None = None,
                    calibration_calculator: CalibrationCalculator | None = None,
@@ -155,6 +177,8 @@ def fit_axial_scan(scan: AxialScan,
     reflection_mapper = _reflection_mapper_if_required(
         fitter, calibration_calculator, scan.system_state,
         np.asarray(scan.measurements[0].frame_andor))
+    dho_axes = _dho_axes_if_required(
+        fitter, calibration_calculator, scan.system_state)
 
     return [
         analyze_frame(
@@ -163,6 +187,7 @@ def fit_axial_scan(scan: AxialScan,
             calibration_calculator=calibration_calculator,
             system_state=scan.system_state,
             reflection_mapper=reflection_mapper,
+            dho_axes=dho_axes,
         )
         for measurement in scan.measurements
     ]

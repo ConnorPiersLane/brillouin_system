@@ -8,9 +8,18 @@ from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, Th
 
 # The model name selects the LINESHAPE only. Windowing (use_window) and the
 # baseline (background) are independent toggles that apply to any lineshape.
+# 'dho_x_psf' (2026-08-28): eq.-S2 damped-harmonic-oscillator core (Bailey
+# et al., Sci. Adv. 2020) built in each peak's own calibration frequency
+# track and convolved with the instrument Lorentzian + camera kernel. The
+# fitted center is the acoustic RESONANCE (damping-corrected shift through
+# the standard chain) and the fitted width is the ACOUSTIC HWHM directly —
+# meant for wide-linewidth (viscous) samples where the DHO center offset
+# (~Gamma^2/nu_B-scaled) matters. Sample-only, n_peaks = 2 only, and fits
+# need dho_axes from the scan's calibration (see spectrum_fitting/dho.py).
 FITTING_MODELS_SAMPLE = [
     "lorentzian",
     "lorentzian_x_psf",
+    "dho_x_psf",
     "prm0",
     "prm1",
     "prmr",

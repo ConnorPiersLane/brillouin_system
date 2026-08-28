@@ -63,6 +63,7 @@ from brillouin_system.spectrum_fitting.reflection_background import (
 )
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter, config_requires_reflection_background,
+    config_requires_dho_axes,
 )
 
 log = get_logger(__name__)
@@ -503,6 +504,16 @@ class AxialScanViewer(QWidget):
                                  "reflection_margin_ghz", None))
         return mapper.render(px)
 
+    def _dho_axes_for_fit(self):
+        """The per-peak calibration axes for 'dho_x_psf' MC fits, or None —
+        same construction as fit_axial_scan (loud when the calibration
+        cannot supply them)."""
+        if self.axial_scan.system_state.is_reference_mode:
+            return None
+        if not config_requires_dho_axes(self.fitter.sample_config):
+            return None
+        return self.calc.dho_axes()
+
     def _scan_mean_frame(self) -> np.ndarray:
         """The MC truth (Fig-3 recipe): the scan-mean frame with the dark
         level taken out.
@@ -574,6 +585,7 @@ class AxialScanViewer(QWidget):
         n_failed = 0
         reflection_bg = None
         reflection_bg_built = False
+        dho_axes = self._dho_axes_for_fit()
         for i, noisy in enumerate(mc.frames()):
             try:
                 px, sline = self.fitter.get_px_sline_from_image(noisy)
@@ -582,7 +594,8 @@ class AxialScanViewer(QWidget):
                     reflection_bg_built = True
                 fit = self.fitter.fit(px=px, sline=sline,
                                       is_reference_mode=is_ref,
-                                      reflection_background=reflection_bg)
+                                      reflection_background=reflection_bg,
+                                      dho_axes=dho_axes)
             except Exception:
                 n_failed += 1
                 continue

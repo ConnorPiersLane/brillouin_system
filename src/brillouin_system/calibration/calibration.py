@@ -9,7 +9,12 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     resolve_fit_options,
 )
-from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter, is_psf_fit
+from brillouin_system.spectrum_fitting.dho import DhoAxes
+from brillouin_system.spectrum_fitting.spectrum_fitter import (
+    SpectrumFitter,
+    is_dho_fit,
+    is_psf_fit,
+)
 
 log = get_logger(__name__)
 
@@ -334,12 +339,47 @@ class CalibrationCalculator:
                 self.calibration_width_right_peak_ghz, px_right),
         )
 
+    def dho_axes(self) -> DhoAxes:
+        """The per-peak inputs a 'dho_x_psf' sample fit needs from THIS
+        calibration: the inner pair's px->GHz frequency tracks and the
+        instrument-width polynomials (Lorentzian HWHM [px], folded into the
+        DHO kernel at each peak's own position).
+
+        Raises when the calibration carries no width model (data saved
+        before it was stored, or a degenerate width fit) — a DHO without
+        the instrument width is not fittable, and its center correction
+        scales as Gamma^2, so guessing would land directly in the resonance.
+        """
+        p = self.p
+
+        def checked(coeffs, name):
+            if coeffs is None or not np.all(
+                    np.isfinite(np.asarray(coeffs, dtype=float))):
+                raise ValueError(
+                    f"This calibration cannot drive a 'dho_x_psf' fit: "
+                    f"'{name}' is missing or non-finite. The DHO needs the "
+                    f"inner pair's frequency tracks and instrument-width "
+                    f"polynomials from the scan's own calibration."
+                )
+            return np.asarray(coeffs, dtype=float)
+
+        return DhoAxes(
+            freq_left_poly=checked(p.freq_left_peak, "freq_left_peak"),
+            freq_right_poly=checked(p.freq_right_peak, "freq_right_peak"),
+            instrument_width_left_poly=checked(
+                p.calibration_width_left_peak, "calibration_width_left_peak"),
+            instrument_width_right_poly=checked(
+                p.calibration_width_right_peak, "calibration_width_right_peak"),
+        )
+
     def hwhm_ghz(self, fitting: FittedSpectrum) -> tuple[float | None, float | None]:
         """Raw fitted HWHM of a fit's two peaks in GHz — still instrument-broadened.
 
         This is the measured width of the peak as it lands on the detector. It
         is what the precision bound needs; for the sample's own linewidth see
-        sample_linewidth_ghz.
+        sample_linewidth_ghz. ONE exception: a DHO fit's width parameter is
+        the ACOUSTIC width (its kernel already contains the instrument
+        Lorentzian), so for those fits this is the material width already.
         """
         if not fitting.is_success:
             return None, None
@@ -363,8 +403,17 @@ class CalibrationCalculator:
         Returns (None, None) unless that holds: only pixel-response fits are
         the validated width recipe, and only a calibration carrying a width
         model can supply the instrument term.
+
+        A DHO fit ('dho_x_psf') needs NO subtraction: the instrument
+        Lorentzian was folded into its kernel at fit time, so the fitted
+        width IS the sample's acoustic HWHM — subtracting again would
+        double-count the instrument.
         """
-        if not fitting.is_success or not is_psf_fit(fitting.model):
+        if not fitting.is_success:
+            return None, None
+        if is_dho_fit(fitting.model):
+            return self.hwhm_ghz(fitting)
+        if not is_psf_fit(fitting.model):
             return None, None
 
         raw_l, raw_r = self.hwhm_ghz(fitting)
