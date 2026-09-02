@@ -359,15 +359,18 @@ class SlineFromFrameConfig:
     # shared psf_sigma_px). FINAL values user-adopted 2026-08-31: the
     # two-decimal means of the three-sweep refit (sigma 0.25/0.28, tau
     # 0.40/0.18) — validated on Figure 2: the Stokes folded sine drops
-    # ~0.9 -> ~0.4 MHz, anti-Stokes unchanged. The outer taus serve the
-    # opt-in n_peaks=4 fit only
-    # (tail is a POSITION property, falling toward the readout side;
-    # provisional — fine for positions/intensities, not width claims);
-    # the outer orders reuse their side's sigma.
+    # ~0.9 -> ~0.4 MHz, anti-Stokes unchanged. The outer constants serve
+    # the opt-in n_peaks=4 fit only and are PROVISIONAL — the outer taus
+    # from the position trend (tail falls toward the readout side, fine
+    # for positions/intensities, not width claims), the outer sigmas
+    # seeded with their side's inner value until the planned four-peak
+    # fine-sweep determination replaces all four (sigma, tau) pairs.
     psf_sigma_left_px: float = 0.25
     psf_sigma_right_px: float = 0.28
     psf_tau_left_px: float = 0.40
     psf_tau_right_px: float = 0.18
+    psf_sigma_outer_left_px: float = 0.25
+    psf_sigma_outer_right_px: float = 0.28
     psf_tau_outer_left_px: float = 0.50
     psf_tau_outer_right_px: float = 0.0
 

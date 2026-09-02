@@ -50,6 +50,7 @@ class FindPeaksConfigDialog(QDialog):
         # psf_measurement.PSF_MEASURED (shown in brackets).
         return ["psf_sigma_left_px", "psf_sigma_right_px",
                 "psf_tau_left_px", "psf_tau_right_px",
+                "psf_sigma_outer_left_px", "psf_sigma_outer_right_px",
                 "psf_tau_outer_left_px", "psf_tau_outer_right_px"]
 
     def na_field_names(self):

@@ -546,11 +546,13 @@ class SpectrumFitter:
                 # Per-peak kernels by left-to-right POSITION (blur and tail
                 # are position properties of the sensor/readout; the tail
                 # falls toward higher px — measured 2026-08-20 on the outer
-                # cal lines; the outer orders reuse their side's sigma):
+                # cal lines; every peak carries its own sigma and tau):
                 #   2 peaks: [left, right] (the main pair)
                 #   4 peaks: [outer_left, left, right, outer_right]
                 if n_peaks == 4:
-                    sigmas = [sigma_l, sigma_l, sigma_r, sigma_r]
+                    sigmas = [float(self.sline_config.psf_sigma_outer_left_px),
+                              sigma_l, sigma_r,
+                              float(self.sline_config.psf_sigma_outer_right_px)]
                     taus = [float(self.sline_config.psf_tau_outer_left_px),
                             tau_l, tau_r,
                             float(self.sline_config.psf_tau_outer_right_px)]
