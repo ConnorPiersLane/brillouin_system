@@ -13,13 +13,20 @@ tau    one-sided exponential readout smear: each charge transfer leaves a
 sigma and tau are FROZEN instrument constants supplied by the config, not
 free parameters: the fit keeps the same amplitude/centre/width per peak as
 the plain Lorentzian model, so initial guesses and bounds transfer directly.
-Measured 2026-07 on the fine EOM sweeps as sigma 0.25, tau_left 0.40,
-tau_right 0.20 px; that removed the +-7 MHz one-cycle-per-pixel residual
-sine on six calibrations spanning seven weeks.
+Both are PER PEAK in the config (position properties on the sensor:
+psf_sigma_left_px/psf_sigma_right_px, psf_tau_left_px/psf_tau_right_px) —
+here they are plain per-call arguments, so the per-peak values just flow
+through. FINAL values adopted 2026-08-31 (two-decimal means of the
+three-sweep refit): sigma 0.25 / 0.28, tau 0.40 / 0.18 px. The kernel
+removes the +-7 MHz one-cycle-per-pixel residual sine (measured 2026-07,
+stable across six calibrations spanning seven weeks); the per-peak
+sigma takes the remaining Stokes folded sine ~0.9 -> ~0.4 MHz on the
+Figure 2 sweep.
 
 The kernel depends only on (sigma, tau) and the grid step, so it is built
-once and cached; each evaluation is one Lorentzian on a fine grid plus one
-convolution.
+once and cached per (sigma, tau) pair — per-peak sigmas simply occupy
+separate cache slots; each evaluation is one Lorentzian on a fine grid plus
+one convolution.
 """
 from functools import lru_cache
 

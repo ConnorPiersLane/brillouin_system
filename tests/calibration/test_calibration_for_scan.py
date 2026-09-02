@@ -45,7 +45,8 @@ def make_fitter(model: str) -> SpectrumFitter:
     fitter.update_sline_config(SlineFromFrameConfig(
         pixel_offset_left=0, pixel_offset_right=0,
         selected_rows=list(range(N_ROWS)), row_selection="manual",
-        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
+        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
+        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
     ))
     return fitter
 

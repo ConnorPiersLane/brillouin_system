@@ -48,8 +48,9 @@ def make_fitter(sample_model: str, reference_model: str) -> SpectrumFitter:
     # camera kernel working values live in the [global] sline config; pin the
     # test values on the fitter directly
     fitter.update_sline_config(replace(
-        fitter.sline_config, n_peaks=2, psf_sigma_px=SIGMA, psf_tau_left_px=TAU_LEFT,
-        psf_tau_right_px=TAU_RIGHT))
+        fitter.sline_config, n_peaks=2,
+        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
+        psf_tau_left_px=TAU_LEFT, psf_tau_right_px=TAU_RIGHT))
     return fitter
 
 
@@ -186,6 +187,32 @@ def test_camera_constants_are_global():
     assert fitter.sline_config.psf_tau_left_px == TAU_LEFT
     assert not hasattr(fitter.sample_config, "psf_sigma_px")
     assert not hasattr(fitter.reference_config, "psf_sigma_px")
+
+
+def test_removed_shared_sigma_raises_with_rename_hint():
+    # No aliases (repo rule): the shared psf_sigma_px was SPLIT per peak
+    # 2026-08-31 — old code must fail loudly with the new names.
+    fitter = make_fitter("prm1", "prm1")
+    with pytest.raises(AttributeError, match="psf_sigma_left_px"):
+        fitter.sline_config.psf_sigma_px
+
+
+def test_legacy_shared_sigma_toml_maps_to_both_sides(tmp_path):
+    # Stored-data compatibility: a pre-2026-08-31 TOML carries ONE shared
+    # psf_sigma_px — it loads onto both per-peak fields.
+    from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
+        load_sline_from_frame_config)
+    toml = tmp_path / "find_peaks_config.toml"
+    toml.write_text(
+        "[global]\n"
+        "pixel_offset_left = 0\n"
+        "pixel_offset_right = 0\n"
+        "selected_rows = [1, 2]\n"
+        "psf_sigma_px = 0.31\n",
+        encoding="utf-8")
+    cfg = load_sline_from_frame_config(toml)
+    assert cfg.psf_sigma_left_px == 0.31
+    assert cfg.psf_sigma_right_px == 0.31
 
 
 def test_reference_mode_never_blocked():

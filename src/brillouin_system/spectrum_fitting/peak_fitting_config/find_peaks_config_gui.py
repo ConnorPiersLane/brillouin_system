@@ -43,11 +43,13 @@ class FindPeaksConfigDialog(QDialog):
 
     def pr_field_names(self):
         # 'lorentzian_x_psf' model: camera PSF working values — Gaussian
-        # charge diffusion and the one-sided readout tail per peak. Part of
-        # the [global] fitting config (one camera, one kernel, shared by
-        # sample and reference fits). Not fitted per frame; the MEASURED
-        # record is psf_measurement.PSF_MEASURED (shown in brackets).
-        return ["psf_sigma_px", "psf_tau_left_px", "psf_tau_right_px",
+        # charge diffusion and the one-sided readout tail, both per peak
+        # (position properties on the sensor). Part of the [global] fitting
+        # config (one camera, one kernel, shared by sample and reference
+        # fits). Not fitted per frame; the MEASURED record is
+        # psf_measurement.PSF_MEASURED (shown in brackets).
+        return ["psf_sigma_left_px", "psf_sigma_right_px",
+                "psf_tau_left_px", "psf_tau_right_px",
                 "psf_tau_outer_left_px", "psf_tau_outer_right_px"]
 
     def na_field_names(self):

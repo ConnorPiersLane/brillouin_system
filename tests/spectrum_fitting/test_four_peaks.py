@@ -49,7 +49,8 @@ def make_fitter(model="prm0", n_peaks=2) -> SpectrumFitter:
     # kernel working values AND n_peaks live in the [global] sline config
     fitter.update_sline_config(replace(
         fitter.sline_config, n_peaks=n_peaks,
-        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
+        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
+        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
         psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR))
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config("lorentzian_x_psf"))
@@ -139,7 +140,8 @@ def test_four_peak_wrong_outer_tau_biases_outer_centre():
     fitter = make_fitter()
     fitter.update_sline_config(replace(
         fitter.sline_config,
-        psf_sigma_px=SIGMA, psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
+        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
+        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
         psf_tau_outer_left_px=TAU_OR, psf_tau_outer_right_px=TAU_OL))
     px, sline = make_spectrum()
     result = fitter.fit(px, sline, is_reference_mode=False, n_peaks=4)

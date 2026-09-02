@@ -495,7 +495,8 @@ class SpectrumFitter:
             # dho_axes present. Per-peak inputs frozen from the FOUND peak
             # positions (the widths vary slowly with px; the center moves
             # << 1 px during the fit), so the kernel is built once per peak.
-            sigma = float(self.sline_config.psf_sigma_px)
+            sigmas = [float(self.sline_config.psf_sigma_left_px),
+                      float(self.sline_config.psf_sigma_right_px)]
             taus = [float(self.sline_config.psf_tau_left_px),
                     float(self.sline_config.psf_tau_right_px)]
             polys = [np.asarray(dho_axes.freq_left_poly, dtype=float),
@@ -511,7 +512,7 @@ class SpectrumFitter:
 
             def peak(x, a, c, w, i):
                 return dho_profile(x, a, c, w, polys[i], g_inst[i],
-                                   sigma, taus[i])
+                                   sigmas[i], taus[i])
 
             def func(x, *params):
                 return (peak(x, params[0], params[1], params[2], 0)
@@ -527,33 +528,38 @@ class SpectrumFitter:
 
         if model in ("lorentzian", "lorentzian_x_psf"):
             if model == "lorentzian_x_psf":
-                sigma = float(self.sline_config.psf_sigma_px)
+                sigma_l = float(self.sline_config.psf_sigma_left_px)
+                sigma_r = float(self.sline_config.psf_sigma_right_px)
                 tau_l = float(self.sline_config.psf_tau_left_px)
                 tau_r = float(self.sline_config.psf_tau_right_px)
-                if sigma <= 0.0 and tau_l <= 0.0 and tau_r <= 0.0:
+                if (sigma_l <= 0.0 and sigma_r <= 0.0
+                        and tau_l <= 0.0 and tau_r <= 0.0):
                     raise ValueError(
                         "Model 'lorentzian_x_psf' requires the frozen camera "
-                        "constants: set psf_sigma_px and/or psf_tau_left_px / "
-                        "psf_tau_right_px in the [global] section of the "
-                        "find-peaks config. Measured "
-                        "2026-07: 0.25 / 0.40 / 0.20 px (record in "
+                        "constants: set psf_sigma_left_px / psf_sigma_right_px "
+                        "and/or psf_tau_left_px / psf_tau_right_px in the "
+                        "[global] section of the find-peaks config. Measured: "
+                        "sigmas 0.25 / 0.28, taus 0.40 / 0.18 px (record in "
                         "peak_fitting_config/psf_measurement.py). With all "
-                        "three at 0 this model is just 'lorentzian'."
+                        "of them at 0 this model is just 'lorentzian'."
                     )
-                # Per-peak tails by left-to-right POSITION (the tail is a
-                # position property of the readout, falling toward higher
-                # px — measured 2026-08-20 on the outer cal lines):
-                #   2 peaks: [tau_left, tau_right] (the main pair)
-                #   4 peaks: [outer_left, tau_left, tau_right, outer_right]
+                # Per-peak kernels by left-to-right POSITION (blur and tail
+                # are position properties of the sensor/readout; the tail
+                # falls toward higher px — measured 2026-08-20 on the outer
+                # cal lines; the outer orders reuse their side's sigma):
+                #   2 peaks: [left, right] (the main pair)
+                #   4 peaks: [outer_left, left, right, outer_right]
                 if n_peaks == 4:
+                    sigmas = [sigma_l, sigma_l, sigma_r, sigma_r]
                     taus = [float(self.sline_config.psf_tau_outer_left_px),
                             tau_l, tau_r,
                             float(self.sline_config.psf_tau_outer_right_px)]
                 else:
+                    sigmas = [sigma_l, sigma_r]
                     taus = [tau_l, tau_r]
 
                 def peak(x, a, c, w, i):
-                    return psf_profile(x, a, c, w, sigma, taus[i])
+                    return psf_profile(x, a, c, w, sigmas[i], taus[i])
             else:
                 def peak(x, a, c, w, i):
                     return _lorentzian_pixel_integrated(x, a, c, w)

@@ -74,7 +74,8 @@ def make_fitter(sample_model="dho_x_psf",
     fitter.update_sample_config(make_config(sample_model))
     fitter.update_reference_config(make_config(reference_model))
     fitter.update_sline_config(replace(
-        fitter.sline_config, n_peaks=2, psf_sigma_px=SIGMA,
+        fitter.sline_config, n_peaks=2,
+        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
         psf_tau_left_px=TAU_LEFT, psf_tau_right_px=TAU_RIGHT))
     return fitter
 

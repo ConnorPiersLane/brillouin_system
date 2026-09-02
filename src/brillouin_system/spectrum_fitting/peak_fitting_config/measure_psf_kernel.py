@@ -1,4 +1,4 @@
-"""Measure the camera PSF kernel (sigma, tau_left, tau_right) [px].
+"""Measure the camera PSF kernel (per-peak sigma and tau) [px].
 
 Results go to psf_measurement.py (the measurement record, next to this
 file — the PSF is PEAKS domain, not the camera readout chain; user rule
@@ -57,9 +57,9 @@ def load_calibration(path: str):
         return pickle.load(f)
 
 
-def residual_rms_mhz(data, degree: int, sigma: float, tau_l: float,
-                     tau_r: float) -> float:
-    """rms of the left+right track residuals [MHz] at one kernel triple."""
+def residual_rms_mhz(data, degree: int, sigma_l: float, sigma_r: float,
+                     tau_l: float, tau_r: float) -> float:
+    """rms of the left+right track residuals [MHz] at one kernel quadruple."""
     from brillouin_system.calibration.calibration import calibrate
     from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
@@ -68,7 +68,8 @@ def residual_rms_mhz(data, degree: int, sigma: float, tau_l: float,
         replace(fitter.reference_config, fitting_model="lorentzian_x_psf"))
     # The kernel working values ride in the [global] sline config.
     fitter.update_sline_config(replace(
-        fitter.sline_config, psf_sigma_px=sigma,
+        fitter.sline_config,
+        psf_sigma_left_px=sigma_l, psf_sigma_right_px=sigma_r,
         psf_tau_left_px=tau_l, psf_tau_right_px=tau_r))
 
     p = calibrate(data=data, polyfit_degree=degree, fitter=fitter)
@@ -84,18 +85,30 @@ def residual_rms_mhz(data, degree: int, sigma: float, tau_l: float,
     return float(np.sqrt(np.mean(res ** 2)))
 
 
-def grid_search(data, degree: int, sigmas, taus_l, taus_r) -> tuple:
+def grid_search(data, degree: int, sigmas_l, sigmas_r, taus_l, taus_r,
+                tie_sigmas: bool = False) -> tuple:
+    """Best (rms, sigma_l, sigma_r, tau_l, tau_r) over the grid.
+
+    tie_sigmas walks ONE sigma grid with sigma_l = sigma_r (sigmas_r is then
+    ignored) — the coarse pass, keeping the grid the pre-split size; the
+    refinement frees the two sigmas around that shared optimum.
+    """
     best = None
-    for sigma, tl, tr in itertools.product(sigmas, taus_l, taus_r):
+    if tie_sigmas:
+        points = ((s, s, tl, tr) for s, tl, tr
+                  in itertools.product(sigmas_l, taus_l, taus_r))
+    else:
+        points = itertools.product(sigmas_l, sigmas_r, taus_l, taus_r)
+    for sl, sr, tl, tr in points:
         try:
-            rms = residual_rms_mhz(data, degree, sigma, tl, tr)
+            rms = residual_rms_mhz(data, degree, sl, sr, tl, tr)
         except Exception as e:
-            print(f"  ({sigma:.2f}, {tl:.2f}, {tr:.2f}) failed: {e}")
+            print(f"  ({sl:.2f}, {sr:.2f}, {tl:.2f}, {tr:.2f}) failed: {e}")
             continue
-        print(f"  sigma {sigma:.3f}  tau_l {tl:.3f}  tau_r {tr:.3f}  "
-              f"-> rms {rms:.2f} MHz")
+        print(f"  sigma_l {sl:.3f}  sigma_r {sr:.3f}  tau_l {tl:.3f}  "
+              f"tau_r {tr:.3f}  -> rms {rms:.2f} MHz")
         if best is None or rms < best[0]:
-            best = (rms, sigma, tl, tr)
+            best = (rms, sl, sr, tl, tr)
     return best
 
 
@@ -111,41 +124,48 @@ def main(argv=None):
     data = load_calibration(args.file)
 
     print("Baseline (no kernel, i.e. plain-Lorentzian-equivalent tiny kernel):")
-    base = residual_rms_mhz(data, args.degree, 0.01, 0.0, 0.0)
+    base = residual_rms_mhz(data, args.degree, 0.01, 0.01, 0.0, 0.0)
     print(f"  rms {base:.2f} MHz — the sine the kernel must remove\n")
 
-    print("Coarse grid:")
+    # Coarse pass with ONE shared sigma (the pre-split grid size); the
+    # refinement then frees the per-peak sigmas around that optimum.
+    print("Coarse grid (shared sigma):")
     best = grid_search(
         data, args.degree,
-        sigmas=np.arange(0.10, 0.46, 0.05),
+        sigmas_l=np.arange(0.10, 0.46, 0.05), sigmas_r=(),
         taus_l=np.arange(0.0, 0.61, 0.10),
-        taus_r=np.arange(0.0, 0.61, 0.10))
+        taus_r=np.arange(0.0, 0.61, 0.10),
+        tie_sigmas=True)
     if best is None:
         print("All grid points failed.")
         return 1
 
     if not args.coarse_only:
-        _, s0, tl0, tr0 = best
-        print("\nRefinement:")
+        _, sl0, sr0, tl0, tr0 = best
+        print("\nRefinement (per-peak sigmas):")
         best = grid_search(
             data, args.degree,
-            sigmas=np.arange(max(s0 - 0.05, 0.01), s0 + 0.051, 0.025),
+            sigmas_l=np.arange(max(sl0 - 0.05, 0.01), sl0 + 0.051, 0.025),
+            sigmas_r=np.arange(max(sr0 - 0.05, 0.01), sr0 + 0.051, 0.025),
             taus_l=np.arange(max(tl0 - 0.10, 0.0), tl0 + 0.101, 0.05),
             taus_r=np.arange(max(tr0 - 0.10, 0.0), tr0 + 0.101, 0.05))
 
-    rms, sigma, tl, tr = best
+    rms, sl, sr, tl, tr = best
     print(f"\n==== Best kernel ====")
-    print(f"sigma {sigma:.3f} px, tau_left {tl:.3f} px, tau_right {tr:.3f} px "
+    print(f"sigma_left {sl:.3f} px, sigma_right {sr:.3f} px, "
+          f"tau_left {tl:.3f} px, tau_right {tr:.3f} px "
           f"-> rms {rms:.2f} MHz (baseline {base:.2f})")
     print("\nA re-measurement updates BOTH:")
     print("psf_measurement.py PSF_MEASURED (the measurement record):")
-    print(f"psf_sigma_px = {sigma:.3g}")
+    print(f"psf_sigma_left_px = {sl:.3g}")
+    print(f"psf_sigma_right_px = {sr:.3g}")
     print(f"psf_tau_left_px = {tl:.3g}")
     print(f"psf_tau_right_px = {tr:.3g}")
     print('psf_measured = "<date>"')
     print("find_peaks_config.toml [global] (the working values the fitter "
           "uses):")
-    print(f"psf_sigma_px = {sigma:.3g}")
+    print(f"psf_sigma_left_px = {sl:.3g}")
+    print(f"psf_sigma_right_px = {sr:.3g}")
     print(f"psf_tau_left_px = {tl:.3g}")
     print(f"psf_tau_right_px = {tr:.3g}")
     return 0

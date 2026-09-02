@@ -354,13 +354,20 @@ class SlineFromFrameConfig:
     # frame. Defaults = the MEASURED kernel; the measurement record
     # (values + date + method) is psf_measurement.PSF_MEASURED in this
     # package, next to measure_psf_kernel.py — re-measure after any
-    # camera/ROI change, and update both. The outer taus serve the opt-in
-    # n_peaks=4 fit only
+    # camera/ROI change, and update both. The sigma is per peak like the
+    # taus (blur is a POSITION property on the sensor; split from the old
+    # shared psf_sigma_px). FINAL values user-adopted 2026-08-31: the
+    # two-decimal means of the three-sweep refit (sigma 0.25/0.28, tau
+    # 0.40/0.18) — validated on Figure 2: the Stokes folded sine drops
+    # ~0.9 -> ~0.4 MHz, anti-Stokes unchanged. The outer taus serve the
+    # opt-in n_peaks=4 fit only
     # (tail is a POSITION property, falling toward the readout side;
-    # provisional — fine for positions/intensities, not width claims).
-    psf_sigma_px: float = 0.25
+    # provisional — fine for positions/intensities, not width claims);
+    # the outer orders reuse their side's sigma.
+    psf_sigma_left_px: float = 0.25
+    psf_sigma_right_px: float = 0.28
     psf_tau_left_px: float = 0.40
-    psf_tau_right_px: float = 0.20
+    psf_tau_right_px: float = 0.18
     psf_tau_outer_left_px: float = 0.50
     psf_tau_outer_right_px: float = 0.0
 
@@ -372,6 +379,19 @@ class SlineFromFrameConfig:
             )
         if self.n_peaks not in (2, 4):
             raise ValueError(f"n_peaks must be 2 or 4, got {self.n_peaks!r}.")
+
+    def __getattr__(self, name):
+        # No aliases (repo rule): the shared sigma was SPLIT per peak
+        # 2026-08-31 — old code must be renamed, not silently served one of
+        # the two sides. (__getattr__ only fires for missing attributes, so
+        # the real fields are unaffected.)
+        if name == "psf_sigma_px":
+            raise AttributeError(
+                "SlineFromFrameConfig.psf_sigma_px was split per peak "
+                "(2026-08-31): use psf_sigma_left_px / psf_sigma_right_px."
+            )
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}")
 
 @dataclass
 class FittingConfigs:
@@ -405,6 +425,13 @@ def load_config_section(path: Path, section: str) -> FindPeaksConfig:
 def load_sline_from_frame_config(path: Path) -> SlineFromFrameConfig:
     with path.open("rb") as f:
         raw = tomli.load(f)["global"]
+    # Stored-data compatibility only (the field itself has no alias): a TOML
+    # from before 2026-08-31 carries ONE shared psf_sigma_px — it applies to
+    # both sides. Explicit per-peak keys win.
+    if "psf_sigma_px" in raw:
+        shared = raw.pop("psf_sigma_px")
+        raw.setdefault("psf_sigma_left_px", shared)
+        raw.setdefault("psf_sigma_right_px", shared)
     return SlineFromFrameConfig(**raw)
 
 def save_config_section(path: Path, section: str, config: ThreadSafeConfig):
