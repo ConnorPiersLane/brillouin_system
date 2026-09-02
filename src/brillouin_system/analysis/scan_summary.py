@@ -76,12 +76,20 @@ class AxialScanSummary:
     thompson_combined_mhz: float | None = None
 
     # Widths, mean over frames (GHz, HWHM as everywhere in the chain).
+    # The outer_* width rows are None unless the scan was fitted AND
+    # calibrated four-peak with an outer width model (2026-09-02).
     hwhm_left_ghz: float | None = None
     hwhm_right_ghz: float | None = None
     instrument_hwhm_left_ghz: float | None = None
     instrument_hwhm_right_ghz: float | None = None
     linewidth_left_ghz: float | None = None
     linewidth_right_ghz: float | None = None
+    hwhm_outer_left_ghz: float | None = None
+    hwhm_outer_right_ghz: float | None = None
+    instrument_hwhm_outer_left_ghz: float | None = None
+    instrument_hwhm_outer_right_ghz: float | None = None
+    linewidth_outer_left_ghz: float | None = None
+    linewidth_outer_right_ghz: float | None = None
 
     # Photons per frame, mean over frames.
     photons_left: float | None = None
@@ -162,6 +170,18 @@ def summarize_axial_scan(
              lambda a: a.analyzed_shifts.linewidth_left_peak_ghz),
             ("linewidth_right_ghz",
              lambda a: a.analyzed_shifts.linewidth_right_peak_ghz),
+            ("hwhm_outer_left_ghz",
+             lambda a: a.analyzed_shifts.hwhm_outer_left_peak_ghz),
+            ("hwhm_outer_right_ghz",
+             lambda a: a.analyzed_shifts.hwhm_outer_right_peak_ghz),
+            ("instrument_hwhm_outer_left_ghz",
+             lambda a: a.analyzed_shifts.instrument_hwhm_outer_left_peak_ghz),
+            ("instrument_hwhm_outer_right_ghz",
+             lambda a: a.analyzed_shifts.instrument_hwhm_outer_right_peak_ghz),
+            ("linewidth_outer_left_ghz",
+             lambda a: a.analyzed_shifts.linewidth_outer_left_peak_ghz),
+            ("linewidth_outer_right_ghz",
+             lambda a: a.analyzed_shifts.linewidth_outer_right_peak_ghz),
             ("photons_left", lambda a: a.photons.left_peak_photons),
             ("photons_right", lambda a: a.photons.right_peak_photons),
             ("photons_total", lambda a: a.photons.total_photons)):

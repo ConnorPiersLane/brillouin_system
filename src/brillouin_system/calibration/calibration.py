@@ -61,10 +61,17 @@ class CalibrationPolyfitParameters:
     # the standard since 2026-08-21). Every order gets its own track from
     # the same sideband frames and the same fitting pass as the inner pair.
     # None on two-peak calibrations and on data saved before the field
-    # existed. No outer WIDTH tracks: the outer taus are provisional
-    # (positions yes, width claims no — 2026-08-20).
+    # existed.
     freq_outer_left_peak: Optional[np.ndarray] = field(default=None)
     freq_outer_right_peak: Optional[np.ndarray] = field(default=None)
+    # Outer-order instrument-width tracks (2026-09-02): same meaning as the
+    # inner pair's — fitted sideband width vs pixel, from the same four-peak
+    # fitting pass. They make the outer orders full width observables
+    # (instrument HWHM + sample linewidth), with one caveat: the outer PSF
+    # taus are less validated than the inner pair's (marked provisional
+    # 2026-08-20), so outer widths inherit that systematic.
+    calibration_width_outer_left_peak: Optional[np.ndarray] = field(default=None)
+    calibration_width_outer_right_peak: Optional[np.ndarray] = field(default=None)
 
     # The measured sideband points behind the polynomials (one entry per
     # fitted calibration frame, sorted by px) — kept for calibration plots
@@ -123,6 +130,17 @@ class AnalyzedFreqShifts:
     freq_shift_outer_left_peak_ghz: float | None = None
     freq_shift_outer_right_peak_ghz: float | None = None
     freq_shift_combined_ghz: float | None = None
+    # Outer-order widths (2026-09-02): same three-layer story as the inner
+    # pair — raw fitted HWHM, the instrument HWHM at that peak's own pixel
+    # (from the outer width tracks), and the sample linewidth left after
+    # subtraction. None unless the fit is four-peak AND the calibration
+    # carries the outer tracks (+ outer width model for the last two).
+    hwhm_outer_left_peak_ghz: float | None = None
+    hwhm_outer_right_peak_ghz: float | None = None
+    instrument_hwhm_outer_left_peak_ghz: float | None = None
+    instrument_hwhm_outer_right_peak_ghz: float | None = None
+    linewidth_outer_left_peak_ghz: float | None = None
+    linewidth_outer_right_peak_ghz: float | None = None
 
 
 class CalibrationCalculator:
@@ -195,6 +213,83 @@ class CalibrationCalculator:
     def df_outer_right_peak(self, px, dpx):
         """Convert dpx to GHz using the outer-right order's local slope."""
         return self.dfreq_dpx_outer_right_peak(px) * dpx
+
+    def calibration_width_outer_left_peak_dpx(self, px):
+        """Ideal HWHM width of the outer-left sideband in pixels."""
+        return np.polyval(self.p.calibration_width_outer_left_peak, px)
+
+    def calibration_width_outer_right_peak_dpx(self, px):
+        """Ideal HWHM width of the outer-right sideband in pixels."""
+        return np.polyval(self.p.calibration_width_outer_right_peak, px)
+
+    def calibration_width_outer_left_peak_ghz(self, px):
+        """Width of the outer-left sideband in GHz at pixel px."""
+        dpx = self.calibration_width_outer_left_peak_dpx(px)
+        return self.df_outer_left_peak(px, dpx)
+
+    def calibration_width_outer_right_peak_ghz(self, px):
+        """Width of the outer-right sideband in GHz at pixel px."""
+        dpx = self.calibration_width_outer_right_peak_dpx(px)
+        return self.df_outer_right_peak(px, dpx)
+
+    def instrument_hwhm_outer_ghz(self, px_outer_left, px_outer_right
+                                  ) -> tuple[float | None, float | None]:
+        """Instrument HWHM in GHz at each OUTER peak's own pixel — the
+        outer-order counterpart of instrument_hwhm_ghz. (None, None) when
+        the calibration carries no outer width model (two-peak calibrations
+        and data saved before 2026-09-02)."""
+        def one(coeffs, width_ghz, px):
+            if (coeffs is None
+                    or not np.all(np.isfinite(np.asarray(coeffs, dtype=float)))
+                    or px is None):
+                return None
+            return float(abs(width_ghz(px)))
+
+        return (
+            one(self.p.calibration_width_outer_left_peak,
+                self.calibration_width_outer_left_peak_ghz, px_outer_left),
+            one(self.p.calibration_width_outer_right_peak,
+                self.calibration_width_outer_right_peak_ghz, px_outer_right),
+        )
+
+    def hwhm_outer_ghz(self, fitting: FittedSpectrum
+                       ) -> tuple[float | None, float | None]:
+        """Raw fitted HWHM of the OUTER orders in GHz — still
+        instrument-broadened, like hwhm_ghz for the inner pair. (None, None)
+        unless the fit is four-peak and the calibration carries the outer
+        frequency tracks (needed for the px -> GHz slope)."""
+        if (not fitting.is_success
+                or fitting.outer_left_peak_center_px is None
+                or not self.has_outer_tracks()):
+            return None, None
+
+        return (
+            float(abs(self.df_outer_left_peak(
+                fitting.outer_left_peak_center_px,
+                fitting.outer_left_peak_width_px))),
+            float(abs(self.df_outer_right_peak(
+                fitting.outer_right_peak_center_px,
+                fitting.outer_right_peak_width_px))),
+        )
+
+    def sample_linewidth_outer_ghz(self, fitting: FittedSpectrum
+                                   ) -> tuple[float | None, float | None]:
+        """Sample HWHM from the OUTER orders: fitted width minus the outer
+        instrument width, at each outer peak's own pixel — the outer-order
+        counterpart of sample_linewidth_ghz (same rules: pixel-response fits
+        only, linear Lorentzian subtraction). The DHO branch does not apply:
+        'dho_x_psf' is inner-pair only, so a DHO fit carries no outer peaks."""
+        raw_l, raw_r = self.hwhm_outer_ghz(fitting)
+        if raw_l is None or not is_psf_fit(fitting.model):
+            return None, None
+
+        inst_l, inst_r = self.instrument_hwhm_outer_ghz(
+            fitting.outer_left_peak_center_px,
+            fitting.outer_right_peak_center_px)
+        if inst_l is None or inst_r is None:
+            return None, None
+
+        return raw_l - inst_l, raw_r - inst_r
 
     def combined_shift(self, fitting: FittedSpectrum) -> FourPeakShift | None:
         """ONE frequency measurement from the position estimates of all four
@@ -440,6 +535,13 @@ class CalibrationCalculator:
             fitting.left_peak_center_px, fitting.right_peak_center_px)
         width_left, width_right = self.sample_linewidth_ghz(fitting)
         combined = self.combined_shift(fitting)
+        hwhm_ol, hwhm_or = self.hwhm_outer_ghz(fitting)
+        inst_ol, inst_or = (self.instrument_hwhm_outer_ghz(
+            fitting.outer_left_peak_center_px,
+            fitting.outer_right_peak_center_px)
+            if fitting.outer_left_peak_center_px is not None
+            else (None, None))
+        width_ol, width_or = self.sample_linewidth_outer_ghz(fitting)
 
         return AnalyzedFreqShifts(
             freq_shift_left_peak_ghz=self.freq_left_peak(fitting.left_peak_center_px),
@@ -457,6 +559,12 @@ class CalibrationCalculator:
                                              if combined is not None else None),
             freq_shift_combined_ghz=(combined.combined_ghz
                                      if combined is not None else None),
+            hwhm_outer_left_peak_ghz=hwhm_ol,
+            hwhm_outer_right_peak_ghz=hwhm_or,
+            instrument_hwhm_outer_left_peak_ghz=inst_ol,
+            instrument_hwhm_outer_right_peak_ghz=inst_or,
+            linewidth_outer_left_peak_ghz=width_ol,
+            linewidth_outer_right_peak_ghz=width_or,
         )
 
     def print_all_models(self):
@@ -627,8 +735,16 @@ def calibrate(data: CalibrationData, polyfit_degree,
             [fs.outer_left_peak_center_px for fs in all_fits], dtype=float)
         outer_right_px = np.asarray(
             [fs.outer_right_peak_center_px for fs in all_fits], dtype=float)
+        outer_left_width = np.asarray(
+            [fs.outer_left_peak_width_px for fs in all_fits], dtype=float)
+        outer_right_width = np.asarray(
+            [fs.outer_right_peak_width_px for fs in all_fits], dtype=float)
         params.freq_outer_left_peak = safe_polyfit(outer_left_px, freqs_all, degree)
         params.freq_outer_right_peak = safe_polyfit(outer_right_px, freqs_all, degree)
+        params.calibration_width_outer_left_peak = safe_polyfit(
+            outer_left_px, outer_left_width, degree)
+        params.calibration_width_outer_right_peak = safe_polyfit(
+            outer_right_px, outer_right_width, degree)
         (params.outer_left_px_points,
          params.outer_left_freq_points) = sort_xy(outer_left_px, freqs_all)
         (params.outer_right_px_points,

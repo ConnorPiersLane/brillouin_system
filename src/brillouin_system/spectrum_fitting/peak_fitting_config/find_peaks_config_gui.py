@@ -47,7 +47,8 @@ class FindPeaksConfigDialog(QDialog):
         # the [global] fitting config (one camera, one kernel, shared by
         # sample and reference fits). Not fitted per frame; the MEASURED
         # record is psf_measurement.PSF_MEASURED (shown in brackets).
-        return ["psf_sigma_px", "psf_tau_left_px", "psf_tau_right_px"]
+        return ["psf_sigma_px", "psf_tau_left_px", "psf_tau_right_px",
+                "psf_tau_outer_left_px", "psf_tau_outer_right_px"]
 
     def na_field_names(self):
         # NA collection model (post-hoc scalar correction only, never in the

@@ -284,6 +284,71 @@ def test_combined_shift_combines_the_orders():
     assert abs(shifts.freq_shift_outer_right_peak_ghz - 5.0) < 0.02
 
 
+def test_four_peak_calibration_builds_outer_width_tracks():
+    # the outer orders get their own instrument-width polynomials from the
+    # same fitting pass, so they carry the full width chain (2026-09-02)
+    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    calc = CalibrationCalculator(calibrate(
+        _calibration_data(freqs), polyfit_degree=1,
+        fitter=_reference_fitter()))
+    assert calc.p.calibration_width_outer_left_peak is not None
+    assert calc.p.calibration_width_outer_right_peak is not None
+    # the sidebands are GAMMA wide in px, so the instrument width at any
+    # outer pixel is GAMMA * |local dispersion| = 1.0 * (1/8) GHz
+    inst_l, inst_r = calc.instrument_hwhm_outer_ghz(30.0, 150.0)
+    assert abs(inst_l - 1.0 / 8.0) < 0.01
+    assert abs(inst_r - 1.0 / 8.0) < 0.01
+
+
+def test_outer_widths_and_linewidth_through_analyze():
+    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    fitter = _reference_fitter()
+    calc = CalibrationCalculator(calibrate(
+        _calibration_data(freqs), polyfit_degree=1, fitter=fitter))
+
+    # a "sample" whose peaks are exactly as wide as the calibration
+    # sidebands: raw HWHM = instrument HWHM, sample linewidth ~ 0
+    shift = 8.0 * (5.0 - freqs[0])
+    centers = (CENTERS[0] - shift, CENTERS[1] - shift,
+               CENTERS[2] + shift, CENTERS[3] + shift)
+    px, sline = make_spectrum(seed=7, centers=centers)
+    fs = fitter.fit(px, sline, is_reference_mode=False, n_peaks=4)
+    assert fs.is_success
+
+    shifts = calc.analyze(fs)
+    for raw, inst, lw in (
+            (shifts.hwhm_outer_left_peak_ghz,
+             shifts.instrument_hwhm_outer_left_peak_ghz,
+             shifts.linewidth_outer_left_peak_ghz),
+            (shifts.hwhm_outer_right_peak_ghz,
+             shifts.instrument_hwhm_outer_right_peak_ghz,
+             shifts.linewidth_outer_right_peak_ghz)):
+        assert abs(raw - 1.0 / 8.0) < 0.01     # GAMMA px * (1/8) GHz/px
+        assert abs(inst - 1.0 / 8.0) < 0.01
+        assert abs(lw) < 0.01                  # same width -> ~0 sample HWHM
+    # the inner-pair width observables are untouched
+    assert shifts.hwhm_left_peak_ghz is not None
+    assert shifts.linewidth_left_peak_ghz is not None
+
+
+def test_outer_widths_none_without_outer_width_model():
+    # a two-peak calibration has neither outer tracks nor outer widths:
+    # every outer width observable degrades to None, loudly nothing
+    freqs = [4.0, 5.0, 6.0]
+    calc = CalibrationCalculator(calibrate(
+        _calibration_data(freqs), polyfit_degree=1,
+        fitter=_reference_fitter(n_peaks=2)))
+    px, sline = make_spectrum(seed=8)
+    fs = make_fitter().fit(px, sline, is_reference_mode=False, n_peaks=4)
+    assert fs.is_success
+
+    shifts = calc.analyze(fs)
+    assert shifts.hwhm_outer_left_peak_ghz is None
+    assert shifts.instrument_hwhm_outer_left_peak_ghz is None
+    assert shifts.linewidth_outer_left_peak_ghz is None
+    assert shifts.linewidth_outer_right_peak_ghz is None
+
+
 def test_combined_shift_is_none_without_four_peaks():
     freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
     calc = CalibrationCalculator(calibrate(

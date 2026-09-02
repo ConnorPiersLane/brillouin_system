@@ -11,6 +11,9 @@ class BrillouinExport:
     """
     lp = left peak
     rp = right peak
+    olp = outer-left peak (outer VIPA order; four-peak fits only)
+    orp = outer-right peak
+    combined = inverse-variance combination of all four orders
     distance = distance btw. peaks
     theo = theoretical value
     bg = background
@@ -57,6 +60,17 @@ class BrillouinExport:
     rp_theo_std_pixelation_mhz: Optional[float] = None
     rp_theo_std_bg_mhz: Optional[float] = None
     rp_theo_std_total_mhz: Optional[float] = None
+    # Outer VIPA orders + the four-order combination (None on two-peak
+    # fits/calibrations and on data without the outer width model)
+    olp_ghz: Optional[float] = None
+    olp_hwhm_ghz: Optional[float] = None
+    olp_instrument_hwhm_ghz: Optional[float] = None
+    olp_linewidth_ghz: Optional[float] = None
+    orp_ghz: Optional[float] = None
+    orp_hwhm_ghz: Optional[float] = None
+    orp_instrument_hwhm_ghz: Optional[float] = None
+    orp_linewidth_ghz: Optional[float] = None
+    combined_ghz: Optional[float] = None
     distance_ghz: Optional[float] = None
     distance_theo_std_total_mhz: Optional[float] = None
     # distance_ghz_interp: Optional[float] = None
@@ -161,6 +175,17 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         rp_theo_std_bg_mhz=theo.right_peak_bg_mhz,
         rp_theo_std_total_mhz=theo.right_peak_total_mhz,
 
+
+        # Outer orders + four-order combination
+        olp_ghz=shifts.freq_shift_outer_left_peak_ghz,
+        orp_ghz=shifts.freq_shift_outer_right_peak_ghz,
+        olp_hwhm_ghz=shifts.hwhm_outer_left_peak_ghz,
+        orp_hwhm_ghz=shifts.hwhm_outer_right_peak_ghz,
+        olp_instrument_hwhm_ghz=shifts.instrument_hwhm_outer_left_peak_ghz,
+        orp_instrument_hwhm_ghz=shifts.instrument_hwhm_outer_right_peak_ghz,
+        olp_linewidth_ghz=shifts.linewidth_outer_left_peak_ghz,
+        orp_linewidth_ghz=shifts.linewidth_outer_right_peak_ghz,
+        combined_ghz=shifts.freq_shift_combined_ghz,
 
         # Distance between peaks
         distance_ghz=shifts.freq_shift_peak_distance_ghz,
