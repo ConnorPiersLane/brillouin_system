@@ -1,16 +1,21 @@
-"""Synthetic dummy camera with a rough two-peak spectrometer simulation.
+"""Synthetic dummy camera with a rough four-peak spectrometer simulation.
 
 Serves fully synthetic frames (no data files needed on any machine):
 
-- sample mode -> two water-like Brillouin peaks (shift ~5 GHz)
-- reference mode (reference shutter open) -> two EOM sideband peaks whose
+- sample mode -> water-like Brillouin lines (shift ~5 GHz)
+- reference mode (reference shutter open) -> EOM sideband peaks whose
   positions follow the dummy microwave's current frequency, so running a
   calibration sweep produces a plausible pixel->GHz mapping
 - camera shutter closed -> dark frame (bias + read noise)
 
-Both modes place peaks with the same rough dispersion model (FSR 21.7 GHz,
-~294 MHz/px at the window centre, mildly nonlinear across the window), so
-an analyzed sample shift comes out near the simulated 5.0 GHz.
+Every frame carries all FOUR VIPA orders (the inner main pair plus the
+adjacent-order outer pair at ~60% amplitude, like the real mask-free
+system), so the dummy works under n_peaks=4 — the four-peak standard —
+AND under n_peaks=2, where the fitter's amplitude ranking keeps the
+brighter inner pair. Both modes place peaks with the same rough dispersion
+model (FSR 21.7 GHz, ~294 MHz/px at the window centre, mildly nonlinear
+across the window), so an analyzed sample shift comes out near the
+simulated 5.0 GHz.
 """
 
 import time
@@ -37,6 +42,7 @@ _PX_PER_GHZ2 = 0.03        # dispersion varies across the window
 _PX_PER_GHZ3 = -0.0015     # small cubic term: calibration is only ROUGHLY polynomial
 _WATER_SHIFT_GHZ = 5.0
 _WATER_HWHM_GHZ = 0.129
+_OUTER_REL_AMP = 0.6       # outer VIPA orders ~60% of the main pair (real: 59.6%)
 _PSF_SIGMA_PX = 0.8        # instrument line blur applied to every spectrum
 _BIAS_COUNTS = 100.0
 _REF_EXPOSURE_S = 0.3      # exposure at which the nominal amplitudes apply
@@ -155,12 +161,17 @@ class DummyCamera(BaseCamera):
             frame = np.fliplr(frame)
         return frame
 
-    def _peak_pixels(self, nu_ghz: float, w: int) -> tuple[float, float]:
-        """Left/right peak positions for a shift (or EOM sideband) nu_ghz.
+    def _peak_pixels(self, nu_ghz: float, w: int
+                     ) -> tuple[float, float, float, float]:
+        """Pixel positions of all four VIPA orders for a line at nu_ghz,
+        ordered left to right: outer_left, left, right, outer_right.
 
-        Both peaks sit at optical offsets +-(FSR/2 - nu) from the window
-        centre, mapped to pixels with a mildly nonlinear dispersion — the
-        pair converges toward the centre as nu approaches FSR/2.
+        The inner main pair sits at optical offsets +-(FSR/2 - nu) from the
+        window centre and converges toward it as nu approaches FSR/2; the
+        outer orders are the same lines one FSR over, at +-(FSR/2 + nu),
+        moving apart with nu — opposite px-slope signs per side, like the
+        real tracks. All four share the same mildly nonlinear dispersion,
+        so a four-peak calibration builds a distinct track per order.
         """
         u = _FSR_GHZ / 2.0 - nu_ghz
         x0 = w / 2.0
@@ -168,17 +179,20 @@ class DummyCamera(BaseCamera):
         def x_of(uo: float) -> float:
             return x0 + _PX_PER_GHZ * uo + _PX_PER_GHZ2 * uo ** 2 + _PX_PER_GHZ3 * uo ** 3
 
-        return x_of(-u), x_of(+u)
+        return (x_of(-(_FSR_GHZ - u)), x_of(-u),
+                x_of(+u), x_of(+(_FSR_GHZ - u)))
 
     def _spectrum_frame(self, nu_ghz: float, amp: float, hwhm_px: float) -> np.ndarray:
         h, w = self.get_frame_shape()
         x = np.arange(w, dtype=np.float64)
-        x_left, x_right = self._peak_pixels(nu_ghz, w)
+        x_outer_left, x_left, x_right, x_outer_right = self._peak_pixels(nu_ghz, w)
 
         def lorentzian(cen):
             return amp * hwhm_px ** 2 / ((x - cen) ** 2 + hwhm_px ** 2)
 
-        line = lorentzian(x_left) + lorentzian(x_right)
+        line = (lorentzian(x_left) + lorentzian(x_right)
+                + _OUTER_REL_AMP * (lorentzian(x_outer_left)
+                                    + lorentzian(x_outer_right)))
         line = gaussian_filter1d(line, _PSF_SIGMA_PX)
         line *= self.exposure_time / _REF_EXPOSURE_S
 
