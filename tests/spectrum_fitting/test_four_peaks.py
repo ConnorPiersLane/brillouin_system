@@ -53,7 +53,9 @@ def make_fitter(model="prm0", n_peaks=2) -> SpectrumFitter:
         psf_sigma_outer_left_px=SIGMA, psf_sigma_outer_right_px=SIGMA,
         psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
         psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR,
-        psf_sat_ratio_outer_right=0.0, psf_sat_delta_outer_right_px=0.0))
+        psf_sat_ratio_outer_right=0.0, psf_sat_delta_outer_right_px=0.0,
+        psf_box_outer_left_px=0.0, psf_box_left_px=0.0,
+        psf_box_right_px=0.0, psf_box_outer_right_px=0.0))
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config("lorentzian_x_psf"))
     return fitter

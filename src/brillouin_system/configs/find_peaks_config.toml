@@ -23,10 +23,12 @@ psf_sigma_left_px = 0.26
 psf_sigma_right_px = 0.27
 psf_tau_left_px = 0.39
 psf_tau_right_px = 0.17
-psf_sigma_outer_left_px = 0.39
-psf_sigma_outer_right_px = 0.36
-psf_tau_outer_left_px = 0.95
-psf_tau_outer_right_px = 0.0
+psf_sigma_outer_left_px = 0.14
+psf_sigma_outer_right_px = 0.15
+psf_tau_outer_left_px = 0.13
+psf_tau_outer_right_px = 0.08
+psf_box_outer_left_px = 1.95
+psf_box_outer_right_px = 0.85
 psf_sat_ratio_outer_right = 0.037
 psf_sat_delta_outer_right_px = -1.23
 

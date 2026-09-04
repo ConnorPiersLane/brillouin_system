@@ -45,7 +45,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from brillouin_system.spectrum_fitting.psf import DX, _kernel
+from brillouin_system.spectrum_fitting.psf import DX, detection_kernel
 
 # Half-width [px] of the instrument-Lorentzian kernel. Lorentzian tails are
 # long; 12 px truncates ~2% of the area for the typical g_inst ~0.4 px, flat
@@ -92,7 +92,7 @@ def _dho_kernel(g_inst_millipx: int, sigma: float, tau: float):
     lor = 1.0 / (1.0 + (xk / g) ** 2)
     lor /= lor.sum()
 
-    cam_x0, cam = _kernel(float(sigma), float(tau), DX)  # unit area
+    cam_x0, cam = detection_kernel(float(sigma), float(tau), DX)  # unit area
     k = np.convolve(lor, cam)
     return -KERNEL_HALF_PX + cam_x0, k
 
