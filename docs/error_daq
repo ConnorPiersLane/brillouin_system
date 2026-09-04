@@ -1,6 +1,7 @@
 C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\Scripts\python.exe C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py
 [DualCamera] Initializing two Allied Vision cameras.
 [AVCamera] Connecting to Allied Vision Camera...
+[AVCamera] Starting Vimba (loading transport layers)...
 Traceback (most recent call last):
   File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 66, in _wait_for_any
     msg = self.evt_q.get(timeout=0.5)
