@@ -60,12 +60,28 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
 
         try:
             self.camera = self.stack.enter_context(self.vimba.get_camera_by_id(id))
-        except VimbaCameraError:
+        except VimbaCameraError as e:
+            available = [cam.get_id() for cam in cameras]
+            if id in available:
+                # Camera enumerates but cannot be opened: it is almost always
+                # held by another process (orphaned camera worker, Vimba
+                # Viewer, a second GUI instance) or in a stale transport
+                # state after a hard-killed client.
+                print(f"[AVCamera] Camera '{id}' is CONNECTED but could not be "
+                      f"opened ({e!r}).")
+                print("[AVCamera] Likely cause: another process is holding the "
+                      "camera (check Task Manager for leftover python.exe / "
+                      "Vimba Viewer), or replug the camera.")
+                raise RuntimeError(
+                    f"[AVCamera] Camera '{id}' is connected but busy or "
+                    f"unopenable: {e!r}") from e
             print(f"[AVCamera] Camera with ID '{id}' not found.")
             print("[AVCamera] Available cameras:")
-            for cam in cameras:
-                print(f"  - {cam.get_id()}")
-            raise RuntimeError("[AVCamera] Cannot continue without valid camera.")
+            for cam_id in available:
+                print(f"  - {cam_id}")
+            raise RuntimeError(
+                f"[AVCamera] Camera '{id}' not connected. "
+                f"Available: {available}") from e
 
         print(f"[AVCamera] ...Found camera: {self.camera.get_id()}")
         self.set_pixel_format(format_str=pixel_format)

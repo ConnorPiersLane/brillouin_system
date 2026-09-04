@@ -1,4 +1,4 @@
-from brillouinDAQ.devices.microwave_device import Microwave  # Replace with actual import path
+from brillouin_system.devices.microwave_device import Microwave  # Replace with actual import path
 
 def test_microwave_real():
     print("=== Microwave Device Real Hardware Test ===")

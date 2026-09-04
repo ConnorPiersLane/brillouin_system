@@ -129,9 +129,6 @@ def load_dict_from_hdf5(filepath: str) -> Any:
 
 def _read_hdf5_group(h5group: h5py.Group) -> Any:
     """Recursively read an HDF5 group back into native Python objects."""
-
-    #print(f"🔍 Entering group: {h5group.name}, keys={list(h5group.keys())}, attrs={dict(h5group.attrs)}")
-
     if h5group.attrs.get("__tuple__") and "items" in h5group:
         item_keys = sorted(h5group["items"].keys(), key=int)
         return {"__tuple__": True, "items": [_read_hdf5_group(h5group["items"][k]) for k in item_keys]}

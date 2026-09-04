@@ -1,7 +1,8 @@
 from dataclasses import dataclass, fields
 from typing import Optional
 
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, AnalyzedSpectrum
+from brillouin_system.analysis.analyzed_spectrum import AnalyzedSpectrum
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from dataclasses import asdict
 import pandas as pd
 
@@ -10,6 +11,9 @@ class BrillouinExport:
     """
     lp = left peak
     rp = right peak
+    olp = outer-left peak (outer VIPA order; four-peak fits only)
+    orp = outer-right peak
+    combined = inverse-variance combination of all four orders
     distance = distance btw. peaks
     theo = theoretical value
     bg = background
@@ -38,7 +42,9 @@ class BrillouinExport:
 
     lp_ghz: Optional[float] = None
     # lp_ghz_interp: Optional[float] = None
-    lp_hwhm_ghz: Optional[float] = None
+    lp_hwhm_ghz: Optional[float] = None  # raw fitted width, instrument-broadened
+    lp_instrument_hwhm_ghz: Optional[float] = None  # instrument width at this peak's pixel
+    lp_linewidth_ghz: Optional[float] = None  # sample HWHM = fitted - instrument
     lp_photons: Optional[float] = None
     lp_theo_std_photons_mhz: Optional[float] = None
     lp_theo_std_pixelation_mhz: Optional[float] = None
@@ -47,12 +53,26 @@ class BrillouinExport:
     rp_ghz: Optional[float] = None
     # rp_ghz_interp: Optional[float] = None
     rp_hwhm_ghz: Optional[float] = None
+    rp_instrument_hwhm_ghz: Optional[float] = None
+    rp_linewidth_ghz: Optional[float] = None
     rp_photons: Optional[float] = None
     rp_theo_std_photons_mhz: Optional[float] = None
     rp_theo_std_pixelation_mhz: Optional[float] = None
     rp_theo_std_bg_mhz: Optional[float] = None
     rp_theo_std_total_mhz: Optional[float] = None
+    # Outer VIPA orders + the four-order combination (None on two-peak
+    # fits/calibrations and on data without the outer width model)
+    olp_ghz: Optional[float] = None
+    olp_hwhm_ghz: Optional[float] = None
+    olp_instrument_hwhm_ghz: Optional[float] = None
+    olp_linewidth_ghz: Optional[float] = None
+    orp_ghz: Optional[float] = None
+    orp_hwhm_ghz: Optional[float] = None
+    orp_instrument_hwhm_ghz: Optional[float] = None
+    orp_linewidth_ghz: Optional[float] = None
+    combined_ghz: Optional[float] = None
     distance_ghz: Optional[float] = None
+    distance_theo_std_total_mhz: Optional[float] = None
     # distance_ghz_interp: Optional[float] = None
     distance_theo_std_mhz: Optional[float] = None
     ts_frame: Optional[float] = None
@@ -93,14 +113,10 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
     pb_um = None
     ts_pb = None
     reflection_signal_pb_v = None
-    pb_background_mean = None
-    pb_background_std = None
     if axial_scan.reflection_result_backwards is not None:
         ts_pb = axial_scan.reflection_result_backwards.event_time_perf
         pb_um = axial_scan.reflection_result_backwards.event_z_um
         reflection_signal_pb_v = axial_scan.reflection_result_backwards.peak_value
-        pb_background_mean = axial_scan.reflection_result_backwards.background_mean
-        pb_background_std = axial_scan.reflection_result_backwards.background_std
 
     measurement_um = axial_scan.measurements[idx].lens_zaber_position
 
@@ -136,9 +152,13 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         rp_ghz=shifts.freq_shift_right_peak_ghz,
         # rp_ghz_interp=shifts.freq_shift_right_peak_ghz_interp,
 
-        # Widths
+        # Widths: raw fitted, the instrument term, and what is left for the sample
         lp_hwhm_ghz=shifts.hwhm_left_peak_ghz,
         rp_hwhm_ghz=shifts.hwhm_right_peak_ghz,
+        lp_instrument_hwhm_ghz=shifts.instrument_hwhm_left_peak_ghz,
+        rp_instrument_hwhm_ghz=shifts.instrument_hwhm_right_peak_ghz,
+        lp_linewidth_ghz=shifts.linewidth_left_peak_ghz,
+        rp_linewidth_ghz=shifts.linewidth_right_peak_ghz,
 
         # Photon counts
         lp_photons=photons.left_peak_photons,
@@ -156,8 +176,20 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         rp_theo_std_total_mhz=theo.right_peak_total_mhz,
 
 
+        # Outer orders + four-order combination
+        olp_ghz=shifts.freq_shift_outer_left_peak_ghz,
+        orp_ghz=shifts.freq_shift_outer_right_peak_ghz,
+        olp_hwhm_ghz=shifts.hwhm_outer_left_peak_ghz,
+        orp_hwhm_ghz=shifts.hwhm_outer_right_peak_ghz,
+        olp_instrument_hwhm_ghz=shifts.instrument_hwhm_outer_left_peak_ghz,
+        orp_instrument_hwhm_ghz=shifts.instrument_hwhm_outer_right_peak_ghz,
+        olp_linewidth_ghz=shifts.linewidth_outer_left_peak_ghz,
+        orp_linewidth_ghz=shifts.linewidth_outer_right_peak_ghz,
+        combined_ghz=shifts.freq_shift_combined_ghz,
+
         # Distance between peaks
         distance_ghz=shifts.freq_shift_peak_distance_ghz,
+        distance_theo_std_total_mhz=theo.distance_total_mhz,
         # distance_ghz_interp=shifts.freq_shift_peak_distance_ghz_interp,
         ts_frame = axial_scan.measurements[idx].time_stamp,
         ts_pf = ts_pf,

@@ -1,0 +1,10 @@
+[calibration]
+n_per_freq = 1
+degree = 2
+start = 4.0
+stop = 8.0
+step = 0.1
+reference = "distance"
+# NOTE: the save_calibration_frames toggle was REMOVED 2026-08-24 — raw
+# calibration frames ALWAYS travel with each scan (re-analysis + the
+# reflection-background frequency anchor both depend on them).

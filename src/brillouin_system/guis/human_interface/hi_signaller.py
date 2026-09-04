@@ -8,13 +8,11 @@ from brillouin_system.calibration.config.calibration_config import CalibrationCo
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config import AndorConfig
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
-from brillouin_system.my_dataclasses.my_exceptions import OperationCancelled
+from brillouin_system.guis.human_interface import scan_procedures
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.logging_utils.logging_setup import get_logger
-from brillouin_system.my_dataclasses.background_image import BackgroundImage
 from brillouin_system.my_dataclasses.display_results import DisplayResults
-
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan
+from brillouin_system.my_dataclasses.request_axial_step_scan import RequestAxialStepScan
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FittingConfigs
 
 log = get_logger(__name__)
@@ -35,8 +33,6 @@ class HiSignaller(QObject):
     stop_live_signal = pyqtSignal()
 
     # Bool Signals outwards
-    background_available_state = pyqtSignal(bool)
-    background_subtraction_state = pyqtSignal(bool)
     illumination_mode_state  = pyqtSignal(bool)
     reference_mode_state = pyqtSignal(bool)
     do_live_fitting_state = pyqtSignal(bool)
@@ -45,7 +41,6 @@ class HiSignaller(QObject):
     camera_settings_ready = pyqtSignal(dict)
     zaber_lens_position_updated = pyqtSignal(float)
     microwave_frequency_updated = pyqtSignal(float)
-    background_data_ready = pyqtSignal(object)  # emits a BackgroundData instance
     # frame_and_fit_ready = pyqtSignal(object)
     measurement_result_ready = pyqtSignal(object)
     camera_shutter_state_changed = pyqtSignal(bool)
@@ -53,6 +48,9 @@ class HiSignaller(QObject):
     calibration_result_ready = pyqtSignal(object)
     send_update_stored_axial_scans = pyqtSignal(list)
     axial_scan_data_ready = pyqtSignal(object)
+    # Outcome of a Load/Take Ref. Bkg. request: a short status label, or
+    # an "ERROR: ..." string the frontend shows in a message box.
+    ref_bkg_state = pyqtSignal(str)
     send_axial_scans_to_save = pyqtSignal(list)
     send_message_to_frontend = pyqtSignal(str, str)
     new_andor_display_ready = pyqtSignal()
@@ -109,9 +107,7 @@ class HiSignaller(QObject):
 
     def update_gui(self):
         self.emit_is_illumination_continuous()
-        self.emit_is_background_available()
         self.emit_camera_settings()
-        self.emit_do_background_subtraction()
         self.emit_do_live_fitting_state()
         self.update_stage_positions() #xyz stage
         self.update_zaber_lens_position(self.backend.zaber_eye_lens.get_position()) # lens
@@ -135,43 +131,8 @@ class HiSignaller(QObject):
         return item
 
     @pyqtSlot()
-    def emit_do_background_subtraction(self):
-        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
-
-    @pyqtSlot()
-    def emit_is_background_available(self):
-        self.background_available_state.emit(self.backend.is_background_image_available())
-
-    @pyqtSlot()
     def emit_is_illumination_continuous(self):
         self.illumination_mode_state.emit(self.backend.is_shutter_open)
-
-
-    # Toggle
-    @pyqtSlot()
-    def toggle_background_subtraction(self):
-        if self.backend.do_background_subtraction:
-            self.backend.stop_background_subtraction()
-            log.info("Background subtraction disabled")
-        elif self.backend.is_background_image_available():
-            self.backend.start_background_subtraction()
-            log.info("Background subtraction enabled")
-        else:
-            log.info("Cannot enable background subtraction: no background image available")
-            return
-
-        # Emit updated state to viewer
-        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
-        self.background_available_state.emit(self.backend.is_background_image_available())
-
-
-    @pyqtSlot()
-    def emit_background_data(self):
-        data = BackgroundImage(
-            dark_image=self.backend.dark_image,
-            bg_image=self.backend.bg_image,
-        )
-        self.background_data_ready.emit(data)
 
     @pyqtSlot()
     def toggle_do_live_fitting(self):
@@ -204,9 +165,6 @@ class HiSignaller(QObject):
             self.backend.change_to_reference_mode()
         self.emit_camera_settings()
         self.reference_mode_state.emit(self.backend.is_reference_mode)
-        # Emit updated state to viewer
-        self.background_subtraction_state.emit(self.backend.do_background_subtraction)
-        self.background_available_state.emit(self.backend.is_background_image_available())
 
     @pyqtSlot()
     def emit_camera_settings(self):
@@ -228,25 +186,17 @@ class HiSignaller(QObject):
         except Exception as e:
             log.info(f"Failed to apply camera settings: {e}")
 
-        # Remove Background if sample mode
-        if not self.backend.is_reference_mode:
-            self.remove_background()
-
-    def remove_background(self):
-        self.backend.stop_background_subtraction()
-        self.backend.bg_image = None
-        self.background_subtraction_state.emit(False)
-        self.background_available_state.emit(False)
-        log.info("Background subtraction stopped (if had been running) and BGs removed")
-
     @pyqtSlot(object)
     def update_andor_config_settings(self, andor_config: AndorConfig):
         self.backend.update_andor_config_settings(andor_config)
-        self.remove_background()
 
     @pyqtSlot(object)
     def update_scanning_config(self, scanning_config: ScanningConfig):
         self.backend.update_scanning_config_file(scanning_config)
+
+    @pyqtSlot(object)
+    def update_sweep_scan_config(self, sweep_config):
+        self.backend.update_sweep_scan_config(sweep_config)
 
     @pyqtSlot(FittingConfigs)
     def update_fitting_configs(self, fitting_configs: FittingConfigs):
@@ -326,24 +276,6 @@ class HiSignaller(QObject):
             self.microwave_frequency_updated.emit(freq)
         except Exception as e:
             log.warning(f"Failed to read microwave frequency: {e}")
-
-    @pyqtSlot()
-    def acquire_background_image(self):
-
-        # Stop live view
-        self._running = False
-
-        try:
-            self.backend.take_bg_and_darknoise_images()
-            self.background_available_state.emit(self.backend.is_background_image_available())
-            log.info("Background image acquired.")
-        except OperationCancelled:
-            log.info("Background acquisition cancelled by user.")
-        except Exception as e:
-            log.warning(f"Failed to acquire background image: {e}")
-
-        if self.backend.is_shutter_open:
-            self.restart_live_view_when_ready()
 
     @pyqtSlot()
     def snap_and_fit(self):
@@ -449,7 +381,7 @@ class HiSignaller(QObject):
         old_state = self.system_state
         self.update_system_state(new_state=SystemState.BUSY)
         try:
-            is_sucess = self.backend.perform_calibration()
+            is_sucess = scan_procedures.perform_calibration(self.backend)
             if is_sucess:
                 self.calibration_finished.emit()
         finally:
@@ -471,7 +403,29 @@ class HiSignaller(QObject):
         QCoreApplication.processEvents()
 
         try:
-            self.backend.take_axial_step_scan(request_axial_scan)
+            scan_procedures.take_axial_step_scan(self.backend, request_axial_scan)
+            self.update_stored_axial_scans()
+        finally:
+            self.update_system_state(new_state=old_state)
+            self.restart_live_view_when_ready()
+
+    @pyqtSlot(object)
+    def take_sweep_scan(self, request):
+        """
+        Run the in-out sweep scan (repeated find-measure-find cycles) and
+        register the result in the stored axial scans.
+        """
+        if self.backend.calibration_poly_fit_params is None:
+            self.send_message_to_user('Warning', "No Calibration available. Run Calibration first.")
+            return
+
+        old_state = self.system_state
+        self.stop_live_view()
+        self.update_system_state(new_state=SystemState.BUSY)
+        QCoreApplication.processEvents()
+
+        try:
+            scan_procedures.take_sweep_scan(self.backend, request)
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)
@@ -479,11 +433,11 @@ class HiSignaller(QObject):
 
     @pyqtSlot()
     def calibrate_laser_camera_position_delegate(self):
-        log.info(f"I disabled this function in normal use (for safety).\n"
-                 f"Go to hi_signaller.py -> def calibrate_laser_camera_position_delegate() and activate it "
-                 f"when required")
-        #laser_offset: LaserOffset = self.backend.run_laser_xy_calibration()
-        #self.laser_coord_calibration_ready.emit(laser_offset)
+        # log.info(f"I disabled this function in normal use (for safety).\n"
+        #          f"Go to hi_signaller.py -> def calibrate_laser_camera_position_delegate() and activate it "
+        #          f"when required")
+        laser_offset: LaserOffset = self.backend.run_laser_xy_calibration()
+        self.laser_coord_calibration_ready.emit(laser_offset)
 
 
     @pyqtSlot(int)
@@ -493,6 +447,20 @@ class HiSignaller(QObject):
             self.axial_scan_data_ready.emit(scan_data)
         else:
             log.warning(f"Requested scan index {index} not found.")
+
+    @pyqtSlot(str)
+    def handle_load_ref_bkg_from_file(self, path: str):
+        """Load/build a reflection background from a file — runs in the
+        backend thread so the calibration re-fit never blocks the GUI."""
+        self.ref_bkg_state.emit(
+            self.backend.load_reflection_background_from_file(path))
+
+    @pyqtSlot(int)
+    def handle_load_ref_bkg_from_scan(self, index: int):
+        """Adopt a stored scan (a just-taken 'Take Ref. Bkg.' capture) as
+        the live reflection background."""
+        self.ref_bkg_state.emit(
+            self.backend.load_reflection_background_from_scan(index))
 
     @pyqtSlot()
     def delegate_find_reflection_plane(self):

@@ -1,57 +1,134 @@
-import sys
+"""Entry window of the data analyzer.
+
+Loads axial-scan files AND standalone calibration files into one list, and
+shows either the sample data or the calibration of whatever is selected:
+
+* "Sample data" on a scan      -> AxialScanViewer
+* "Sample data" on a cal file  -> warning (a calibration holds no samples)
+* "Calibration" on a cal file  -> CalibrationViewer (re-fitted from its raw
+                                  frames with the current configs)
+* "Calibration" on a scan      -> CalibrationViewer of the SCAN's own
+                                  calibration (re-fitted from the frames it
+                                  carries when possible, else the stored
+                                  polynomial)
+
+All log output — logger and print() alike — is mirrored into the panel on
+the right side of the window.
+"""
+from __future__ import annotations
+
 import pickle
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox
-)
+import sys
+import traceback
+from dataclasses import dataclass
+from pathlib import Path
+
 from PyQt5.QtCore import Qt
-
-from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
-# Reuse your existing modules
-
-from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
-
-from brillouin_system.my_dataclasses.human_interface_measurements import AxialScan, fit_axial_scan
-from brillouin_system.guis.data_analyzer.excel_export_axial_scan import (
-    BrillouinExport,
-    get_excel_row_data,
-    export_to_excel,
+from PyQt5.QtWidgets import (
+    QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+    QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QSplitter,
+    QVBoxLayout, QWidget,
 )
+
+from brillouin_system.calibration.calibration import (
+    CalibrationCalculator, CalibrationData, calibrate,
+)
+from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+from brillouin_system.calibration.config.calibration_config import calibration_config
+from brillouin_system.calibration.config.calibration_config_gui import CalibrationConfigDialog
+from brillouin_system.guis.data_analyzer.excel_export_axial_scan import (
+    BrillouinExport, export_to_excel, get_excel_row_data,
+)
+from brillouin_system.guis.data_analyzer.log_panel import LogPanel, install_analyzer_logging
+from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
+from brillouin_system.guis.data_analyzer.show_calibration import CalibrationViewer
+from brillouin_system.logging_utils.logging_setup import get_logger
+from brillouin_system.calibration.calibration import calibration_calculator_for_scan
+from brillouin_system.analysis.fit_axial_scan import fit_axial_scan
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
-from brillouin_system.saving_and_loading.safe_and_load_hdf5 import load_dict_from_hdf5, dict_to_dataclass_tree
-from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import FindPeaksConfigDialog
+from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+    dict_to_dataclass_tree, load_dict_from_hdf5,
+)
+from brillouin_system.spectrum_fitting.build_reflection_background import (
+    background_from_scan,
+)
+from brillouin_system.spectrum_fitting.reflection_background import (
+    ReflectionBackground, get_current_background, set_current_background,
+)
+from brillouin_system.guis.data_analyzer.show_reflection_background import (
+    ReflectionBackgroundViewer,
+)
+from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui import (
+    FindPeaksConfigDialog,
+)
+
+log = get_logger(__name__)
+
+
+@dataclass
+class LoadedEntry:
+    kind: str            # "scan" | "calibration"
+    obj: object          # AxialScan | CalibrationData
+    source_path: str
+
+    @property
+    def label(self) -> str:
+        if self.kind == "scan":
+            scan: AxialScan = self.obj
+            return (f"[scan] {getattr(scan, 'i', '?')} - "
+                    f"{getattr(scan, 'id', 'no-id')}")
+        name = self.source_path.replace("\\", "/").split("/")[-1]
+        return f"[cal]  {name}"
 
 
 class AxialScanManager(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Axial Scan Manager")
-        self.setMinimumSize(800, 500)
+        self.setMinimumSize(1000, 550)
 
-        self.scans: dict[int, AxialScan] = {}   # internal tracker → scan
+        self.entries: dict[int, LoadedEntry] = {}
         self.next_index: int = 0
+        self.open_viewers: dict = {}
 
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout()
-        self.setLayout(layout)
+        outer = QHBoxLayout(self)
+        splitter = QSplitter(Qt.Horizontal)
+        outer.addWidget(splitter)
 
-        # --- List of loaded scans ---
+        # --- left: list + controls ---
+        left = QWidget()
+        layout = QVBoxLayout(left)
+
+        layout.addWidget(QLabel("Loaded files (axial scans and calibrations):"))
         self.scan_list = QListWidget()
-        self.scan_list.setSelectionMode(QListWidget.MultiSelection)
-        layout.addWidget(QLabel("Loaded Axial Scans:"))
+        self.scan_list.setSelectionMode(QListWidget.ExtendedSelection)
+        self.scan_list.itemDoubleClicked.connect(lambda _: self.show_selected())
         layout.addWidget(self.scan_list)
 
-        # --- Buttons row ---
+        # --- view mode ---
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Show:"))
+        self.sample_radio = QRadioButton("Sample data")
+        self.sample_radio.setChecked(True)
+        self.cal_radio = QRadioButton("Calibration")
+        mode_row.addWidget(self.sample_radio)
+        mode_row.addWidget(self.cal_radio)
+        mode_row.addStretch()
+        layout.addLayout(mode_row)
+
+        # --- buttons ---
         btn_row = QHBoxLayout()
 
-        self.load_btn = QPushButton("Load Axial Scan(s)")
-        self.load_btn.clicked.connect(self.load_scans)
+        self.load_btn = QPushButton("Load File(s)")
+        self.load_btn.clicked.connect(self.load_files)
         btn_row.addWidget(self.load_btn)
 
-        self.show_btn = QPushButton("Show Axial Scan")
-        self.show_btn.clicked.connect(self.show_scan)
+        self.show_btn = QPushButton("Show Selected")
+        self.show_btn.clicked.connect(self.show_selected)
         btn_row.addWidget(self.show_btn)
 
         self.save_all_btn = QPushButton("Save All to Excel")
@@ -64,7 +141,6 @@ class AxialScanManager(QWidget):
 
         layout.addLayout(btn_row)
 
-        # --- Config Buttons Row ---
         config_row = QHBoxLayout()
 
         self.config_btn = QPushButton("Open Calibration Config")
@@ -77,175 +153,387 @@ class AxialScanManager(QWidget):
 
         layout.addLayout(config_row)
 
-    # --- Logic ---
+        # --- reflection background (the template prmr fits use) ---
+        bg_row = QHBoxLayout()
 
-    def load_scans(self):
+        self.load_bg_btn = QPushButton("Load Background")
+        self.load_bg_btn.clicked.connect(self.load_background)
+        bg_row.addWidget(self.load_bg_btn)
+
+        self.show_bg_btn = QPushButton("Show Background")
+        self.show_bg_btn.clicked.connect(self.show_background)
+        bg_row.addWidget(self.show_bg_btn)
+
+        self.bg_label = QLabel("Background: none loaded")
+        self.bg_label.setToolTip(
+            "The reflection background used by 'reflection'-background "
+            "(prmr) sample fits. Load one from a reflection-plane scan of "
+            "the session's own alignment (e.g. a 'reflection_background' "
+            "scan taken with the GUI's Take Background button). With none "
+            "loaded, prmr fits warn and use per-peak offsets only — there "
+            "is deliberately no default template.")
+        bg_row.addWidget(self.bg_label, stretch=1)
+
+        layout.addLayout(bg_row)
+
+        splitter.addWidget(left)
+
+        # --- right: log panel ---
+        splitter.addWidget(LogPanel())
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([650, 350])
+
+    # --- Loading ---
+
+    @staticmethod
+    def _load_file(path: str):
+        if path.endswith((".hdf5", ".h5")):
+            data_dict = load_dict_from_hdf5(path)
+            return dict_to_dataclass_tree(data_dict, known_classes)
+        with open(path, "rb") as f:
+            return pickle.load(f)
+
+    def _add_entry(self, kind: str, obj, path: str):
+        entry = LoadedEntry(kind=kind, obj=obj, source_path=path)
+        idx = self.next_index
+        self.entries[idx] = entry
+        self.next_index += 1
+
+        item = QListWidgetItem(f"{idx} - {entry.label}")
+        item.setData(Qt.UserRole, idx)
+        item.setToolTip(path)
+        self.scan_list.addItem(item)
+        log.info(f"Loaded {entry.label} from {path}")
+
+    def load_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Load Axial Scans",
-            filter="Axial Scan Files (*.pkl *.hdf5 *.h5);;All Files (*)"
-        )
+            self, "Load Axial Scans / Calibrations",
+            filter="Data Files (*.pkl *.hdf5 *.h5);;All Files (*)")
         if not paths:
             return
 
         for path in paths:
             try:
-                # ✅ Support HDF5 and Pickle
-                if path.endswith((".hdf5", ".h5")):
-                    data_dict = load_dict_from_hdf5(path)
-                    loaded = dict_to_dataclass_tree(data_dict, known_classes)
-                else:
-                    with open(path, "rb") as f:
-                        loaded = pickle.load(f)
+                loaded = self._load_file(path)
+                objs = loaded if isinstance(loaded, list) else [loaded]
 
-                scans = loaded if isinstance(loaded, list) else [loaded]
-
-                for scan in scans:
-                    if not isinstance(scan, AxialScan):
-                        QMessageBox.warning(self, "Invalid File", f"{path} contained a non-AxialScan object.")
-                        continue
-
-                    idx = self.next_index
-                    self.scans[idx] = scan
-                    self.next_index += 1
-
-                    label = f"{idx} - {getattr(scan, 'i', '?')} - {getattr(scan, 'id', 'no-id')}"
-                    item = QListWidgetItem(label)
-                    item.setData(Qt.UserRole, idx)
-                    self.scan_list.addItem(item)
-
+                for obj in objs:
+                    if isinstance(obj, AxialScan):
+                        self._add_entry("scan", obj, path)
+                    elif isinstance(obj, CalibrationData):
+                        self._add_entry("calibration", obj, path)
+                    else:
+                        QMessageBox.warning(
+                            self, "Invalid File",
+                            f"{path} contained a {type(obj).__name__} — "
+                            f"expected AxialScan or CalibrationData.")
             except Exception as e:
-                QMessageBox.warning(self, "Load Error", f"Failed to load {path}:\n{e}")
+                traceback.print_exc()
+                QMessageBox.warning(self, "Load Error",
+                                    f"Failed to load {path}:\n{e}")
 
+    # --- Showing ---
 
-    def show_scan(self):
+    def _selected_single_entry(self) -> tuple[int, LoadedEntry] | None:
         items = self.scan_list.selectedItems()
         if not items:
-            QMessageBox.information(self, "No Selection", "Select one or more scans first.")
-            return
+            QMessageBox.information(self, "No Selection",
+                                    "Select an entry first.")
+            return None
         if len(items) > 1:
-            QMessageBox.warning(self, "Multiple Selection", "Please select only one scan at a time.")
+            QMessageBox.warning(self, "Multiple Selection",
+                                "Please select only one entry to show.")
+            return None
+        idx = items[0].data(Qt.UserRole)
+        entry = self.entries.get(idx)
+        if entry is None:
+            return None
+        return idx, entry
+
+    def show_selected(self):
+        selected = self._selected_single_entry()
+        if selected is None:
             return
+        idx, entry = selected
+        show_calibration = self.cal_radio.isChecked()
 
-        if not hasattr(self, "open_viewers"):
-            self.open_viewers = {}
+        try:
+            if entry.kind == "scan":
+                if show_calibration:
+                    self._show_scan_calibration(idx, entry.obj)
+                else:
+                    self._show_scan(idx, entry.obj)
+            else:  # calibration file
+                if show_calibration:
+                    self._show_calibration_file(idx, entry)
+                else:
+                    msg = (f"'{entry.label}' is a calibration file — it holds "
+                           f"no sample measurements. Switch to 'Calibration' "
+                           f"to view it.")
+                    log.warning(msg)
+                    QMessageBox.warning(self, "No Sample Measurements", msg)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(
+                self, "Cannot Open",
+                f"Failed to open entry {idx}:\n\n{type(e).__name__}: {e}")
 
-        for item in items:
-            idx = item.data(Qt.UserRole)
-            scan = self.scans.get(idx)
-            if not scan:
-                continue
+    def _register_window(self, key, window):
+        window.setAttribute(Qt.WA_DeleteOnClose, True)
+        window.destroyed.connect(lambda _, k=key: self.open_viewers.pop(k, None))
+        window.show()
+        window.raise_()
+        self.open_viewers[key] = window
 
-            if idx in self.open_viewers:
-                try:
-                    self.open_viewers[idx].raise_()
-                    self.open_viewers[idx].activateWindow()
-                    print(f"⚠️ Scan {idx} is already open. Not opening a second viewer.")
-                except RuntimeError:
-                    print(f"⚠️ Viewer for scan {idx} was closed unexpectedly. Reopening...")
-                    viewer = AxialScanViewer(scan)
-                    viewer.setAttribute(Qt.WA_DeleteOnClose, True)
-                    viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
-                    viewer.show()
-                    viewer.raise_()
-                    self.open_viewers[idx] = viewer
-            else:
-                viewer = AxialScanViewer(scan)
-                viewer.setAttribute(Qt.WA_DeleteOnClose, True)
-                viewer.destroyed.connect(lambda _, i=idx: self.open_viewers.pop(i, None))
-                viewer.show()
-                viewer.raise_()
-                self.open_viewers[idx] = viewer
+    def _raise_if_open(self, key) -> bool:
+        if key in self.open_viewers:
+            try:
+                self.open_viewers[key].raise_()
+                self.open_viewers[key].activateWindow()
+                log.info(f"Window {key} is already open — raising it.")
+                return True
+            except RuntimeError:
+                self.open_viewers.pop(key, None)
+        return False
+
+    def _show_scan(self, idx: int, scan: AxialScan):
+        key = ("scan", idx)
+        if self._raise_if_open(key):
+            return
+        # The viewer fits the whole scan in its constructor, so a bad fitting
+        # config (e.g. a pixel-response sample model against a lorentzian
+        # reference) raises here — the caller reports it instead of letting
+        # the exception escape the slot (PyQt aborts the process on that).
+        viewer = AxialScanViewer(scan)
+        self._register_window(key, viewer)
+
+    def _show_scan_calibration(self, idx: int, scan: AxialScan):
+        key = ("scan-cal", idx)
+        if self._raise_if_open(key):
+            return
+        if scan.calibration_data is None and scan.calibration_params is None:
+            QMessageBox.warning(self, "No Calibration",
+                                f"Scan '{scan.id}' carries no calibration data "
+                                f"and no stored calibration parameters.")
+            return
+        log.info(f"Showing the calibration of scan '{scan.id}'")
+        fitter = SpectrumFitter()
+        calc = calibration_calculator_for_scan(
+            scan.calibration_data, scan.calibration_params, fitter)
+        viewer = CalibrationViewer(
+            calc, title=f"Calibration of Scan {scan.id}",
+            calibration_data=scan.calibration_data, fitter=fitter)
+        self._register_window(key, viewer)
+
+    def _show_calibration_file(self, idx: int, entry: LoadedEntry):
+        key = ("cal", idx)
+        if self._raise_if_open(key):
+            return
+        degree = calibration_config.get().degree
+        log.info(f"Re-fitting {entry.label} with the current configs "
+                 f"(degree={degree})")
+        fitter = SpectrumFitter()
+        calc = CalibrationCalculator(
+            calibrate(data=entry.obj, polyfit_degree=degree, fitter=fitter))
+        viewer = CalibrationViewer(calc, title=f"Calibration - {entry.label}",
+                                   calibration_data=entry.obj, fitter=fitter)
+        self._register_window(key, viewer)
+
+    # --- List management ---
 
     def remove_selected(self):
-        selected_items = self.scan_list.selectedItems()
-        for item in selected_items:
+        for item in self.scan_list.selectedItems():
             idx = item.data(Qt.UserRole)
-            if idx in self.scans:
-                del self.scans[idx]
-            row = self.scan_list.row(item)
-            self.scan_list.takeItem(row)
+            self.entries.pop(idx, None)
+            self.scan_list.takeItem(self.scan_list.row(item))
+
+    # --- Configs ---
 
     def open_calibration_config(self):
         def on_apply(_):
-            # No need to update anything locally
-            print("[AxialScanManager] Apply has no effect — you need to save the configs to they effect the viewer.")
+            log.info("[AxialScanManager] Apply has no effect — save the "
+                     "configs so they affect the viewer.")
         dlg = CalibrationConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
 
-
-
-
     def open_fitting_config(self):
         def on_apply(_):
-            # No need to update anything locally
-            print("[AxialScanManager] Apply has no effect — you need to save the configs to they effect the viewer")
-
+            log.info("[AxialScanManager] Apply has no effect — save the "
+                     "configs so they affect the viewer.")
         dlg = FindPeaksConfigDialog(on_apply=on_apply, parent=self)
         dlg.exec_()
 
+    # --- Reflection background ---
+
+    def _pick_scan(self, scans: list) -> AxialScan | None:
+        if len(scans) == 1:
+            log.info("File holds a single scan — using it.")
+            return scans[0]
+        labels = [f"{getattr(s, 'i', '?')} - {getattr(s, 'id', 'no-id')} "
+                  f"({len(s.measurements)} frames)" for s in scans]
+        # Preselect a scan recorded with the GUI's Take Background button.
+        default = next((i for i, s in enumerate(scans)
+                        if "reflection_background" in str(getattr(s, "id", ""))),
+                       0)
+        choice, ok = QInputDialog.getItem(
+            self, "Pick Background Scan",
+            "Reflection-plane scan to build the background from:",
+            labels, default, False)
+        if not ok:
+            return None
+        return scans[labels.index(choice)]
+
+    def load_background(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Reflection Background",
+            filter="Scans / Templates (*.h5 *.hdf5 *.pkl *.npz);;"
+                   "All Files (*)")
+        if not path:
+            return
+        try:
+            if path.endswith(".npz"):
+                bg = ReflectionBackground.load(path)
+                label = Path(path).name
+            else:
+                loaded = self._load_file(path)
+                objs = loaded if isinstance(loaded, list) else [loaded]
+                scans = [o for o in objs if isinstance(o, AxialScan)]
+                if not scans:
+                    QMessageBox.warning(
+                        self, "No Scans",
+                        f"{path} contains no scans to build a background "
+                        f"from.")
+                    return
+                scan = self._pick_scan(scans)
+                if scan is None:
+                    return
+                log.info(f"Building the reflection background from scan "
+                         f"'{scan.id}' ({len(scan.measurements)} frames) — "
+                         f"fitting its calibration...")
+                bg = background_from_scan(scan, source=path)
+                label = (f"scan {getattr(scan, 'i', '?')} - {scan.id} "
+                         f"({Path(path).name})")
+                self._offer_background_save(bg, scan)
+
+            set_current_background(bg)
+            self.bg_label.setText(f"Background: {label}")
+            # A stale viewer of the previous template would be misleading.
+            if "reflection-bg" in self.open_viewers:
+                self.open_viewers["reflection-bg"].close()
+            log.info(f"Reflection background set to {label} — newly opened "
+                     f"viewers and exports with a 'reflection' background "
+                     f"config will use it.")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Load Background Failed",
+                                 f"Could not load a reflection background "
+                                 f"from {path}:\n\n{type(e).__name__}: {e}")
+
+    def _offer_background_save(self, bg: ReflectionBackground, scan):
+        answer = QMessageBox.question(
+            self, "Save Background?",
+            "Save this background as a .npz template so it can be reloaded "
+            "directly next time?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        out, _ = QFileDialog.getSaveFileName(
+            self, "Save Reflection Background",
+            f"reflection_bg_{scan.id}.npz", "Background Template (*.npz)")
+        if not out:
+            return
+        if not out.lower().endswith(".npz"):
+            out += ".npz"
+        bg.save(out)
+        log.info(f"Saved the reflection background to {out}")
+
+    def show_background(self):
+        if self._raise_if_open("reflection-bg"):
+            return
+        bg = get_current_background()
+        if bg is None:
+            QMessageBox.information(
+                self, "No Background",
+                "No reflection background is loaded — use 'Load Background' "
+                "first. (prmr fits currently warn and use per-peak offsets "
+                "only.)")
+            return
+        title = self.bg_label.text().replace("Background: ",
+                                             "Reflection Background — ")
+        viewer = ReflectionBackgroundViewer(bg, title=title)
+        self._register_window("reflection-bg", viewer)
+
+    # --- Excel export ---
 
     def _build_export_rows_for_scan(self, scan: AxialScan) -> list[BrillouinExport]:
-        rows: list[BrillouinExport] = []
-
         analyzed_spectra = fit_axial_scan(scan)
-
-        for idx, analyzed_spectrum in enumerate(analyzed_spectra):
-            row = get_excel_row_data(
-                axial_scan=scan,
-                analyzed_spectrum=analyzed_spectrum,
-                idx=idx,
-            )
-            rows.append(row)
-
-        return rows
-
-    def _build_export_rows_for_all_scans(self) -> list[BrillouinExport]:
-        all_rows: list[BrillouinExport] = []
-
-        # sort by manager index for predictable export order
-        for idx in sorted(self.scans.keys()):
-            scan = self.scans[idx]
-            scan_rows = self._build_export_rows_for_scan(scan)
-            all_rows.extend(scan_rows)
-
-        return all_rows
+        return [
+            get_excel_row_data(axial_scan=scan, analyzed_spectrum=analyzed, idx=i)
+            for i, analyzed in enumerate(analyzed_spectra)
+        ]
 
     def save_all_to_excel(self):
         try:
-            if not self.scans:
-                QMessageBox.information(self, "No Scans", "There are no loaded scans to export.")
+            scan_entries = {i: e for i, e in self.entries.items()
+                            if e.kind == "scan"}
+            n_cal = len(self.entries) - len(scan_entries)
+            if n_cal:
+                log.info(f"Skipping {n_cal} calibration file(s) — Excel export "
+                         f"covers sample scans only.")
+            if not scan_entries:
+                QMessageBox.information(self, "No Scans",
+                                        "There are no loaded scans to export.")
                 return
 
-            rows = self._build_export_rows_for_all_scans()
-            if not rows:
-                QMessageBox.warning(self, "No Data", "There is no data to export.")
+            all_rows: list[BrillouinExport] = []
+            for idx in sorted(scan_entries.keys()):
+                all_rows.extend(
+                    self._build_export_rows_for_scan(scan_entries[idx].obj))
+            if not all_rows:
+                QMessageBox.warning(self, "No Data",
+                                    "There is no data to export.")
                 return
 
             file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save All to Excel",
+                self, "Save All to Excel",
                 "all_axial_scans_brillouin_export.xlsx",
-                "Excel Files (*.xlsx)"
-            )
-
+                "Excel Files (*.xlsx)")
             if not file_path:
                 return
-
             if not file_path.lower().endswith(".xlsx"):
                 file_path += ".xlsx"
 
-            export_to_excel(rows, file_path)
-
+            export_to_excel(all_rows, file_path)
             QMessageBox.information(
-                self,
-                "Excel Saved",
-                f"Saved {len(rows)} rows from {len(self.scans)} scan(s) to:\n{file_path}"
-            )
+                self, "Excel Saved",
+                f"Saved {len(all_rows)} rows from {len(scan_entries)} "
+                f"scan(s) to:\n{file_path}")
 
         except Exception as e:
-            QMessageBox.critical(self, "Save Failed", f"Could not save Excel file:\n{e}")
+            traceback.print_exc()
+            QMessageBox.critical(self, "Save Failed",
+                                 f"Could not save Excel file:\n{e}")
+
+
+def install_exception_hook():
+    """Show unhandled exceptions instead of letting PyQt kill the process.
+
+    PyQt5 calls qFatal() when an exception escapes a slot, which ends the app
+    with exit code 0xC0000409 and no visible message.
+    """
+    def hook(exc_type, exc, tb):
+        traceback.print_exception(exc_type, exc, tb)
+        QMessageBox.critical(
+            None, "Unhandled Error", f"{exc_type.__name__}: {exc}"
+        )
+
+    sys.excepthook = hook
+
 
 if __name__ == "__main__":
+    install_analyzer_logging()
+    install_exception_hook()
     app = QApplication(sys.argv)
     window = AxialScanManager()
     window.show()

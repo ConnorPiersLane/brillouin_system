@@ -40,36 +40,33 @@ class CalibrationConfigDialog(QDialog):
         self.left_radio = QRadioButton("Left Peak")
         self.right_radio = QRadioButton("Right Peak")
         self.dist_radio = QRadioButton("Peak Distance")
+        self.combined_radio = QRadioButton("Combined (4 peaks)")
+        self.combined_radio.setToolTip(
+            "Inverse-variance combination of all four orders' shifts — "
+            "needs n_peaks = 4 in both fitting sections; shows N/A "
+            "otherwise. Precision observable; the inner-pair distance "
+            "stays the absolute anchor."
+        )
 
         self.ref_group.addButton(self.left_radio)
         self.ref_group.addButton(self.right_radio)
         self.ref_group.addButton(self.dist_radio)
+        self.ref_group.addButton(self.combined_radio)
 
         ref_layout = QVBoxLayout()
         ref_layout.addWidget(self.left_radio)
         ref_layout.addWidget(self.right_radio)
         ref_layout.addWidget(self.dist_radio)
+        ref_layout.addWidget(self.combined_radio)
 
-        # Mode radio buttons
-        self.mode_group = QButtonGroup(self)
-        self.poly_radio = QRadioButton("Polynomial")
-        self.interp_radio = QRadioButton("Interpolation")
-
-        self.mode_group.addButton(self.poly_radio)
-        self.mode_group.addButton(self.interp_radio)
-
-        mode_layout = QVBoxLayout()
-        mode_layout.addWidget(self.poly_radio)
-        mode_layout.addWidget(self.interp_radio)
-
-        # Form layout
+        # Form layout. (No storage toggle: calibration frames ALWAYS travel
+        # with each scan — user decision 2026-08-24, see CalibrationConfig.)
         form.addRow("n_per_freq:", self.n_per_freq_input)
         form.addRow("Polynomial Degree:", self.degree_input)
         form.addRow("Start Frequency (GHz):", self.start_input)
         form.addRow("Stop Frequency (GHz):", self.stop_input)
         form.addRow("Step (GHz):", self.step_input)
         form.addRow(QLabel("Reference Method:"), ref_layout)
-        form.addRow(QLabel("Mode:"), mode_layout)
 
         layout.addLayout(form)
 
@@ -92,13 +89,10 @@ class CalibrationConfigDialog(QDialog):
             self.left_radio.setChecked(True)
         elif cfg.reference == "right":
             self.right_radio.setChecked(True)
+        elif cfg.reference == "combined":
+            self.combined_radio.setChecked(True)
         else:
             self.dist_radio.setChecked(True)
-
-        if cfg.mode == "poly":
-            self.poly_radio.setChecked(True)
-        else:
-            self.interp_radio.setChecked(True)
 
     def create_buttons(self):
         layout = QHBoxLayout()
@@ -124,10 +118,9 @@ class CalibrationConfigDialog(QDialog):
             reference = (
                 "left" if self.left_radio.isChecked() else
                 "right" if self.right_radio.isChecked() else
+                "combined" if self.combined_radio.isChecked() else
                 "distance"
             )
-
-            mode = "poly" if self.poly_radio.isChecked() else "interp"
 
             calibration_config.update(
                 n_per_freq=int(self.n_per_freq_input.text()),
@@ -136,7 +129,6 @@ class CalibrationConfigDialog(QDialog):
                 stop=float(self.stop_input.text()),
                 step=float(self.step_input.text()),
                 reference=reference,
-                mode=mode,
             )
 
             if self.on_apply:

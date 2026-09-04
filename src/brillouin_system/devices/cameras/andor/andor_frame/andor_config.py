@@ -3,7 +3,8 @@ from pathlib import Path
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 
 @dataclass
@@ -20,12 +21,10 @@ class AndorConfig:
     temperature: float | str
     flip_image_horizontally: bool
     verbose: bool
-    n_dark_images: int
-    n_bg_images: int
 
 # ---------- Load/save helpers ----------
 
-andor_config_toml_path = Path(__file__).parent.resolve() / "andor_config.toml"
+andor_config_toml_path = CONFIG_DIR / "andor_config.toml"
 
 
 
@@ -46,8 +45,6 @@ def load_andor_frame_settings(path: Path) -> AndorConfig:
         temperature=raw["temperature"],
         flip_image_horizontally=raw["flip_image_horizontally"],
         verbose=raw["verbose"],
-        n_dark_images=raw["n_dark_images"],
-        n_bg_images=raw["n_bg_images"],
     )
 
 
@@ -63,4 +60,4 @@ def save_andor_frame_settings(path: Path, config: ThreadSafeConfig):
 
 # ---------- Global instances ----------
 
-andor_frame_config = ThreadSafeConfig(load_andor_frame_settings(andor_config_toml_path))
+andor_frame_config = LazyThreadSafeConfig(lambda: load_andor_frame_settings(andor_config_toml_path))

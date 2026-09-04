@@ -1,6 +1,8 @@
 # dual_camera_proxy.py
 import multiprocessing as mp
 import queue
+import time
+import uuid
 
 import numpy as np
 
@@ -16,7 +18,9 @@ class DualCameraProxy:
         self.right_ring = None
         self.use_dummy = use_dummy
 
-        base = "dual_" + mp.current_process().name
+        # Unique suffix per proxy instance so a restart never collides with
+        # shared-memory blocks the previous worker hasn't released yet.
+        base = f"dual_{mp.current_process().name}_{uuid.uuid4().hex[:8]}"
         self.left_spec  = ShmFrameSpec(f"{base}_L", (1, 1), dtype, slots)   # worker overrides shape
         self.right_spec = ShmFrameSpec(f"{base}_R", (1, 1), dtype, slots)
 
@@ -50,17 +54,24 @@ class DualCameraProxy:
         self.left_ring  = ShmRing(ShmFrameSpec(**evt["left_spec"]),  create=False)
         self.right_ring = ShmRing(ShmFrameSpec(**evt["right_spec"]), create=False)
 
-    def _wait_for(self, typ):
-        while True:
-            msg = self.evt_q.get()
-            if msg.get("type") == typ:
-                return msg
-            if msg.get("type") == "error":
-                raise RuntimeError(f"Dual camera worker error: {msg['msg']}\n{msg.get('tb','')}")
+    def _wait_for(self, typ, timeout: float = 30.0):
+        return self._wait_for_any({typ}, timeout=timeout)
 
-    def _wait_for_any(self, types):
+    def _wait_for_any(self, types, timeout: float = 30.0):
+        """Wait for one of `types`, but never block forever: give up if the
+        worker process dies or `timeout` seconds pass without an answer."""
+        deadline = time.monotonic() + timeout
         while True:
-            msg = self.evt_q.get()
+            try:
+                msg = self.evt_q.get(timeout=0.5)
+            except queue.Empty:
+                if self.proc is not None and not self.proc.is_alive():
+                    raise RuntimeError(
+                        f"Dual camera worker process died while waiting for {types}")
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        f"Timed out after {timeout:.0f}s waiting for {types} from dual camera worker")
+                continue
             t = msg.get("type")
             if t in types:
                 return msg

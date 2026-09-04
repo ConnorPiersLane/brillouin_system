@@ -51,17 +51,12 @@ def main():
         calib_config = calibration_config.get()
         reference = calib_config.reference
         degree = calib_config.degree
-        mode = calib_config.mode
 
+        # Re-fits the raw frames with the CURRENT fitter configs — the one
+        # fitting pass; the measured points travel in the parameters.
         calculator = get_calibration_calculator_from_data(calibration_data, degree)
 
-
-        pixmap = render_calibration_to_pixmap(
-            calibration_data,
-            calculator,
-            reference,
-            mode=mode,
-        )
+        pixmap = render_calibration_to_pixmap(calculator, reference)
 
         dlg = CalibrationImageDialog(pixmap)
         dlg.exec_()

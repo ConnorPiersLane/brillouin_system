@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 import numpy as np
-from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.cameras.flir.flir_dataclass import FlirCameraInfo
 
 

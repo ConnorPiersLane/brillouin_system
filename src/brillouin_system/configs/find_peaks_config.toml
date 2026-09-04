@@ -1,0 +1,59 @@
+[global]
+pixel_offset_left = 0
+pixel_offset_right = 0
+selected_rows = [
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+]
+row_selection = "manual"
+n_rows = 13
+n_peaks = 4
+psf_sigma_left_px = 0.26
+psf_sigma_right_px = 0.27
+psf_tau_left_px = 0.39
+psf_tau_right_px = 0.17
+psf_sigma_outer_left_px = 0.39
+psf_sigma_outer_right_px = 0.36
+psf_tau_outer_left_px = 0.95
+psf_tau_outer_right_px = 0.0
+psf_sat_ratio_outer_right = 0.037
+psf_sat_delta_outer_right_px = -1.23
+
+[sample]
+prominence_fraction = 0.001
+min_peak_width = 1
+min_peak_height = 5
+rel_height = 0.5
+wlen_pixels = 10
+fitting_model = "lorentzian_x_psf"
+use_window = true
+background = "reflection"
+beta = 3.0
+na_weighting = "uniform"
+na_collection = 0.14
+na_beam_diameter_mm = 5.5
+na_focal_length_mm = 10.0
+na_n_sample = 1.33
+reflection_margin_ghz = 0.7
+
+[reference]
+prominence_fraction = 0.05
+min_peak_width = 1
+min_peak_height = 800
+rel_height = 0.5
+wlen_pixels = 40
+fitting_model = "lorentzian_x_psf"
+use_window = true
+background = "flat"
+beta = 3.0

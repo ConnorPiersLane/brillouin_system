@@ -104,6 +104,10 @@ class AxialScanningConfigDialog(QDialog):
         le_z_offset.setValidator(QDoubleValidator(-1e12, 1e12, 6))
         self._add_row(v, "Z offset [µm]", "z_offset_um", le_z_offset)
 
+        le_min_above = QLineEdit()
+        le_min_above.setValidator(QIntValidator(1, 1_000_000))
+        self._add_row(v, "Min samples above threshold", "min_samples_above", le_min_above)
+
         g.setLayout(v)
         return g
 
@@ -152,6 +156,7 @@ class AxialScanningConfigDialog(QDialog):
             chunk_size=max(1, int(_req("chunk_size"))),
             idle_sleep_s=float(_req("idle_sleep_s")),
             z_offset_um=float(_req("z_offset_um")),
+            min_samples_above=max(1, int(_req("min_samples_above"))),
         )
 
     # ------------------------------------------------------------------ #

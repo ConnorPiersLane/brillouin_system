@@ -4,7 +4,6 @@ import math
 
 # ---------- Geometry helpers ----------
 
-from matplotlib import pyplot as plt
 
 
 def rotation_matrix_from_gaze(gaze_vector, up_hint=np.array([0, 1, 0])):
@@ -313,7 +312,6 @@ class EyeSceneRenderer:
 
     def set_pupil_diameter(self, new_diameter):
         """Regenerate pupil geometry and update actor in place."""
-        r_outer = self.parts["r_limbus"]  # keep iris outer radius constant
         r_inner = new_diameter / 2.0
 
         # Build new pupil (and keep iris plane position)

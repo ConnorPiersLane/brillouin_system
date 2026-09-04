@@ -4,9 +4,6 @@ import numpy as np
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import FindPeaksConfig
 
 
-
-
-
 def find_peak_locations(sline: np.ndarray, config: FindPeaksConfig):
     """
     Locate peaks in a 1D Brillouin signal using parameters from config.
@@ -36,28 +33,21 @@ def find_peak_locations(sline: np.ndarray, config: FindPeaksConfig):
     return pk_ind, pk_info
 
 
-def select_top_two_peaks(pk_ind, pk_info):
-    """
-    Select the two strongest peaks based on peak height (not area).
+def select_top_n_peaks(pk_ind, pk_info, n: int):
+    """Select the n strongest peaks by height (amplitude ranking).
 
-    Parameters:
-        pk_ind: Indices of detected peaks
-        pk_info: Properties of detected peaks (from find_peaks)
-
-    Returns:
-        Tuple of (selected_peak_indices, selected_peak_properties)
+    n = 2 keeps the production behaviour (the inner main pair is always
+    the brightest); n = 4 keeps the outer VIPA orders as well. Returns
+    the selected (indices, properties); fewer than n detected peaks are
+    returned as-is.
     """
-    if len(pk_ind) <= 2:
+    if len(pk_ind) <= n:
         return pk_ind, pk_info
-
     pk_hts = np.asarray(pk_info['peak_heights'])
-    sorted_indices = np.argsort(pk_hts)
-    top_two_indices = sorted_indices[-2:]
-
-    selected_pk_ind = pk_ind[top_two_indices]
-    selected_pk_info = {prop: np.asarray(values)[top_two_indices] for prop, values in pk_info.items()}
-
-    return selected_pk_ind, selected_pk_info
+    top = np.argsort(pk_hts)[-n:]
+    return (pk_ind[top],
+            {prop: np.asarray(values)[top]
+             for prop, values in pk_info.items()})
 
 
 def refine_fitted_spectrum(function, x_pixels: np.ndarray, parameters: tuple, factor: int):
@@ -84,21 +74,3 @@ def refine_fitted_spectrum(function, x_pixels: np.ndarray, parameters: tuple, fa
         y_fit = np.zeros_like(x_fit)
 
     return x_fit, y_fit
-
-
-def sort_peaks(params: np.ndarray | list) -> np.ndarray:
-    """
-    Ensure Lorentzian fit parameters are sorted by peak center positions (left-to-right).
-
-    Parameters:
-        params (array-like): [amp1, cen1, wid1, amp2, cen2, wid2, offset]
-
-    Returns:
-        np.ndarray: Reordered parameters so that the left peak comes first
-    """
-    amp1, cen1, wid1, amp2, cen2, wid2, offset = params
-
-    if cen1 <= cen2:
-        return np.array([amp1, cen1, wid1, amp2, cen2, wid2, offset])
-    else:
-        return np.array([amp2, cen2, wid2, amp1, cen1, wid1, offset])

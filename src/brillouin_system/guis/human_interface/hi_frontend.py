@@ -12,6 +12,9 @@ from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrac
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config_gui import \
     AxialScanningConfigDialog
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config_gui import \
+    SweepScanConfigDialog
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt
@@ -22,14 +25,13 @@ QtCore.QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
 
 import sys
-import pickle
 from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import GraphicsLayoutWidget, TextItem
 
-from PyQt5.QtGui import QDoubleValidator, QIntValidator
+from PyQt5.QtGui import QDoubleValidator, QFont, QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QMessageBox
@@ -39,7 +41,7 @@ from PyQt5 import QtCore
 
 from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
 from brillouin_system.logging_utils.logging_setup import start_logging, install_crash_hooks, get_logger, \
-    shutdown_logging, logging_fmt_gui, enable_console_fallback
+    logging_fmt_gui
 
 log = get_logger(__name__)
 
@@ -50,9 +52,9 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import Ando
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
-from brillouin_system.guis.data_analyzer.show_axial_scan import AxialScanViewer
-from brillouin_system.my_dataclasses.background_image import BackgroundImage
-from brillouin_system.my_dataclasses.human_interface_measurements import RequestAxialStepScan, AxialScan
+from brillouin_system.my_dataclasses.axial_scan import AxialScan
+from brillouin_system.my_dataclasses.request_axial_step_scan import RequestAxialStepScan
+from brillouin_system.my_dataclasses.request_sweep_scan import RequestSweepScan
 from brillouin_system.calibration.calibration import CalibrationData, CalibrationCalculator
 from brillouin_system.calibration.calibration_plotting import render_calibration_to_pixmap, CalibrationImageDialog
 ###
@@ -63,9 +65,9 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 #todo: fix sample mode closing shutter.
 
-use_backend_dummy = False
+use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
+include_eye_tracking = False
 use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
@@ -91,9 +93,7 @@ class HiFrontend(QWidget):
     stop_live_requested = pyqtSignal()
     update_microwave_freq_requested = pyqtSignal(float)
     toggle_illumination_requested = pyqtSignal()
-    toggle_bg_subtraction_requested = pyqtSignal()
     toggle_reference_mode_requested = pyqtSignal()
-    acquire_background_requested = pyqtSignal()
 
     move_zaber_eye_lens_requested = pyqtSignal(float)
     move_zaber_stage_x_requested = pyqtSignal(float)
@@ -103,6 +103,8 @@ class HiFrontend(QWidget):
     run_calibration_requested = pyqtSignal()
     update_calibration_config_requested = pyqtSignal(object)
     take_axial_step_scan_requested = pyqtSignal(object)
+    take_sweep_scan_requested = pyqtSignal(object)
+    update_sweep_scan_config_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
     toggle_do_live_fitting_requested = pyqtSignal()
@@ -114,6 +116,8 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
+    load_ref_bkg_from_file_requested = pyqtSignal(str)
+    load_ref_bkg_from_scan_requested = pyqtSignal(int)
     calibrate_laser_camera_position_requested = pyqtSignal()
 
     # Saving Signals
@@ -176,9 +180,7 @@ class HiFrontend(QWidget):
         self.stop_live_requested.connect(self.brillouin_signaller.stop_live_view)
         self.update_microwave_freq_requested.connect(self.brillouin_signaller.set_microwave_frequency)
         self.toggle_illumination_requested.connect(self.brillouin_signaller.toggle_illumination_mode)
-        self.toggle_bg_subtraction_requested.connect(self.brillouin_signaller.toggle_background_subtraction)
         self.toggle_reference_mode_requested.connect(self.brillouin_signaller.toggle_reference_mode)
-        self.acquire_background_requested.connect(self.brillouin_signaller.acquire_background_image)
 
         self.move_zaber_eye_lens_requested.connect(self.brillouin_signaller.move_zaber_eye_lens_relative)
         self.move_zaber_stage_x_requested.connect(self.brillouin_signaller.move_zaber_stage_x_relative)
@@ -188,6 +190,8 @@ class HiFrontend(QWidget):
         self.run_calibration_requested.connect(self.brillouin_signaller.run_calibration)
         self.update_calibration_config_requested.connect(self.brillouin_signaller.update_calibration_config_backend)
         self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
+        self.take_sweep_scan_requested.connect(self.brillouin_signaller.take_sweep_scan)
+        self.update_sweep_scan_config_requested.connect(self.brillouin_signaller.update_sweep_scan_config)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
         self.toggle_do_live_fitting_requested.connect(self.brillouin_signaller.toggle_do_live_fitting)
@@ -201,11 +205,13 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
+        self.load_ref_bkg_from_file_requested.connect(
+            self.brillouin_signaller.handle_load_ref_bkg_from_file)
+        self.load_ref_bkg_from_scan_requested.connect(
+            self.brillouin_signaller.handle_load_ref_bkg_from_scan)
 
         # Receiving signals
         self.brillouin_signaller.calibration_finished.connect(self.calibration_finished)
-        self.brillouin_signaller.background_subtraction_state.connect(self.update_bg_subtraction)
-        self.brillouin_signaller.background_available_state.connect(self.handle_is_bg_available)
         self.brillouin_signaller.illumination_mode_state.connect(self.update_illumination_ui)
         self.brillouin_signaller.reference_mode_state.connect(self.update_reference_ui)
         self.brillouin_signaller.camera_settings_ready.connect(self.populate_camera_ui)
@@ -219,6 +225,7 @@ class HiFrontend(QWidget):
 
         self.brillouin_signaller.calibration_result_ready.connect(self.handle_requested_calibration)
         self.brillouin_signaller.do_live_fitting_state.connect(self.update_do_live_fitting_checkbox)
+        self.brillouin_signaller.ref_bkg_state.connect(self.update_ref_bkg_label)
 
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
@@ -280,7 +287,6 @@ class HiFrontend(QWidget):
         left_column_layout.addWidget(self.create_andor_camera_group())
         left_column_layout.addWidget(self.create_fitting_group())
         left_column_layout.addWidget(self.create_reference_group())
-        left_column_layout.addWidget(self.create_background_group())
         left_column_layout.addWidget(self.create_illumination_group())
         left_column_layout.addWidget(self.create_allied_vision_group())
         left_column_layout.addWidget(self.create_axial_scans_group())
@@ -345,38 +351,6 @@ class HiFrontend(QWidget):
         group.setLayout(layout)
         return group
 
-    def create_background_group(self):
-        self.bg_label_off = QLabel("● No BG Subtraction")
-        self.bg_label_on = QLabel("○ With BG Subtraction")
-
-        self.bg_label_off.setStyleSheet("color: green; font-weight: bold")
-        self.bg_label_on.setStyleSheet("color: gray")
-
-        self.btn_take_bg = QPushButton("Take BG")
-        self.btn_take_bg.clicked.connect(self.take_background_image)
-
-        self.toggle_bg_btn = QPushButton("Switch")
-        self.toggle_bg_btn.clicked.connect(self.toggle_background_subtraction)
-
-        self.btn_save_bg = QPushButton("Save BG")
-        self.btn_save_bg.clicked.connect(self.save_background_image)
-
-        # Create horizontal layout for the three buttons
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_take_bg)
-        btn_row.addWidget(self.toggle_bg_btn)
-        btn_row.addWidget(self.btn_save_bg)
-
-        layout = QVBoxLayout()
-        layout.addWidget(self.bg_label_off)
-        layout.addWidget(self.bg_label_on)
-        layout.addSpacing(5)
-        layout.addLayout(btn_row)  # Add button row as one horizontal layout
-
-        group = QGroupBox("Background")
-        group.setLayout(layout)
-        return group
-
     def create_andor_camera_group(self):
         self.exposure_input = QLineEdit()
         self.exposure_input.setValidator(QDoubleValidator(0.001, 60.0, 3))
@@ -422,9 +396,28 @@ class HiFrontend(QWidget):
         row_layout.addWidget(self.fitting_config_btn)
         row_layout.addWidget(self.do_live_fitting_checkbox)
 
+        # Reflection background for live sample fits: without one loaded,
+        # a 'reflection' sample config warns once and fits per-peak flat
+        # offsets only. 'Take Ref. Bkg.' auto-loads its scan when done.
+        self.load_ref_bkg_btn = QPushButton("Load Ref. Bkg.")
+        self.load_ref_bkg_btn.setToolTip(
+            "Load a reflection background for live sample fitting — a "
+            "saved .npz template, or an .h5 scan (built the same way the "
+            "analyzer's Load Background does).")
+        self.load_ref_bkg_btn.clicked.connect(self.on_load_ref_bkg_clicked)
+
+        self.ref_bkg_label = QLabel("Ref. bkg: none")
+        self.ref_bkg_label.setStyleSheet("color: gray")
+
+        bkg_row = QHBoxLayout()
+        bkg_row.addWidget(self.load_ref_bkg_btn)
+        bkg_row.addWidget(self.ref_bkg_label)
+        bkg_row.addStretch()
+
         # Vertical layout for the group box
         layout = QVBoxLayout()
         layout.addLayout(row_layout)
+        layout.addLayout(bkg_row)
 
         group = QGroupBox("Fitting")
         group.setLayout(layout)
@@ -641,12 +634,37 @@ class HiFrontend(QWidget):
         self.axial_btn2 = QPushButton("Find -> Scan")
         self.axial_btn2.clicked.connect(lambda: self.take_axial_step_scan(find_reflection_plane=True))
 
+        self.take_background_btn = QPushButton("Take Ref. Bkg.")
+        self.take_background_btn.setToolTip(
+            "Records Num Meas frames at the CURRENT position through the "
+            "normal scan pipeline (step 0), named 'reflection_background', "
+            "stored and saved like any scan. Position at the reflection "
+            "plane first. When the scan completes it is AUTOMATICALLY "
+            "loaded as the live reflection background for sample fitting "
+            "(see the Fitting group's status label).")
+        self.take_background_btn.clicked.connect(self.take_background_scan)
+
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.axial_btn)
         btn_row.addWidget(self.axial_btn2)
+        btn_row.addWidget(self.take_background_btn)
         btn_row.addStretch()
 
         layout.addRow(btn_row)
+
+        # --- In-out sweep scan (repeated find-measure-find cycles) ---
+        self.sweep_scan_btn = QPushButton("Sweep Scan")
+        self.sweep_scan_btn.clicked.connect(self.take_sweep_scan)
+
+        self.sweep_scan_settings_btn = QPushButton("Sweep Settings")
+        self.sweep_scan_settings_btn.clicked.connect(self.open_sweep_scan_settings_dialog)
+
+        sweep_row = QHBoxLayout()
+        sweep_row.addWidget(self.sweep_scan_btn)
+        sweep_row.addWidget(self.sweep_scan_settings_btn)
+        sweep_row.addStretch()
+
+        layout.addRow(sweep_row)
 
         group.setLayout(layout)
         return group
@@ -845,6 +863,16 @@ class HiFrontend(QWidget):
             pass
         return "—"
 
+    def _fmt_plot_mhz(self, value_ghz):
+        """A GHz value rendered in MHz (widths read better in MHz)."""
+        try:
+            value = 1e3 * float(value_ghz)
+            if np.isfinite(value):
+                return f"{value:.1f} MHz"
+        except Exception:
+            pass
+        return "—"
+
     # --- inside HiFrontend ---
     def create_andor_display_group(self):
         # White theme + fast options
@@ -919,6 +947,9 @@ class HiFrontend(QWidget):
             color=(0, 0, 0),
             anchor=(1, 0)
         )
+        _live_fit_font = QFont()
+        _live_fit_font.setPointSize(7)
+        self.live_fit_text.setFont(_live_fit_font)
         self.live_fit_text.setZValue(10)
         self.spec_plot.addItem(self.live_fit_text, ignoreBounds=True)
 
@@ -1149,13 +1180,10 @@ class HiFrontend(QWidget):
             return
 
         try:
-            # Save as Pickle
-            pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-            with open(pkl_path, "wb") as f:
-                pickle.dump(scans, f)
-            log.info(f"[✓] Pickle saved to: {pkl_path}")
-
-            # Save as HDF5
+            # HDF5 only (2026-08-21 decision): the format of record. It is
+            # refactor-proof (name-based loading, unknown fields dropped),
+            # unlike pickle, which pins module paths forever. Old .pkl files
+            # remain loadable everywhere — they are just not written any more.
             h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
             native_dict = dataclass_to_hdf5_native_dict(scans)
             save_dict_to_hdf5(h5_path, native_dict)
@@ -1222,23 +1250,6 @@ class HiFrontend(QWidget):
         dialog.exec_()
 
 
-    def update_bg_subtraction(self, enabled: bool):
-        if enabled:
-            self.bg_label_on.setText("● With BG Subtraction")
-            self.bg_label_on.setStyleSheet("color: green; font-weight: bold")
-            self.bg_label_off.setText("○ No BG Subtraction")
-            self.bg_label_off.setStyleSheet("color: gray")
-        else:
-            self.bg_label_on.setText("○ With BG Subtraction")
-            self.bg_label_on.setStyleSheet("color: gray")
-            self.bg_label_off.setText("● No BG Subtraction")
-            self.bg_label_off.setStyleSheet("color: green; font-weight: bold")
-
-    def handle_is_bg_available(self, available: bool):
-        self.toggle_bg_btn.setEnabled(available)
-        self.btn_save_bg.setEnabled(available)
-
-
     def on_do_live_fitting_toggled(self, state: int):
         self.toggle_do_live_fitting_requested.emit()
 
@@ -1262,9 +1273,6 @@ class HiFrontend(QWidget):
 
 
     # ---------------- Toggle ---------------- #
-    def toggle_background_subtraction(self):
-        self.toggle_bg_subtraction_requested.emit()
-
     def toggle_illumination(self):
         self.toggle_illumination_requested.emit()
 
@@ -1275,7 +1283,7 @@ class HiFrontend(QWidget):
         self._zaber_lens_um = pos
         self.lens_pos_display.setText(f"Lens {pos:.2f} µm")
         dx, dy, dz = self._laser_offset.dx, self._laser_offset.dy, self._laser_offset.dz
-        self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dy/1000)
+        self.laser_focus_position = RigCoord(x=0+dx/1000, y=0+dy/1000, z=pos/1000+dz/1000)
 
     # ---------------- GUI Update Loop ---------------- #
 
@@ -1316,14 +1324,64 @@ class HiFrontend(QWidget):
             freq_shift = getattr(dr, "freq_shift_ghz", None)
             left_hwhm = getattr(dr, "hwhm_left_peak", None)
             right_hwhm = getattr(dr, "hwhm_right_peak", None)
+            lw_left = getattr(dr, "linewidth_left_peak", None)
+            lw_right = getattr(dr, "linewidth_right_peak", None)
 
-            self.live_fit_text.setText(
-                "Freq shift: {}\nLeft HWHM: {}\nRight HWHM: {}".format(
-                    self._fmt_plot_val(freq_shift),
-                    self._fmt_plot_val(left_hwhm),
-                    self._fmt_plot_val(right_hwhm),
-                )
-            )
+            # Compact 3-line overview.
+            # 1: L / R / combined shift in GHz ('NA' = cone-corrected)
+            # 2: raw HWHMs + deconvolved sample Γ, all MHz
+            # 3: the L−R alignment meters (shift lean, width asymmetry)
+            def _g(v):
+                try:
+                    v = float(v)
+                    if np.isfinite(v):
+                        return f"{v:.4f}"
+                except Exception:
+                    pass
+                return "—"
+
+            def _m(v):
+                try:
+                    v = 1e3 * float(v)
+                    if np.isfinite(v):
+                        return f"{v:.0f}"
+                except Exception:
+                    pass
+                return "—"
+
+            def _d(a, b):
+                try:
+                    d = 1e3 * (float(a) - float(b))
+                    if np.isfinite(d):
+                        return f"{d:+.1f}"
+                except Exception:
+                    pass
+                return None
+
+            sh_l = getattr(dr, "shift_left_peak", None)
+            sh_r = getattr(dr, "shift_right_peak", None)
+            na_tag = " NA" if getattr(dr, "na_corrected", False) else ""
+            if sh_l is not None and sh_r is not None:
+                text = (f"L {_g(sh_l)}  R {_g(sh_r)}  "
+                        f"S {_g(freq_shift)} GHz{na_tag}")
+            else:
+                text = f"Shift {_g(freq_shift)} GHz{na_tag}"
+
+            line2 = f"HWHM {_m(left_hwhm)}/{_m(right_hwhm)}"
+            if lw_left is not None and lw_right is not None:
+                line2 += f"  Γ {_m(lw_left)}/{_m(lw_right)}"
+            text += "\n" + line2 + " MHz"
+
+            meters = []
+            ds = _d(sh_l, sh_r)
+            if ds is not None:
+                meters.append(f"Δshift {ds}")
+            dw = _d(left_hwhm, right_hwhm)
+            if dw is not None:
+                meters.append(f"Δwidth {dw}")
+            if meters:
+                text += "\nL−R: " + "  ".join(meters) + " MHz"
+            self.live_fit_text.setText(text)
             self.live_fit_text.setVisible(True)
 
             # Keep text in upper-right corner of current view
@@ -1431,47 +1489,12 @@ class HiFrontend(QWidget):
     # -------------- Functions --------------
 
 
-    def save_background_image(self):
-        def receive_data(data: BackgroundImage):
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Save Background Image", filter="All Files (*)"
-            )
-            if not path:
-                return
-
-            try:
-                # Save as Pickle
-                pkl_path = path if path.endswith(".pkl") else path + ".pkl"
-                with open(pkl_path, "wb") as f:
-                    pickle.dump(data, f)
-                log.info(f"[✓] Background image saved to: {pkl_path}")
-
-                # Save as HDF5
-                h5_path = path if path.endswith(".h5") else path + ".h5"
-                native_dict = dataclass_to_hdf5_native_dict(data)
-                save_dict_to_hdf5(h5_path, native_dict)
-                log.info(f"[✓] Background image saved as HDF5 to: {h5_path}")
-
-            except Exception as e:
-                log.exception(f"[Brillouin Viewer] [Error] Failed to save background data: {e}")
-
-            finally:
-                self.brillouin_signaller.background_data_ready.disconnect(receive_data)
-
-        self.brillouin_signaller.background_data_ready.connect(receive_data)
-        self.brillouin_signaller.emit_background_data()
-
-
-
     def set_reference_freq(self):
         try:
             freq = float(self.ref_freq_input.text())
             self.update_microwave_freq_requested.emit(freq)
         except ValueError:
             log.exception("[Brillouin Viewer] [Reference] Invalid frequency input.")
-
-    def take_background_image(self):
-        self.acquire_background_requested.emit()
 
     def receive_axial_scan_list(self, scan_list: list):
 
@@ -1481,6 +1504,22 @@ class HiFrontend(QWidget):
 
         self.shift_scan_combo.clear()
         self.shift_scan_combo.addItems(scan_list)
+
+        # A just-finished 'Take Ref. Bkg.' scan: ask the backend to adopt
+        # it as the live reflection background (built backend-side).
+        if getattr(self, "_pending_ref_bkg_autoload", False) and scan_list:
+            last = scan_list[-1]
+            if "reflection_background" in str(last):
+                self._pending_ref_bkg_autoload = False
+                try:
+                    self.ref_bkg_label.setText("Ref. bkg: loading…")
+                    self.ref_bkg_label.setStyleSheet("color: gray")
+                    self.load_ref_bkg_from_scan_requested.emit(
+                        int(str(last).split(" - ")[0]))
+                except Exception:
+                    log.exception("[Brillouin Viewer] Ref. bkg auto-load: "
+                                  "could not parse the scan index from "
+                                  f"'{last}'")
 
     def on_show_axial_scan_clicked(self):
         selected_scan = self.shift_scan_combo.currentText()
@@ -1493,11 +1532,36 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.emit(i)
 
     def handle_received_axial_scan_data(self, scan_data: AxialScan):
+        """Open the scan in the analyzer viewer — the same viewer the data
+        analyzer uses: the scan is re-fitted against its own re-fitted
+        calibration under the LIVE configs, frame browser + spectrum fit +
+        shift-vs-frame-index profile.
+
+        (The 'Take Ref. Bkg.' auto-load no longer routes through here —
+        it goes frontend → signaller → backend via
+        load_ref_bkg_from_scan_requested.)"""
+        log.info(f"[Brillouin Viewer] Opening scan {scan_data.id} "
+                 f"({len(scan_data.measurements)} frames) — re-fitting with "
+                 f"the live configs...")
         try:
-            self.axial_viewer = AxialScanViewer(scan_data)
-            self.axial_viewer.show()
+            from brillouin_system.guis.data_analyzer.show_axial_scan import (
+                AxialScanViewer,
+            )
+            viewer = AxialScanViewer(scan_data)
         except Exception as e:
-            log.exception(f"[AxialScanViewer] Failed to show data: {e}")
+            log.exception(f"[Brillouin Viewer] Failed to open scan "
+                          f"{scan_data.id}: {e}")
+            QMessageBox.critical(
+                self, "Cannot Show Scan",
+                f"Failed to open scan {scan_data.id}:\n\n"
+                f"{type(e).__name__}: {e}")
+            return
+        # Keep a reference so the window survives; drop closed ones.
+        self._open_scan_viewers = [
+            v for v in getattr(self, "_open_scan_viewers", [])
+            if v.isVisible()]
+        self._open_scan_viewers.append(viewer)
+        viewer.show()
 
     def run_calibration(self):
         self.run_calibration_requested.emit()
@@ -1515,7 +1579,7 @@ class HiFrontend(QWidget):
     def calibration_finished(self):
         self.show_calib_btn.setEnabled(True)
         self.save_calib_btn.setEnabled(True)
-        log.info(f"[Brillouin Viewer] Calibration available")
+        log.info("[Brillouin Viewer] Calibration available")
 
 
     def handle_requested_calibration(self,
@@ -1527,8 +1591,12 @@ class HiFrontend(QWidget):
 
         if self._show_cali:
             try:
+                # The calibration plot shows one px->GHz track; "combined"
+                # has no single track, so its plot shows the distance one.
+                plot_reference = ("distance" if config.reference == "combined"
+                                  else config.reference)
                 pixmap = render_calibration_to_pixmap(
-                    cali_data, cali_calculator, reference=config.reference, mode=config.mode
+                    cali_calculator, reference=plot_reference
                 )
                 dialog = CalibrationImageDialog(pixmap, parent=self)
                 dialog.exec_()
@@ -1548,13 +1616,7 @@ class HiFrontend(QWidget):
                 return
 
             try:
-                # Save Pickle
-                pkl_path = base_path if base_path.endswith(".pkl") else base_path + ".pkl"
-                with open(pkl_path, "wb") as f:
-                    pickle.dump(cali_data, f)
-                log.info(f"[✓] Calibration data saved to {pkl_path}")
-
-                # Save HDF5
+                # HDF5 only (2026-08-21 decision, same as the scan save).
                 h5_path = base_path if base_path.endswith(".h5") else base_path + ".h5"
                 hdf5_dict = dataclass_to_hdf5_native_dict(cali_data)
                 save_dict_to_hdf5(h5_path, hdf5_dict)
@@ -1593,6 +1655,79 @@ class HiFrontend(QWidget):
 
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate axial scan: {e}")
+
+
+    def take_background_scan(self):
+        """A reflection-background capture IS a normal axial scan: N frames
+        at the current position (step 0), fixed id 'reflection_background',
+        registered and saved like any other scan — no separate pipeline.
+        When the scan appears in the registry it is auto-loaded as the
+        live reflection background (see receive_axial_scan_list)."""
+        try:
+            n_meas = int(self.axial_num_input.text())
+            self._pending_ref_bkg_autoload = True
+
+            log.info(f"[Brillouin Viewer] Background Scan Request | "
+                     f"id: reflection_background, N: {n_meas}, step 0 µm "
+                     f"(position at the reflection plane first) — will "
+                     f"auto-load as the live reflection background")
+
+            request = RequestAxialStepScan(
+                id="reflection_background",
+                n_measurements=n_meas,
+                step_size_um=0.0,
+                find_reflection_plane=False,
+                eye_tracker_results=self.lastest_eye_tracker_results,
+            )
+
+            self.take_axial_step_scan_requested.emit(request)
+
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to initiate background scan: {e}")
+
+
+    # -------- Reflection background for live sample fitting --------
+    # House pattern: the frontend only emits requests; the signaller runs
+    # the load/build in the backend thread and reports back via
+    # ref_bkg_state (so the GUI never blocks on a calibration re-fit).
+
+    def on_load_ref_bkg_clicked(self):
+        """Pick a saved .npz template or an .h5 scan file and ask the
+        backend to make it the live reflection background."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Reflection Background", "",
+            "Background (*.npz *.h5);;Template (*.npz);;Scan (*.h5)")
+        if not path:
+            return
+        self.ref_bkg_label.setText("Ref. bkg: loading…")
+        self.ref_bkg_label.setStyleSheet("color: gray")
+        self.load_ref_bkg_from_file_requested.emit(path)
+
+    def update_ref_bkg_label(self, status: str):
+        """Backend outcome of a Load/Take Ref. Bkg. request."""
+        if status.startswith("ERROR"):
+            self.ref_bkg_label.setText("Ref. bkg: failed")
+            self.ref_bkg_label.setStyleSheet("color: red")
+            QMessageBox.critical(self, "Load Ref. Bkg. Failed", status)
+        else:
+            self.ref_bkg_label.setText(f"Ref. bkg: {status}")
+            self.ref_bkg_label.setStyleSheet("color: green")
+
+    def take_sweep_scan(self):
+        try:
+            id_str = self.axial_id_input.text().strip()
+
+            log.info(f"[Brillouin Viewer] Sweep Scan Request | ID: {id_str}")
+
+            request = RequestSweepScan(
+                id=id_str,
+                eye_tracker_results=self.lastest_eye_tracker_results,
+            )
+
+            self.take_sweep_scan_requested.emit(request)
+
+        except Exception as e:
+            log.exception(f"[Brillouin Viewer] Failed to initiate sweep scan: {e}")
 
 
     def clear_measurements(self):
@@ -1665,6 +1800,21 @@ class HiFrontend(QWidget):
                 log.exception(f"[EyeTracker] Failed to send new axial scan settings: {e}")
 
         dlg = AxialScanningConfigDialog(
+            on_apply=_on_apply,
+            parent=self,
+        )
+        dlg.exec_()
+
+    def open_sweep_scan_settings_dialog(self):
+
+        def _on_apply(cfg: SweepScanConfig):
+            try:
+                self.update_sweep_scan_config_requested.emit(cfg)
+                log.info("[Frontend] Sent new sweep scan settings.")
+            except Exception as e:
+                log.exception(f"[Frontend] Failed to send new sweep scan settings: {e}")
+
+        dlg = SweepScanConfigDialog(
             on_apply=_on_apply,
             parent=self,
         )
@@ -1787,15 +1937,19 @@ class HiFrontend(QWidget):
         x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
         if self._zaber_lens_um is None:
             return
-        print(f"Pupil Center before moving: {round(float(x)), round(float(y)), round(float(z))}")
-        # Assumint Rig COS and zaber_lens share same origin
+        log.info(f"Pupil Center before moving: {round(float(x)), round(float(y)), round(float(z))}")
+        # Assuming Rig COS and zaber_lens share same origin
         # Moving the Rig here (not the lens)
         self.move_zaber_stage_x_requested.emit(x)
         self.move_zaber_stage_y_requested.emit(y)
         self.move_zaber_stage_z_requested.emit(z-self._zaber_lens_um)
 
-        # remov ethie
-        time.sleep(2)
+        # Wait for the stage moves + a fresh eye result WITHOUT freezing the
+        # GUI thread (processEvents keeps the event loop alive).
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.02)
         et_result = self._wait_for_eye_result()
         if et_result is None or et_result.pupil3d is None:
             return
@@ -1805,7 +1959,7 @@ class HiFrontend(QWidget):
         x, y, z = pupil_center[0]*1000, pupil_center[1]*1000, pupil_center[2]*1000
         if self._zaber_lens_um is None:
             return
-        print(f"Pupil Center after moving: {round(float(x)), round(float(y)), round(float(z))}")
+        log.info(f"Pupil Center after moving: {round(float(x)), round(float(y)), round(float(z))}")
 
         self.calibrate_laser_camera_position_requested.emit()
 
@@ -1968,7 +2122,8 @@ class HiFrontend(QWidget):
         self.request_eye_shutdown.emit()
         time.sleep(5)
         self.eye_thread.quit()
-        self.eye_thread.wait()
+        if not self.eye_thread.wait(10000):
+            log.error("Eye tracker thread did not stop within 10 s — continuing anyway.")
 
     def on_restart_eye_clicked(self):
         # Close old eye tracker

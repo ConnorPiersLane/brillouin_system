@@ -1,6 +1,5 @@
 import numpy as np
 
-from brillouin_system.devices.cameras.flir.flir_config.flir_config import FLIRConfig
 from brillouin_system.devices.cameras.flir.flir_base import BaseFLIRCamera
 from brillouin_system.devices.cameras.flir.flir_dataclass import FlirCameraInfo
 
@@ -95,7 +94,7 @@ class DummyFLIRCamera(BaseFLIRCamera):
         print(f"[DummyFLIR] Gamma set to {value}")
 
     def get_gamma(self):
-        print(f"[DummyFLIR] get_gamma() -> None (not simulated)")
+        print("[DummyFLIR] get_gamma() -> None (not simulated)")
         return None
 
     def set_exposure_time(self, value):

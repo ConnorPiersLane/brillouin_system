@@ -13,7 +13,6 @@ import time
 from typing import List, Tuple, Dict
 
 import numpy as np
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QCheckBox, QSpinBox, QDoubleSpinBox, QGroupBox, QMessageBox,

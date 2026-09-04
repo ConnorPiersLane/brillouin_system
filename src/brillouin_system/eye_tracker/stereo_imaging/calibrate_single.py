@@ -68,6 +68,7 @@ class CameraResult:
     R: np.ndarray
     t: np.ndarray
     rms: float
+    per_view_rms: Optional[np.ndarray] = None  # reprojection RMS per used view, in input order
 
 # ---------------- Core functions ----------------
 def prepare_object_points(cols: int, rows: int, square_size_mm: float) -> np.ndarray:
@@ -77,24 +78,55 @@ def prepare_object_points(cols: int, rows: int, square_size_mm: float) -> np.nda
     return objp
 
 def detect_corners(img: np.ndarray, pattern_size: Tuple[int, int]) -> Optional[np.ndarray]:
+    """
+    Single source of truth for checkerboard detection (used by BOTH the capture
+    GUI and the calibration GUI, so what you see live is what gets calibrated).
+
+    Tries the robust sector-based detector (findChessboardCornersSB, already
+    subpixel-accurate) first, falls back to the classic detector + cornerSubPix.
+    Corner ordering is normalized so the first corner is the top-most end of the
+    grid — otherwise a 180°-flipped detection in one camera silently ruins the
+    stereo extrinsics.
+    """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
-    flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
-    ok, corners = cv2.findChessboardCorners(gray, pattern_size, flags)
-    if not ok:
-        return None
-    corners = cv2.cornerSubPix(
-        gray, corners, (11, 11), (-1, -1),
-        criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3)
-    )
+
+    corners = None
+    try:
+        ok, corners = cv2.findChessboardCornersSB(
+            gray, pattern_size, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
+        )
+        if not ok:
+            corners = None
+    except cv2.error:
+        corners = None
+
+    if corners is None:
+        flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+        ok, corners = cv2.findChessboardCorners(gray, pattern_size, flags)
+        if not ok:
+            return None
+        corners = cv2.cornerSubPix(
+            gray, corners, (11, 11), (-1, -1),
+            criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3)
+        )
+
+    corners = np.asarray(corners, dtype=np.float32).reshape(-1, 1, 2)
+    first, last = corners[0, 0], corners[-1, 0]
+    if (first[1] > last[1]) or (first[1] == last[1] and first[0] > last[0]):
+        corners = corners[::-1].copy()
     return corners
 
-import cv2
-import numpy as np
-from typing import List, Tuple
 
-def calibrate_single(images: List[np.ndarray], config) -> Tuple["CameraResult", Tuple[int, int]]:
+def calibrate_single(
+    images: List[np.ndarray],
+    config,
+    corners: Optional[List[Optional[np.ndarray]]] = None,
+) -> Tuple["CameraResult", Tuple[int, int]]:
     """
     Mono or fisheye camera calibration with conservative gating and sanity checks.
+
+    If `corners` is given (list aligned with `images`, entries may be None), the
+    per-image detection step is skipped and the provided detections are used.
     """
     pattern_size = (int(config.cols), int(config.rows))
     objp = prepare_object_points(config.cols, config.rows, config.square_size_mm)
@@ -102,15 +134,15 @@ def calibrate_single(images: List[np.ndarray], config) -> Tuple["CameraResult", 
     image_size = None
 
     # --- Collect valid detections ---
-    for im in images:
-        c = detect_corners(im, pattern_size)
+    for i, im in enumerate(images):
+        c = corners[i] if corners is not None else detect_corners(im, pattern_size)
         if c is None:
             continue
         if image_size is None:
             h, w = im.shape[:2]
             image_size = (w, h)
         objpoints.append(objp.astype(np.float32))
-        imgpoints.append(c.astype(np.float32))
+        imgpoints.append(np.asarray(c, dtype=np.float32))
 
     if not objpoints:
         raise RuntimeError("No valid checkerboard detections for mono calibration.")
@@ -153,11 +185,13 @@ def calibrate_single(images: List[np.ndarray], config) -> Tuple["CameraResult", 
         per_view_err = []
         for op, ip, r, t in zip(objpoints, imgpoints, rvecs, tvecs):
             proj, _ = cv2.projectPoints(op, r, t, K, dist)
-            per_view_err.append(float(np.sqrt(np.mean(np.sum((proj.reshape(-1,2) - ip)**2, axis=1)))))
+            diff = proj.reshape(-1, 2) - ip.reshape(-1, 2)
+            per_view_err.append(float(np.sqrt(np.mean(np.sum(diff**2, axis=1)))))
         idx = int(np.argsort(per_view_err)[len(per_view_err)//2])
         R, _ = cv2.Rodrigues(rvecs[idx]); t = tvecs[idx].reshape(3)
 
-        return CameraResult(K, dist.reshape(-1), R, t, float(ret)), image_size
+        return CameraResult(K, dist.reshape(-1), R, t, float(ret),
+                            per_view_rms=np.asarray(per_view_err)), image_size
 
     # ================================================================
     # FISHEYE MODEL
@@ -180,7 +214,8 @@ def calibrate_single(images: List[np.ndarray], config) -> Tuple["CameraResult", 
     idx = int(np.argsort(per_view_err)[len(per_view_err)//2])
     R, _ = cv2.Rodrigues(rvecs[idx]); t = tvecs[idx].reshape(3)
 
-    return CameraResult(K, D.reshape(-1), R, t, float(rms)), image_size
+    return CameraResult(K, D.reshape(-1), R, t, float(rms),
+                        per_view_rms=np.asarray(per_view_err)), image_size
 
 
 

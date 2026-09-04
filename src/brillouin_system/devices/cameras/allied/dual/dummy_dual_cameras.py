@@ -1,5 +1,4 @@
 import numpy as np
-from dataclasses import asdict
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig, allied_config
 from brillouin_system.devices.cameras.allied.dual.base_dual_cameras import BaseDualCameras
@@ -41,6 +40,10 @@ class DummyDualCameras(BaseDualCameras):
     def start_stream(self):
         print("[DummyCamera] Start stream (flag only).")
         self._is_streaming = True
+
+    def start_dual_cam_stream(self):
+        # API mirror of DualAlliedVisionCameras (used by dual_camera_worker)
+        self.start_stream()
 
     def stop_stream(self):
         print("[DummyCamera] Stop stream (flag only).")

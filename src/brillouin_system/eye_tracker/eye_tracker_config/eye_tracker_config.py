@@ -8,7 +8,8 @@ from typing import Any, Literal
 import tomli
 import tomli_w
 
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 
 @dataclass
@@ -41,7 +42,7 @@ class EyeTrackerConfig:
 
 
 # Path to the TOML config file
-PUPIL_FIT_TOML_PATH = Path(__file__).parent.resolve() / "eye_tracker_config.toml"
+PUPIL_FIT_TOML_PATH = CONFIG_DIR / "eye_tracker_config.toml"
 
 
 def _toml_to_kwargs(raw: dict[str, Any]) -> dict[str, Any]:
@@ -93,6 +94,6 @@ def save_config_section(path: Path, section: str, config: ThreadSafeConfig) -> N
 
 
 # Single global configuration instance, loaded from TOML at import time
-eye_tracker_config = ThreadSafeConfig(
+eye_tracker_config = LazyThreadSafeConfig(lambda: 
     load_eye_tracker_config(PUPIL_FIT_TOML_PATH, "eye_tracker")
 )

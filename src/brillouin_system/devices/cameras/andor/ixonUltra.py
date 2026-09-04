@@ -43,6 +43,12 @@ class IxonUltra(BaseCamera):
         20: AmpMode(0, 1, 2, 2),
     }
     """
+    Amp-mode table as reported by the SDK. The trailing "e⁻/count" in this
+    captured output is the SDK's own mislabelling: the value is the preamp
+    MULTIPLIER (1x/2x/3x). Electrons per count is a separate calibration
+    constant — see SENSITIVITY_E_PER_COUNT_PREAMP_1X in
+    noise_analysis/pixel_counts_and_photons.py.
+
     [0]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=0 (1.0 e⁻/count)
     [1]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=1 (2.0 e⁻/count)
     [2]  Channel=0, BitDepth=16, OAmp=0 (Electron Multiplying), HSSpeed=0 (17.0 MHz),       Preamp=2 (3.0 e⁻/count)
@@ -124,7 +130,7 @@ class IxonUltra(BaseCamera):
         self.set_fixed_pre_amp_mode(fixed_amp_mode_index)
         print("[IxonUltra] (Current) Preamp index:", self.cam.get_preamp())
         print("[IxonUltra] Preamp mode", self.get_amp_mode())
-        print("[IxonUltra] Preamp gain (e⁻/count):", self.get_preamp_gain())
+        print("[IxonUltra] Preamp multiplier:", self.get_preamp_gain())
 
         if temperature != "off":
             self.cam.set_temperature(temperature, enable_cooler=True)
@@ -284,7 +290,13 @@ class IxonUltra(BaseCamera):
             return self.cam.get_EMCCD_gain()[0]
 
     def get_preamp_gain(self) -> float:
-        """Preamp gain (e⁻/count)"""
+        """
+        Preamp multiplier (1x, 2x, 3x) — NOT e⁻/count.
+
+        The electrons-per-count sensitivity is a separate calibration constant;
+        see SENSITIVITY_E_PER_COUNT_PREAMP_1X in
+        noise_analysis/pixel_counts_and_photons.py.
+        """
         return self.cam.get_preamp_gain()
 
     def get_emccd_gain_advanced(self) -> tuple[int, bool]:
@@ -376,14 +388,14 @@ class IxonUltra(BaseCamera):
         modes = self.cam.get_all_amp_modes()
         for i, m in enumerate(modes):
             print(f"[{i}] Channel={m.channel}, BitDepth={m.channel_bitdepth}, OAmp={m.oamp} ({m.oamp_kind}), "
-                  f"HSSpeed={m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp={m.preamp} ({m.preamp_gain} e⁻/count)")
+                  f"HSSpeed={m.hsspeed} ({m.hsspeed_MHz} MHz), Preamp={m.preamp} ({m.preamp_gain}x)")
 
     def list_fixed_amp_modes(self):
         for idx, mode in self.FIXED_AMP_MODE_LOOKUP.items():
             oamp_kind = "EM" if mode.oamp == 0 else "Conventional"
             hsspeed_freq = {0: 17.0, 1: 10.0, 2: 5.0, 3: 1.0, 4: 0.08}.get(mode.hsspeed, "?")
             preamp_gain = {0: 1.0, 1: 2.0, 2: 3.0}.get(mode.preamp, "?")
-            print(f"[{idx}] {oamp_kind}, {hsspeed_freq} MHz, {preamp_gain} e⁻/count")
+            print(f"[{idx}] {oamp_kind}, {hsspeed_freq} MHz, preamp {preamp_gain}x")
 
     def get_pre_amp_mode(self) -> int:
         """Return current amplifier mode index."""

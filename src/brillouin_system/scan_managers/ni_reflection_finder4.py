@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -17,11 +17,14 @@ class ReflectionResult:
     Indices (event_index / idx_first / idx_last) are acquisition-buffer indices:
       - i == 0 refers to the first sample stored by NI6008 background acquisition
       - the corresponding time is ni_result.time_of(i) (perf_counter timeline model)
+      - event_index is FRACTIONAL (centroid estimator, sub-sample resolution)
     """
     found: bool
-    event_index: Optional[int] = None          # acquisition-buffer index
+    event_index: Optional[float] = None        # fractional acquisition-buffer index (centroid)
     event_time_perf: Optional[float] = None    # perf_counter time_of(event_index)
-    event_z_um: Optional[float] = None         # interpolated z at event time
+    event_z_um: Optional[float] = None         # z at event time (line fit; falls back to interp)
+    event_z_um_interp: Optional[float] = None  # z via 2-point interpolation of the Zaber log
+    event_z_um_fit: Optional[float] = None     # z via constant-velocity line fit (NaN-> None if fit failed)
     z_offset_um: Optional[float] = None
     peak_value: Optional[float] = None
     background_mean: Optional[float] = None
@@ -30,15 +33,73 @@ class ReflectionResult:
     threshold_low: Optional[float] = None
     idx_first: Optional[int] = None            # first sample above threshold_high
     idx_last: Optional[int] = None             # last sample above threshold_high (within the interval)
+    n_samples_above: Optional[int] = None      # samples above threshold_high in the accepted interval
+    n_rejected_intervals: int = 0              # intervals rejected as noise spikes (< min_samples_above)
     daq_ts: Optional[np.ndarray] = None
     daq_values: Optional[np.ndarray] = None
     zaber_lens_ts: Optional[np.ndarray] = None
     zaber_lens_z_um: Optional[np.ndarray] = None
 
-def print_reflection_result(result):
-    for f in fields(result):
-        value = getattr(result, f.name)
-        print(f"{f.name}: {value}")
+def fit_z_at_time(
+    t_query: float,
+    t_z: np.ndarray,
+    z_um: np.ndarray,
+    *,
+    slope_tol: float = 0.2,
+    min_points: int = 4,
+) -> float:
+    """
+    Least-squares line fit z(t) over the constant-velocity portion of the
+    Zaber position log, evaluated at t_query.
+
+    During the search the stage slews at constant velocity, so z(t) is a
+    straight line; fitting all log samples averages out the per-sample
+    timestamp jitter (~ms serial latency placement), which 2-point
+    interpolation inherits in full. Acceleration ramps and stationary
+    portions of the log are excluded by keeping only segments whose local
+    slope is within slope_tol of the slope AT t_query (the event always
+    happens mid-motion; a global median slope can be dominated by a long
+    stationary tail — e.g. the tracker's per-pass logs — and would then fit
+    the parking plateau instead of the motion).
+
+    Returns NaN if fewer than min_points samples remain, or if t_query lies
+    outside the log's time span (extrapolating the fitted line can produce
+    arbitrarily wrong positions) — caller should fall back to
+    interp_z_positions(), which clamps to the log endpoints.
+    """
+    t = np.asarray(t_z, dtype=np.float64)
+    z = np.asarray(z_um, dtype=np.float64)
+    if t.size < min_points:
+        return float("nan")
+    if not (t[0] <= float(t_query) <= t[-1]):
+        return float("nan")
+
+    keep = np.concatenate(([True], np.diff(t) > 0))
+    t = t[keep]
+    z = z[keep]
+    if t.size < min_points:
+        return float("nan")
+
+    v = np.diff(z) / np.diff(t)
+    # reference slope: the segment bracketing t_query
+    k = int(np.searchsorted(t, float(t_query), side="right")) - 1
+    k = min(max(k, 0), v.size - 1)
+    v_ref = float(v[k])
+    if v_ref == 0.0 or not np.isfinite(v_ref):
+        return float("nan")
+
+    good_seg = np.abs(v - v_ref) <= slope_tol * abs(v_ref)
+    # a sample belongs to the constant-velocity window if an adjacent segment is good
+    good_pt = np.zeros(t.size, dtype=bool)
+    good_pt[:-1] |= good_seg
+    good_pt[1:] |= good_seg
+    if int(np.sum(good_pt)) < min_points:
+        return float("nan")
+
+    # center t for numerical conditioning (perf_counter values are large)
+    t0 = float(np.mean(t[good_pt]))
+    coef = np.polyfit(t[good_pt] - t0, z[good_pt], 1)
+    return float(np.polyval(coef, float(t_query) - t0))
 
 
 def find_reflection_realtime(
@@ -57,6 +118,8 @@ def find_reflection_realtime(
     chunk_size: int = 1024,
     idle_sleep_s: float = 0.001,   # sleep when DAQ has no new samples
     z_offset_um: float = 0.0,      # optional manual offset
+    centroid_fraction: float = 0.8,  # centroid weights: samples above this fraction of peak amplitude
+    min_samples_above: int = 3,    # interval acceptance: reject noise spikes with fewer samples above threshold_high
 ) -> ReflectionResult:
     """
     Early-stop reflection finder using:
@@ -68,9 +131,22 @@ def find_reflection_realtime(
       - start when v > threshold_high
       - end when v <= threshold_low for debounce_s continuously
 
-    Event choice:
-      - mode="midpoint": event_index = midpoint(idx_first, idx_last_above_high)
-      - mode="max":      event_index = argmax(v) within the interval (tracks max while in interval)
+    Interval acceptance (false-trigger rejection, power-independent):
+      An ended interval is only accepted as the reflection if it contains at
+      least min_samples_above samples above threshold_high. Single-sample
+      noise spikes (observed when the background window catches a quiet noise
+      state and the n-sigma threshold lands near the spike amplitude) are
+      rejected and the search continues slewing; rejected intervals are
+      counted in n_rejected_intervals.
+
+    Event choice (centroid estimator, sub-sample resolution):
+      event_index = signal-weighted center of mass of the samples between
+      idx_first and idx_last, using weights max(0, v - level) with
+      level = background + centroid_fraction * (peak - background).
+      This averages the noise of all samples near the peak top (argmax jitters
+      across a flat/noisy plateau and is undefined on a clipped peak) and
+      yields a FRACTIONAL buffer index, i.e. finer than the 1-sample z spacing
+      (speed_um_s / ni_sample_rate_hz). peak_value still reports the argmax value.
     """
 
     ni.set_sample_rate_hz(ni_sample_rate_hz)
@@ -94,13 +170,14 @@ def find_reflection_realtime(
         idx_first: Optional[int] = None
         idx_last_above: Optional[int] = None
         low_run = 0
-        daq: NIReadResult | None = None
+        n_above = 0
+        n_rejected = 0
+        daq = None
         zlog: ZaberPositionLog | None = None
 
-        # Track max within interval (for mode="max")
+        # Track max within interval
         best_v = float("-inf")
         best_idx: Optional[int] = None
-        rr: NIReadResult | None = None
 
         # Cursor into NI acquisition-buffer indices for incremental reads
         last_idx = 0
@@ -126,7 +203,7 @@ def find_reflection_realtime(
                 if (time.perf_counter() - t_start) > max_time_s:
                     break
 
-                rr: NIReadResult = ni.get_new_block_result(last_idx, copy=False)
+                rr = ni.get_new_block_result(last_idx, copy=False)
                 xs = rr.values
                 n = xs.size
                 if n <= 0:
@@ -148,6 +225,7 @@ def find_reflection_realtime(
                             idx_first = i_abs
                             idx_last_above = i_abs
                             low_run = 0
+                            n_above = 1
                             best_v = v
                             best_idx = i_abs
                     else:
@@ -155,6 +233,7 @@ def find_reflection_realtime(
                         if v > th_hi:
                             idx_last_above = i_abs
                             low_run = 0
+                            n_above += 1
 
                         # track max anywhere in interval if requested
                         if v > best_v:
@@ -165,7 +244,18 @@ def find_reflection_realtime(
                         if v <= th_lo:
                             low_run += 1
                             if low_run >= debounce_samples:
-                                raise StopIteration
+                                if n_above >= min_samples_above:
+                                    raise StopIteration
+                                # too few samples above threshold: noise spike,
+                                # reject interval and keep searching
+                                n_rejected += 1
+                                in_interval = False
+                                idx_first = None
+                                idx_last_above = None
+                                low_run = 0
+                                n_above = 0
+                                best_v = float("-inf")
+                                best_idx = None
                         else:
                             low_run = 0
 
@@ -179,36 +269,55 @@ def find_reflection_realtime(
             except Exception:
                 zlog = None
 
-            try: err = ni.get_acquiring_error()
-            except Exception: err = None
-
             try:
-                daq: NIReadResult = ni.stop_acquiring()
+                daq = ni.stop_acquiring()
             except Exception:
-                daq: None = None
+                daq = None
 
+
+    if (
+        (not in_interval)
+        or idx_first is None
+        or idx_last_above is None
+        or daq is None
+        or best_idx is None
+        or n_above < min_samples_above  # timeout inside a spurious interval
+    ):
+        # Validate detection + acquisition
+        return ReflectionResult(
+            found=False,
+            n_rejected_intervals=n_rejected,
+        )
+
+    # Interpolate Z from full Zaber log
+    if zlog is None or zlog.t_perf.size < 2:
+        return ReflectionResult(found=False, n_rejected_intervals=n_rejected)
 
     daq_ts = np.asarray(daq.timestamps_perf())
     daq_values = np.asarray(daq.values)
     zaber_lens_ts = np.asarray(zlog.t_perf)
     zaber_lens_z_um = np.asarray(zlog.z_um)
 
-
-    if (not in_interval) or idx_first is None or idx_last_above is None or daq is None or best_idx is None:
-        # Validate detection + acquisition
-        return ReflectionResult(
-            found=False,
-        )
-
-    event_i = best_idx
+    # Centroid event estimator: center of mass of the samples near the peak
+    # top -> fractional buffer index (sub-sample resolution, robust against
+    # plateau noise and clipping; see docstring).
+    seg = daq_values[int(idx_first): int(idx_last_above) + 1]
+    level = av + centroid_fraction * (best_v - av)
+    w = np.clip(seg - level, 0.0, None)
+    w_sum = float(np.sum(w))
+    if w_sum > 0.0:
+        event_i = float(idx_first) + float(np.sum(w * np.arange(seg.size))) / w_sum
+    else:
+        event_i = float(best_idx)  # degenerate interval: fall back to argmax
     peak_val = best_v
     t_event = daq.time_of(event_i)
 
-    # Interpolate Z from full Zaber log
-    if zlog is None or zlog.t_perf.size < 2:
-        return ReflectionResult(found=False)
-    else:
-        z_event = interp_z_positions(t_event, np.asarray(zlog.t_perf), np.asarray(zlog.z_um))
+    # z at event time: constant-velocity line fit over the whole Zaber log
+    # (averages per-sample timestamp jitter), 2-point interpolation as
+    # fallback and for comparison.
+    z_interp = interp_z_positions(t_event, zaber_lens_ts, zaber_lens_z_um)
+    z_fit = fit_z_at_time(t_event, zaber_lens_ts, zaber_lens_z_um)
+    z_event = z_fit if np.isfinite(z_fit) else z_interp
 
 
 
@@ -218,6 +327,8 @@ def find_reflection_realtime(
         event_index=event_i,
         event_time_perf=t_event,
         event_z_um=z_event,
+        event_z_um_interp=float(z_interp) if np.isfinite(z_interp) else None,
+        event_z_um_fit=float(z_fit) if np.isfinite(z_fit) else None,
         z_offset_um=z_offset_um,
         peak_value=peak_val,
         background_mean=av,
@@ -226,6 +337,8 @@ def find_reflection_realtime(
         threshold_low=th_lo,
         idx_first=int(idx_first),
         idx_last=int(idx_last_above),
+        n_samples_above=int(n_above),
+        n_rejected_intervals=int(n_rejected),
         daq_ts = daq_ts,
         daq_values = daq_values,
         zaber_lens_ts = zaber_lens_ts,
@@ -237,7 +350,7 @@ def find_reflection_realtime(
 # Example usage
 # --------------------
 if __name__ == "__main__":
-    from brillouin_system.devices.ni.ni6008 import NI6008, NIReadResult
+    from brillouin_system.devices.ni.ni6008 import NI6008
     from brillouin_system.devices.zaber_engines.zaber_human_interface.zaber_eye_lens import ZaberEyeLens
 
     ni = NI6008()
@@ -257,16 +370,6 @@ if __name__ == "__main__":
         idle_sleep_s=0.001,
     )
 
-    # print_reflection_result(res)
-
     if res.found and res.event_z_um is not None and np.isfinite(res.event_z_um):
         z.move_abs(res.event_z_um)
         print(res.event_z_um)
-    # plt.figure()
-    # # plt.plot(r[:500], marker='o')
-    # plt.plot(res.zaber_lens_ts, res.zaber_lens_z_um, marker='o')
-    # plt.axvline(x=res.event_time_perf)  # vertical line at xe
-    #
-    # plt.grid(True)
-    #
-    # plt.show()

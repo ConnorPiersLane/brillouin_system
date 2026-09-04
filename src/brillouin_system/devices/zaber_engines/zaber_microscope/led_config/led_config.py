@@ -2,7 +2,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomli
 import tomli_w
-from brillouin_system.helpers.thread_safe_config import ThreadSafeConfig
+from brillouin_system.configs import CONFIG_DIR
+from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, ThreadSafeConfig
 
 @dataclass
 class LEDConfig:
@@ -15,7 +16,7 @@ class LEDConfig:
     is_led_red_625_below: bool
     is_led_white_top: bool
 
-led_config_toml_path = Path(__file__).parent.resolve() / "led_config.toml"
+led_config_toml_path = CONFIG_DIR / "led_config.toml"
 
 def load_led_settings(path: Path) -> LEDConfig:
     with path.open("rb") as f:
@@ -29,4 +30,4 @@ def save_led_settings(path: Path, config: ThreadSafeConfig):
     with path.open("wb") as f:
         tomli_w.dump(data, f)
 
-led_config = ThreadSafeConfig(load_led_settings(led_config_toml_path))
+led_config = LazyThreadSafeConfig(lambda: load_led_settings(led_config_toml_path))
