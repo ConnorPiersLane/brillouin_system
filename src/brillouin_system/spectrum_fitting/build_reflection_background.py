@@ -90,10 +90,13 @@ def background_from_scan(scan, source: str = "",
     frame = _mean_frame(scan) - bias
 
     fitter = SpectrumFitter()
-    fitter.auto_select_rows(np.stack(
-        [np.asarray(p.frame, dtype=float)
-         for b in cal.measured_freqs
-         for p in b.cali_meas_points]))
+    if fitter.sline_config.row_selection == "auto":
+        # A fresh fitter has no frozen band yet; manual mode uses the
+        # configured rows and must not run (or log) the auto locator.
+        fitter.auto_select_rows(np.stack(
+            [np.asarray(p.frame, dtype=float)
+             for b in cal.measured_freqs
+             for p in b.cali_meas_points]))
     freqs, left, right = _calibration_points(scan, fitter)
     if len(freqs) < 3:
         raise ValueError(
@@ -161,10 +164,11 @@ def build_reflection_background(
           f"max {frame.max():.0f} counts")
 
     fitter = SpectrumFitter()
-    fitter.auto_select_rows(np.stack(
-        [np.asarray(p.frame, dtype=float)
-         for b in kept_scans[0].calibration_data.measured_freqs
-         for p in b.cali_meas_points]))
+    if fitter.sline_config.row_selection == "auto":
+        fitter.auto_select_rows(np.stack(
+            [np.asarray(p.frame, dtype=float)
+             for b in kept_scans[0].calibration_data.measured_freqs
+             for p in b.cali_meas_points]))
     freqs, left, right = _calibration_points(kept_scans[0], fitter)
     print(f"calibration: {len(freqs)} points, "
           f"{freqs.min():.2f}-{freqs.max():.2f} GHz")

@@ -50,8 +50,11 @@ def make_fitter(model="prm0", n_peaks=2) -> SpectrumFitter:
     fitter.update_sline_config(replace(
         fitter.sline_config, n_peaks=n_peaks,
         psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
+        psf_sigma_outer_left_px=SIGMA, psf_sigma_outer_right_px=SIGMA,
         psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
-        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR))
+        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR,
+        psf_sat_ratio_outer_right=0.0, psf_sat_delta_outer_right_px=0.0,
+        psf_sat_ratio_outer_left=0.0, psf_sat_delta_outer_left_px=0.0))
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config("lorentzian_x_psf"))
     return fitter
@@ -64,6 +67,44 @@ def make_spectrum(seed=0, centers=CENTERS):
         true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
     rng = np.random.default_rng(seed)
     return px, true + rng.normal(0.0, 2.0, size=true.shape)
+
+
+def test_outer_right_satellite_removes_center_bias():
+    # the outer_right order carries an intrinsic near-core satellite
+    # (2026-09-02 determination): a scaled displaced copy of the main
+    # line. A spectrum synthesized WITH the satellite must be fitted
+    # without centre bias when the config carries the satellite
+    # constants, and with a visible pull when it does not.
+    sat_r, sat_d = 0.08, -1.23      # exaggerated ratio for a crisp test
+    px = np.arange(0.0, 200.0)
+    true = np.full_like(px, OFFSET)
+    for a, c, tau in zip(AMPS, CENTERS, TAUS):
+        true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
+    # add the satellite to the outer_right line only
+    true = true + psf_profile(px, AMPS[3] * sat_r, CENTERS[3] + sat_d,
+                              GAMMA, SIGMA, TAUS[3])
+    rng = np.random.default_rng(7)
+    sline = true + rng.normal(0.0, 2.0, size=true.shape)
+
+    def fit_with(ratio, delta):
+        fitter = make_fitter(n_peaks=4)
+        fitter.update_sline_config(replace(
+            fitter.sline_config,
+            psf_sat_ratio_outer_right=ratio,
+            psf_sat_delta_outer_right_px=delta))
+        r = fitter.fit(px, sline, is_reference_mode=True, n_peaks=4)
+        assert r.is_success
+        return r
+
+    with_sat = fit_with(sat_r, sat_d)
+    without = fit_with(0.0, 0.0)
+    err_with = abs(with_sat.outer_right_peak_center_px - CENTERS[3])
+    err_without = abs(without.outer_right_peak_center_px - CENTERS[3])
+    assert err_with < 0.03
+    assert err_without > 2.0 * err_with
+    # the satellite term must not disturb the other orders
+    assert abs(with_sat.left_peak_center_px - CENTERS[1]) < 0.03
+    assert abs(with_sat.right_peak_center_px - CENTERS[2]) < 0.03
 
 
 def test_n_peaks_validation():

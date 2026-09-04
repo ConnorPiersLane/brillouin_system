@@ -21,20 +21,29 @@ this record and the working values.
                    tail is worse than no tail on both peaks,
                    Data/Figure2/tau_direction_scan.txt, 2026-08-31).
 
-FINAL values user-adopted 2026-08-31: the two-decimal means of the
-three-sweep refit (Data/SectionS3/constants_summary.txt over
-cal2_5-18 / cal1_5-22 / cal2_5-22: tau*_AS 0.399 +- 0.007, tau*_S
-0.185 +- 0.002, sigma*_AS 0.252 +- 0.005, sigma*_S 0.285 +- 0.003 ->
-adopted 0.40 / 0.18 / 0.25 / 0.28). Consistent with the original
-2026-07 shared-kernel measurement (0.25 / 0.40 / 0.20, stable across
-6 calibrations over 7 weeks, re-confirmed alignment-stable across
-3 months in the 2026-08 background-model work). Validated on Figure 2:
-the Stokes folded residual sine drops ~0.9 -> ~0.4 MHz, anti-Stokes
-panels unchanged. The
-outer taus (n_peaks=4 fit only) were measured 2026-08-20 from the outer
-calibration lines of four 4-peak-ROI sessions — PROVISIONAL (per-frame
-sigma/tau/gamma are degenerate; sweep medians only): fine for positions
-and intensities, do not hang width claims on outer-peak lineshapes.
+ALL EIGHT constants user-adopted 2026-09-03 from the four-peak
+4001-point fine-sweep determination of 2026-09-02 (four runs,
+calibration_4001_1..4.h5, adaptive per-peak scans minimizing each
+peak's folded once-per-pixel sine; agreement +-0.02 px across the four
+runs INCLUDING a realignment before run 4; second coordinate-descent
+pass puts outer_left / left / right at 0.06 / 0.07 / 0.09 MHz residual
+sine — records in Data/2026-9-2/determine_fourpeak_summary.txt,
+phase3_outer_tau_summary.txt, constants per run in
+determine_calibration_4001_*_summary.txt). The previous 2026-08-31
+inner values (0.25/0.28, 0.40/0.18, May epoch) differ by <=0.01 px.
+
+The OUTER_RIGHT order carries an intrinsic NEAR-CORE SATELLITE — a
+scaled displaced copy of the main line (same gamma, same kernel) with
+ratio psf_sat_ratio_outer_right at psf_sat_delta_outer_right_px.
+Without it that peak's fitted position wobbles once per pixel by
+~3.2 MHz, immune to any (sigma, tau); with it 0.32-0.41 MHz, validated
+BLIND on the three runs it was not tuned on (Data/2026-9-2/
+ghost_model_opt.txt, validate_companion_run*.txt). Nine alternative
+mechanisms were eliminated by measurement (sampling/estimator bias via
+synthetic data, window placement, joint-fit crosstalk, row tilt, column
+gains, stray contamination, track curvature, distant ghost, kernel
+shape). The other three orders need no satellite (their residual floors
+leave nothing to determine).
 Re-measure after any camera / ROI / readout change.
 """
 from __future__ import annotations
@@ -44,21 +53,26 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PsfMeasurement:
-    psf_sigma_left_px: float = 0.25
-    psf_sigma_right_px: float = 0.28
-    psf_tau_left_px: float = 0.40
-    psf_tau_right_px: float = 0.18
-    psf_tau_outer_left_px: float = 0.50
+    psf_sigma_left_px: float = 0.26
+    psf_sigma_right_px: float = 0.27
+    psf_tau_left_px: float = 0.39
+    psf_tau_right_px: float = 0.17
+    psf_sigma_outer_left_px: float = 0.39
+    psf_sigma_outer_right_px: float = 0.36
+    psf_tau_outer_left_px: float = 0.95
     psf_tau_outer_right_px: float = 0.0
-    psf_measured: str = "2026-08-31 (three-sweep per-peak refit)"
+    psf_sat_ratio_outer_right: float = 0.037
+    psf_sat_delta_outer_right_px: float = -1.23
+    psf_measured: str = "2026-09-03 (four-peak 4001-pt determination, 9-2)"
     psf_method: str = (
-        "Fine EOM sweeps: scans of the kernel constants minimizing the "
-        "per-pixel residual sine of the calibration tracks (from ~7 MHz to "
-        "~2 MHz rms). Adopted = two-decimal means of the 2026-08-31 "
-        "three-sweep refit (Data/SectionS3/constants_summary.txt, sd "
-        "0.007/0.002/0.005/0.003 px); consistent with the 2026-07 "
-        "shared-sigma measurement, stable across 6 calibrations over "
-        "7 weeks. See measure_psf_kernel.py."
+        "Four 4001-point four-peak fine sweeps (Data/2026-9-2): adaptive "
+        "per-peak scans of each (sigma, tau) minimizing that peak's folded "
+        "once-per-pixel sine; four-run agreement +-0.02 px incl. a "
+        "realignment; residual sines 0.06-0.09 MHz (outer_left/left/right). "
+        "outer_right additionally carries an intrinsic near-core satellite "
+        "(scaled displaced copy, ratio 0.037 at -1.23 px), optimized on "
+        "run 1 and validated blind on runs 2-4 (0.32-0.41 MHz). See "
+        "determine_fourpeak_kernel.py and ghost_model_opt.py with the data."
     )
 
 

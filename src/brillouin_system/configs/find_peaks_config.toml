@@ -19,14 +19,16 @@ selected_rows = [
 row_selection = "manual"
 n_rows = 13
 n_peaks = 4
-psf_sigma_left_px = 0.25
-psf_sigma_right_px = 0.28
-psf_tau_left_px = 0.4
-psf_tau_right_px = 0.18
-psf_sigma_outer_left_px = 0.25
-psf_sigma_outer_right_px = 0.28
-psf_tau_outer_left_px = 0.5
+psf_sigma_left_px = 0.26
+psf_sigma_right_px = 0.27
+psf_tau_left_px = 0.39
+psf_tau_right_px = 0.17
+psf_sigma_outer_left_px = 0.39
+psf_sigma_outer_right_px = 0.36
+psf_tau_outer_left_px = 0.95
 psf_tau_outer_right_px = 0.0
+psf_sat_ratio_outer_right = 0.037
+psf_sat_delta_outer_right_px = -1.23
 
 [sample]
 prominence_fraction = 0.001

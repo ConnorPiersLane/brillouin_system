@@ -356,23 +356,35 @@ class SlineFromFrameConfig:
     # package, next to measure_psf_kernel.py — re-measure after any
     # camera/ROI change, and update both. The sigma is per peak like the
     # taus (blur is a POSITION property on the sensor; split from the old
-    # shared psf_sigma_px). FINAL values user-adopted 2026-08-31: the
-    # two-decimal means of the three-sweep refit (sigma 0.25/0.28, tau
-    # 0.40/0.18) — validated on Figure 2: the Stokes folded sine drops
-    # ~0.9 -> ~0.4 MHz, anti-Stokes unchanged. The outer constants serve
-    # the opt-in n_peaks=4 fit only and are PROVISIONAL — the outer taus
-    # from the position trend (tail falls toward the readout side, fine
-    # for positions/intensities, not width claims), the outer sigmas
-    # seeded with their side's inner value until the planned four-peak
-    # fine-sweep determination replaces all four (sigma, tau) pairs.
-    psf_sigma_left_px: float = 0.25
-    psf_sigma_right_px: float = 0.28
-    psf_tau_left_px: float = 0.40
-    psf_tau_right_px: float = 0.18
-    psf_sigma_outer_left_px: float = 0.25
-    psf_sigma_outer_right_px: float = 0.28
-    psf_tau_outer_left_px: float = 0.50
+    # shared psf_sigma_px). ALL EIGHT constants user-adopted 2026-09-03
+    # from the four-peak 4001-point fine-sweep determination of 2026-09-02
+    # (four runs, agreement +-0.02 px across a realignment; residual
+    # folded sines 0.06-0.09 MHz on outer_left/left/right; record in
+    # Data/2026-9-2/determine_fourpeak_summary.txt + phase3 files). The
+    # OUTER_RIGHT order additionally carries an intrinsic near-core
+    # SATELLITE line — a scaled displaced copy of the main peak (same
+    # gamma, same kernel, amplitude ratio psf_sat_ratio_outer_right at
+    # psf_sat_delta_outer_right_px) — without which its fitted position
+    # wobbles once per pixel by ~3.2 MHz that no (sigma, tau) can remove.
+    # With the satellite the wobble is 0.32-0.41 MHz, validated BLIND on
+    # the three runs it was not tuned on (incl. post-realignment). Set
+    # the ratio to 0 to disable. The other three orders need no
+    # satellite (their sinusoid floors leave nothing to determine).
+    psf_sigma_left_px: float = 0.26
+    psf_sigma_right_px: float = 0.27
+    psf_tau_left_px: float = 0.39
+    psf_tau_right_px: float = 0.17
+    psf_sigma_outer_left_px: float = 0.39
+    psf_sigma_outer_right_px: float = 0.36
+    psf_tau_outer_left_px: float = 0.95
     psf_tau_outer_right_px: float = 0.0
+    psf_sat_ratio_outer_right: float = 0.037
+    psf_sat_delta_outer_right_px: float = -1.23
+    # outer_left satellite: same structure, OFF by default (ratio 0) —
+    # position-only candidate (2026-09-04, r~0.02 at +0.72 px); enable
+    # for width-closure experiments, adopt only if both criteria close.
+    psf_sat_ratio_outer_left: float = 0.0
+    psf_sat_delta_outer_left_px: float = 0.0
 
     def __post_init__(self):
         if self.row_selection not in ROW_SELECTIONS:
