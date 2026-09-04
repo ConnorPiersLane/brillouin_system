@@ -1,9 +1,31 @@
+import os
 from contextlib import ExitStack
 
 from vimba import Vimba, VimbaFeatureError, VimbaCameraError
 
 from brillouin_system.devices.cameras.allied.allied_config.allied_config import AlliedConfig
 from brillouin_system.devices.cameras.allied.single.base_allied_vision_camera import BaseAlliedVisionCamera
+
+def _restrict_gentl_search_to_vimba():
+    """VmbStartup loads every GenTL producer on the GenICam search path,
+    including other vendors' (FLIR, Andor, ...). A foreign producer that
+    blocks during load — e.g. while its device is held by another running
+    process — hangs Vimba startup before we ever see a camera. The Allied
+    cameras only need Vimba's own transport layers, so drop the rest for
+    this process."""
+    for var in ("GENICAM_GENTL64_PATH", "GENICAM_GENTL32_PATH"):
+        val = os.environ.get(var)
+        if not val:
+            continue
+        entries = [p for p in val.split(os.pathsep) if p]
+        keep = [p for p in entries if "vimba" in p.lower()]
+        dropped = [p for p in entries if p not in keep]
+        if keep and dropped:
+            os.environ[var] = os.pathsep.join(keep)
+            print(f"[AVCamera] {var}: ignoring non-Vimba transport layers:", flush=True)
+            for p in dropped:
+                print(f"[AVCamera]   dropped {p}", flush=True)
+
 
 class AlliedVisionCamera(BaseAlliedVisionCamera):
     """
@@ -53,6 +75,7 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
         # inside the Vimba C layer (transport-layer load, GigE discovery,
         # camera open). When the dual-camera worker times out, the last
         # line printed tells us which step hung.
+        _restrict_gentl_search_to_vimba()
         print("[AVCamera] Starting Vimba (loading transport layers)...", flush=True)
         self.vimba = self.stack.enter_context(Vimba.get_instance())
         self.camera = None
