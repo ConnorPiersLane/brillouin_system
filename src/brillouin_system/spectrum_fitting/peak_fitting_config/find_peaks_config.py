@@ -380,11 +380,6 @@ class SlineFromFrameConfig:
     psf_tau_outer_right_px: float = 0.0
     psf_sat_ratio_outer_right: float = 0.037
     psf_sat_delta_outer_right_px: float = -1.23
-    # outer_left satellite: same structure, OFF by default (ratio 0) —
-    # position-only candidate (2026-09-04, r~0.02 at +0.72 px); enable
-    # for width-closure experiments, adopt only if both criteria close.
-    psf_sat_ratio_outer_left: float = 0.0
-    psf_sat_delta_outer_left_px: float = 0.0
 
     def __post_init__(self):
         if self.row_selection not in ROW_SELECTIONS:

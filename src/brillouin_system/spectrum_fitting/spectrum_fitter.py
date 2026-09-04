@@ -556,29 +556,23 @@ class SpectrumFitter:
                     taus = [float(self.sline_config.psf_tau_outer_left_px),
                             tau_l, tau_r,
                             float(self.sline_config.psf_tau_outer_right_px)]
-                    # the outer orders can carry an intrinsic near-core
+                    # the outer_right order carries an intrinsic near-core
                     # satellite line (a scaled displaced copy of the main
-                    # peak, measured 2026-09-02 for outer_right; see the
-                    # config comment) — frozen constants, no extra free
-                    # parameters; ratio 0 disables. Indexed per peak:
-                    # [outer_left, left, right, outer_right].
-                    sc = self.sline_config
-                    sats = [
-                        (float(sc.psf_sat_ratio_outer_left),
-                         float(sc.psf_sat_delta_outer_left_px)),
-                        (0.0, 0.0), (0.0, 0.0),
-                        (float(sc.psf_sat_ratio_outer_right),
-                         float(sc.psf_sat_delta_outer_right_px)),
-                    ]
+                    # peak, measured 2026-09-02; see the config comment) —
+                    # frozen constants, no extra free parameters; ratio 0
+                    # disables.
+                    sat_r = float(self.sline_config.psf_sat_ratio_outer_right)
+                    sat_d = float(
+                        self.sline_config.psf_sat_delta_outer_right_px)
                 else:
                     sigmas = [sigma_l, sigma_r]
                     taus = [tau_l, tau_r]
-                    sats = [(0.0, 0.0), (0.0, 0.0)]
+                    sat_r = 0.0
+                    sat_d = 0.0
 
                 def peak(x, a, c, w, i):
                     base = psf_profile(x, a, c, w, sigmas[i], taus[i])
-                    sat_r, sat_d = sats[i]
-                    if sat_r > 0.0:
+                    if i == 3 and sat_r > 0.0:
                         base = base + psf_profile(x, a * sat_r, c + sat_d,
                                                   w, sigmas[i], taus[i])
                     return base
