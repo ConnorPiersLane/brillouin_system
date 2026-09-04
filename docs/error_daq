@@ -1,6 +1,12 @@
-C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\Scripts\python.exe C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py
+C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\Scripts\python.exe -X pycache_prefix=C:\Users\Mandelstam\AppData\Local\JetBrains\PyCharmCE2024.3\cpython-cache "C:/Program Files/JetBrains/PyCharm Community Edition 2024.3.3/plugins/python-ce/helpers/pydev/pydevd.py" --multiprocess --qt-support=auto --client 127.0.0.1 --port 50455 --file C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py
+Connected to pydev debugger (build 243.24978.54)
 [DualCamera] Initializing two Allied Vision cameras.
 [AVCamera] Connecting to Allied Vision Camera...
+[AVCamera] GENICAM_GENTL64_PATH: ignoring non-Vimba transport layers:
+[AVCamera]   dropped C:\BitFlow SDK 6.30\Bin64
+[AVCamera]   dropped C:\Program Files\FLIR Systems\Spinnaker\cti64\vs2015
+[AVCamera] GENICAM_GENTL32_PATH: ignoring non-Vimba transport layers:
+[AVCamera]   dropped C:\Program Files\FLIR Systems\Spinnaker\cti\vs2015
 [AVCamera] Starting Vimba (loading transport layers)...
 Traceback (most recent call last):
   File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 66, in _wait_for_any
@@ -12,6 +18,10 @@ _queue.Empty
 During handling of the above exception, another exception occurred:
 
 Traceback (most recent call last):
+  File "C:\Program Files\JetBrains\PyCharm Community Edition 2024.3.3\plugins\python-ce\helpers\pydev\pydevd.py", line 1570, in _exec
+    pydev_imports.execfile(file, globals, locals)  # execute the script
+  File "C:\Program Files\JetBrains\PyCharm Community Edition 2024.3.3\plugins\python-ce\helpers\pydev\_pydev_imps\_pydev_execfile.py", line 18, in execfile
+    exec(compile(contents+"\n", file, 'exec'), glob, loc)
   File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py", line 496, in <module>
     w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
   File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py", line 134, in __init__
@@ -23,5 +33,45 @@ Traceback (most recent call last):
   File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 72, in _wait_for_any
     raise RuntimeError(
 RuntimeError: Timed out after 30s waiting for {'inited'} from dual camera worker
+python-BaseException
+[AVCamera] Vimba up. Discovering cameras...
+[AVCamera] Discovery done: ['DEV_000F315BDC0C', 'DEV_000F315BC084']
+[AVCamera] Opening camera 'DEV_000F315BC084'...
+[AVCamera] ...Found camera: DEV_000F315BC084
+[AVCamera] Pixel format set to Mono8
+[AVCamera] Auto exposure mode set to Off
+[AVCamera] Connecting to Allied Vision Camera...
+[AVCamera] Starting Vimba (loading transport layers)...
+[AVCamera] Vimba up. Discovering cameras...
+[AVCamera] Discovery done: ['DEV_000F315BDC0C', 'DEV_000F315BC084']
+[AVCamera] Opening camera 'DEV_000F315BDC0C'...
+[AVCamera] ...Found camera: DEV_000F315BDC0C
+[AVCamera] Pixel format set to Mono8
+[AVCamera] Auto exposure mode set to Off
+[DualCamera] Applying configs to both cameras...
+[AVCamera] ROI set to x:500 y:500 width:1000 height:1000
+[AVCamera] Exposure time set to 201843 us
+[AVCamera] Gain set to 7 dB
+[AVCamera] Gamma set to 1.01
+[AVCamera] Applied full config for DEV_000F315BC084
+[AVCamera] ROI set to x:500 y:500 width:1000 height:1000
+[AVCamera] Exposure time set to 214075 us
+[AVCamera] Gain set to 7 dB
+[AVCamera] Gamma set to 1.0
+[AVCamera] Applied full config for DEV_000F315BDC0C
+[DualCamera] Configs applied successfully.
+[DualCameraWorker] Using Real cameras.
+[DualCamera] Applying configs to both cameras...
+[AVCamera] ROI set to x:500 y:500 width:1000 height:1000
+[AVCamera] Exposure time set to 201843 us
+[AVCamera] Gain set to 7 dB
+[AVCamera] Gamma set to 1.01
+[AVCamera] Applied full config for DEV_000F315BC084
+[AVCamera] ROI set to x:500 y:500 width:1000 height:1000
+[AVCamera] Exposure time set to 214075 us
+[AVCamera] Gain set to 7 dB
+[AVCamera] Gamma set to 1.0
+[AVCamera] Applied full config for DEV_000F315BDC0C
+[DualCamera] Configs applied successfully.
 
 Process finished with exit code 1
