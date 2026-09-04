@@ -39,7 +39,12 @@ class DualCameraProxy:
             "right_spec": self.right_spec.__dict__,
             "use_dummy": self.use_dummy,
         })
-        evt = self._wait_for("inited")
+        # First-time Vimba startup (transport-layer load + GigE discovery)
+        # can legitimately take well over 30 s on some machines; before the
+        # 30 s watchdog existed this wait was unbounded and simply looked
+        # like a slow GUI start. Give init a generous budget so a slow SDK
+        # start is not misreported as a dead worker.
+        evt = self._wait_for("inited", timeout=180.0)
         self._attach_rings(evt)
 
         # kick streaming (if your worker requires explicit start)
