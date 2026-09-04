@@ -49,16 +49,24 @@ class AlliedVisionCamera(BaseAlliedVisionCamera):
     def __init__(self, id="DEV_000F315BC084", pixel_format='Mono8', mode="software"):
         print("[AVCamera] Connecting to Allied Vision Camera...")
         self.stack = ExitStack()
+        # Progress prints on purpose: each of these three steps can block
+        # inside the Vimba C layer (transport-layer load, GigE discovery,
+        # camera open). When the dual-camera worker times out, the last
+        # line printed tells us which step hung.
+        print("[AVCamera] Starting Vimba (loading transport layers)...", flush=True)
         self.vimba = self.stack.enter_context(Vimba.get_instance())
         self.camera = None
         self.streaming = False
         self._last_callback = None
 
+        print("[AVCamera] Vimba up. Discovering cameras...", flush=True)
         cameras = self.vimba.get_all_cameras()
+        print(f"[AVCamera] Discovery done: {[cam.get_id() for cam in cameras]}", flush=True)
         if not cameras:
             raise RuntimeError("[AVCamera] No Allied Vision cameras found.")
 
         try:
+            print(f"[AVCamera] Opening camera '{id}'...", flush=True)
             self.camera = self.stack.enter_context(self.vimba.get_camera_by_id(id))
         except VimbaCameraError as e:
             available = [cam.get_id() for cam in cameras]
