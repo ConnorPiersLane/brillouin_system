@@ -1498,6 +1498,15 @@ class HiFrontend(QWidget):
 
     def receive_axial_scan_list(self, scan_list: list):
 
+        # A just-finished sweep scan: report the elapsed wall-clock time.
+        sweep_start = getattr(self, "_sweep_start_monotonic", None)
+        if sweep_start is not None:
+            self._sweep_start_monotonic = None
+            elapsed = time.monotonic() - sweep_start
+            log.info(f"[Brillouin Viewer] Sweep Scan finished | "
+                     f"elapsed {elapsed:.1f} s "
+                     f"({elapsed / 60:.2f} min)")
+
         # Update QListWidget
         self.axial_scans_list.clear()
         self.axial_scans_list.addItems(scan_list)
@@ -1723,6 +1732,10 @@ class HiFrontend(QWidget):
                 id=id_str,
                 eye_tracker_results=self.lastest_eye_tracker_results,
             )
+
+            # Start the sweep stopwatch; elapsed time is reported when the
+            # scan finishes (see receive_axial_scan_list).
+            self._sweep_start_monotonic = time.monotonic()
 
             self.take_sweep_scan_requested.emit(request)
 
