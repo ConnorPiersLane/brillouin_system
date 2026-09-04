@@ -1,28 +1,26 @@
-C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\Scripts\python.exe C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\scan_managers\ni_reflection_finder4.py
-Failed to get extended error info. DAQmxGetExtendedErrorInfo returned error code -200090.
+C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\Scripts\python.exe C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py
+[DualCamera] Initializing two Allied Vision cameras.
+[AVCamera] Connecting to Allied Vision Camera...
 Traceback (most recent call last):
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\scan_managers\ni_reflection_finder4.py", line 359, in <module>
-    res = find_reflection_realtime(
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\scan_managers\ni_reflection_finder4.py", line 155, in find_reflection_realtime
-    with ni.streaming():
-  File "C:\Users\Mandelstam\AppData\Local\Programs\Python\Python310\lib\contextlib.py", line 135, in __enter__
-    return next(self.gen)
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\ni\ni6008.py", line 236, in streaming
-    self.start_streaming()
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\ni\ni6008.py", line 161, in start_streaming
-    task = nidaqmx.Task()
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\nidaqmx\task\_task.py", line 121, in __init__
-    self._interpreter = utils._select_interpreter(grpc_options)
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\nidaqmx\utils.py", line 216, in _select_interpreter
-    return LibraryInterpreter()
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\nidaqmx\_library_interpreter.py", line 97, in __init__
-    major_version = self.get_system_info_attribute_uint32(0x1272)
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\nidaqmx\_library_interpreter.py", line 3534, in get_system_info_attribute_uint32
-    self.check_for_error(error_code)
-  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\.venv\lib\site-packages\nidaqmx\_library_interpreter.py", line 7271, in check_for_error
-    raise DaqError(extended_error_info, error_code)
-nidaqmx.errors.DaqError: Failed to retrieve error description.
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 66, in _wait_for_any
+    msg = self.evt_q.get(timeout=0.5)
+  File "C:\Users\Mandelstam\AppData\Local\Programs\Python\Python310\lib\multiprocessing\queues.py", line 114, in get
+    raise Empty
+_queue.Empty
 
-Status Code: -200090
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py", line 496, in <module>
+    w = DualCamImageCapture(use_dummy=False)  # set False to use real hardware
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\guis\human_interface\calibrate_dual_allied_vision_cameras\checkerboard_capture_gui.py", line 134, in __init__
+    self.proxy.start()
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 42, in start
+    evt = self._wait_for("inited")
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 58, in _wait_for
+    return self._wait_for_any({typ}, timeout=timeout)
+  File "C:\Users\Mandelstam\Documents\Connor\repos\brillouin_system\src\brillouin_system\devices\cameras\allied\own_subprocess\dual_camera_proxy.py", line 72, in _wait_for_any
+    raise RuntimeError(
+RuntimeError: Timed out after 30s waiting for {'inited'} from dual camera worker
 
 Process finished with exit code 1
