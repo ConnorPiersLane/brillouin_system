@@ -360,51 +360,25 @@ class SlineFromFrameConfig:
     # from the four-peak 4001-point fine-sweep determination of 2026-09-02
     # (four runs, agreement +-0.02 px across a realignment; residual
     # folded sines 0.06-0.09 MHz on outer_left/left/right; record in
-    # Data/2026-9-2/determine_fourpeak_summary.txt + phase3 files). The
-    # OUTER_RIGHT order additionally carries an intrinsic near-core
-    # SATELLITE line — a scaled displaced copy of the main peak (same
-    # gamma, same kernel, amplitude ratio psf_sat_ratio_outer_right at
-    # psf_sat_delta_outer_right_px) — without which its fitted position
-    # wobbles once per pixel by ~3.2 MHz that no (sigma, tau) can remove.
-    # With the satellite the wobble is 0.32-0.41 MHz, validated BLIND on
-    # the three runs it was not tuned on (incl. post-realignment). Set
-    # the ratio to 0 to disable. The other three orders need no
-    # satellite (their sinusoid floors leave nothing to determine).
+    # Data/2026-9-2/determine_fourpeak_summary.txt + phase3 files).
+    # These are the ONLY kernel constants (user decision 2026-09-04:
+    # one model family, Gauss + one-sided tail, for every peak). The
+    # additionally MEASURED terms — the row-tilt boxcar and the
+    # outer_right near-core satellite — are deliberately NOT in
+    # production: they live in spectrum_fitting/psf/extras.py with the
+    # 09-04 constants recorded in psf_measurement.PSF_MEASURED. Their
+    # known cost: the outer_right position wobbles once per pixel by
+    # ~3.2 MHz without its satellite (no sigma/tau removes it), and the
+    # outer sigma/tau below are EFFECTIVE values that absorb each
+    # order's tilt smear (hence outer_left tau 0.95).
     psf_sigma_left_px: float = 0.26
     psf_sigma_right_px: float = 0.27
     psf_tau_left_px: float = 0.39
     psf_tau_right_px: float = 0.17
-    # outer constants redetermined 2026-09-04 under the measured row-tilt
-    # boxcars (all four sweep runs agree; outer_right tau ±0.001 px) —
-    # the old effective values (sigma 0.39/0.36, tau 0.95/0.0) were the
-    # tilt smear leaking into the kernel
-    psf_sigma_outer_left_px: float = 0.14
-    psf_sigma_outer_right_px: float = 0.15
-    psf_tau_outer_left_px: float = 0.13
-    psf_tau_outer_right_px: float = 0.08
-    psf_sat_ratio_outer_right: float = 0.037
-    psf_sat_delta_outer_right_px: float = -1.23
-    # row-tilt boxcars (2026-09-04): each peak's line is tilted against
-    # the CCD columns (measured 2026-09: 0.147/0.096/0.078/0.064 px/row
-    # for OL/L/R/OR), so the 13-row sum smears it with a top-hat of
-    # width tilt*n_rows — directly visible as the outer_left profile's
-    # TRAPEZOIDAL 1 px flat top. Carried as a kernel element of
-    # MEASURED width (geometry constant, never fitted); 0 disables.
-    # Without it the fitted sigma/tau absorb the smear and turn
-    # effective (outer_left tau read 0.95 instead of ~0.13). The INNER
-    # peaks keep box 0 by measurement, not omission: the row-intensity
-    # profile is bell-shaped (sd ~2 rows), so their tilt smear is
-    # Gauss+tail-shaped and already lives in their sigma/tau — a top-hat
-    # there is the wrong shape (sines 0.09/0.25 -> 4.8/2.9 MHz,
-    # unrecoverable, 2026-09-04). Only the outer orders prefer the
-    # literal top-hat (outer_left's trapezoid profile; outer_right sine
-    # 0.54 -> 0.13 MHz and narrow-line water widths +0.05 of Holmes).
-    # The four tilts are ONE physical constant: ~27 MHz/row frequency
-    # shear divided by each track's local dispersion.
-    psf_box_outer_left_px: float = 1.95
-    psf_box_left_px: float = 0.0
-    psf_box_right_px: float = 0.0
-    psf_box_outer_right_px: float = 0.85
+    psf_sigma_outer_left_px: float = 0.39
+    psf_sigma_outer_right_px: float = 0.36
+    psf_tau_outer_left_px: float = 0.95
+    psf_tau_outer_right_px: float = 0.0
 
     def __post_init__(self):
         if self.row_selection not in ROW_SELECTIONS:
@@ -424,6 +398,17 @@ class SlineFromFrameConfig:
             raise AttributeError(
                 "SlineFromFrameConfig.psf_sigma_px was split per peak "
                 "(2026-08-31): use psf_sigma_left_px / psf_sigma_right_px."
+            )
+        if name in ("psf_sat_ratio_outer_right",
+                    "psf_sat_delta_outer_right_px",
+                    "psf_box_outer_left_px", "psf_box_left_px",
+                    "psf_box_right_px", "psf_box_outer_right_px"):
+            raise AttributeError(
+                f"SlineFromFrameConfig.{name} was removed from production "
+                "(2026-09-04): the satellite and row-tilt boxcar are "
+                "measured-but-not-production terms — see "
+                "spectrum_fitting/psf/extras.py and "
+                "psf_measurement.PSF_MEASURED."
             )
         raise AttributeError(
             f"{type(self).__name__!r} object has no attribute {name!r}")
@@ -467,6 +452,12 @@ def load_sline_from_frame_config(path: Path) -> SlineFromFrameConfig:
         shared = raw.pop("psf_sigma_px")
         raw.setdefault("psf_sigma_left_px", shared)
         raw.setdefault("psf_sigma_right_px", shared)
+    # A TOML from the brief boxcar/satellite production era (2026-09-04)
+    # carries these keys; the terms moved to psf/extras.py — drop them.
+    for key in ("psf_sat_ratio_outer_right", "psf_sat_delta_outer_right_px",
+                "psf_box_outer_left_px", "psf_box_left_px",
+                "psf_box_right_px", "psf_box_outer_right_px"):
+        raw.pop(key, None)
     return SlineFromFrameConfig(**raw)
 
 def save_config_section(path: Path, section: str, config: ThreadSafeConfig):

@@ -20,7 +20,7 @@ from brillouin_system.spectrum_fitting.fit_util import (
 
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.spectrum_fitting.dho import DhoAxes, dho_profile
-from brillouin_system.spectrum_fitting.psf import psf1, psf2, psf3, psf4
+from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.row_selection import (
     select_rows,
     captured_fraction,
@@ -549,6 +549,12 @@ class SpectrumFitter:
                 # cal lines; every peak carries its own sigma and tau):
                 #   2 peaks: [left, right] (the main pair)
                 #   4 peaks: [outer_left, left, right, outer_right]
+                # ONE model family for every peak (user convention,
+                # re-affirmed 2026-09-04): Lorentzian x Gauss(sigma) x
+                # Tail(tau) x Pixel, per-peak frozen constants. The
+                # measured-but-not-production terms (row-tilt boxcar,
+                # outer_right satellite) live in psf.extras, outside
+                # this chain.
                 if n_peaks == 4:
                     sigmas = [float(self.sline_config.psf_sigma_outer_left_px),
                               sigma_l, sigma_r,
@@ -556,45 +562,12 @@ class SpectrumFitter:
                     taus = [float(self.sline_config.psf_tau_outer_left_px),
                             tau_l, tau_r,
                             float(self.sline_config.psf_tau_outer_right_px)]
-                    # the outer_right order carries an intrinsic near-core
-                    # satellite line (a scaled displaced copy of the main
-                    # peak, measured 2026-09-02; see the config comment) —
-                    # frozen constants, no extra free parameters; ratio 0
-                    # disables.
-                    sat_r = float(self.sline_config.psf_sat_ratio_outer_right)
-                    sat_d = float(
-                        self.sline_config.psf_sat_delta_outer_right_px)
-                    boxes = [
-                        float(self.sline_config.psf_box_outer_left_px),
-                        float(self.sline_config.psf_box_left_px),
-                        float(self.sline_config.psf_box_right_px),
-                        float(self.sline_config.psf_box_outer_right_px)]
-                    # psf1..psf4 (psf/peaks.py): each with its measured
-                    # row-tilt boxcar, outer Stokes additionally with the
-                    # intrinsic satellite
-                    peak_funcs = [
-                        lambda x, a, c, w: psf1(x, a, c, w, sigmas[0],
-                                                taus[0], boxes[0]),
-                        lambda x, a, c, w: psf2(x, a, c, w, sigmas[1],
-                                                taus[1], boxes[1]),
-                        lambda x, a, c, w: psf3(x, a, c, w, sigmas[2],
-                                                taus[2], boxes[2]),
-                        lambda x, a, c, w: psf4(x, a, c, w, sigmas[3],
-                                                taus[3], sat_r, sat_d,
-                                                boxes[3]),
-                    ]
                 else:
-                    peak_funcs = [
-                        lambda x, a, c, w: psf2(
-                            x, a, c, w, sigma_l, tau_l,
-                            float(self.sline_config.psf_box_left_px)),
-                        lambda x, a, c, w: psf3(
-                            x, a, c, w, sigma_r, tau_r,
-                            float(self.sline_config.psf_box_right_px)),
-                    ]
+                    sigmas = [sigma_l, sigma_r]
+                    taus = [tau_l, tau_r]
 
                 def peak(x, a, c, w, i):
-                    return peak_funcs[i](x, a, c, w)
+                    return psf_profile(x, a, c, w, sigmas[i], taus[i])
             else:
                 def peak(x, a, c, w, i):
                     return _lorentzian_pixel_integrated(x, a, c, w)

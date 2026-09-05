@@ -76,10 +76,26 @@ class PsfMeasurement:
     psf_sigma_right_px: float = 0.27
     psf_tau_left_px: float = 0.39
     psf_tau_right_px: float = 0.17
-    psf_sigma_outer_left_px: float = 0.14
-    psf_sigma_outer_right_px: float = 0.15
-    psf_tau_outer_left_px: float = 0.13
-    psf_tau_outer_right_px: float = 0.08
+    # EFFECTIVE outer constants (2026-09-03 determination, no extras):
+    # these are what the PRODUCTION Gauss+tail kernel should carry —
+    # they absorb each order's tilt smear (user decision 2026-09-04:
+    # one plain model family for every peak; the physical
+    # boxcar-decomposed set and the satellite live below and in
+    # psf/extras.py, outside the chain).
+    psf_sigma_outer_left_px: float = 0.39
+    psf_sigma_outer_right_px: float = 0.36
+    psf_tau_outer_left_px: float = 0.95
+    psf_tau_outer_right_px: float = 0.0
+    # NOT-IN-PRODUCTION measured terms (2026-09-04 all-peak boxcar arc;
+    # implemented in psf/extras.py for analyses). Physical decomposition
+    # of the outer kernels under their measured row-tilt boxcars
+    # (tilt x 13 rows; one ~27 MHz/row frequency shear / local
+    # dispersion, stable across all four sweeps incl. a realignment):
+    #   outer_left  box 1.95 px, tau 0.13, sigma 0.14
+    #   outer_right box 0.85 px, tau 0.08 (+-0.001 across four runs),
+    #               sigma 0.15
+    # Inner boxes are 0 BY MEASUREMENT (bell-shaped row profile: their
+    # smear is Gauss+tail-shaped and already inside sigma/tau).
     psf_box_outer_left_px: float = 1.95
     psf_box_left_px: float = 0.0
     psf_box_right_px: float = 0.0
@@ -87,22 +103,19 @@ class PsfMeasurement:
     psf_sat_ratio_outer_right: float = 0.037
     psf_sat_delta_outer_right_px: float = -1.23
     psf_measured: str = (
-        "2026-09-04 (all-peak boxcar arc; inner 2026-09-03, 9-2 sweeps)")
+        "2026-09-03 (four-peak 4001-pt determination, 9-2 sweeps); "
+        "extras measured 2026-09-04, kept out of production")
     psf_method: str = (
-        "Four 4001-point four-peak fine sweeps (Data/2026-9-2): row tilts "
-        "measured per peak on all four runs (tilt_all_runs.py, one ~27 "
-        "MHz/row shear / local dispersion, stable incl. realignment); "
-        "boxcars frozen at tilt x 13 rows for the OUTER orders (the inner "
-        "peaks' bell-weighted smear is Gauss+tail-shaped, inside their "
-        "sigma/tau); (sigma, tau) per peak from adaptive scans minimizing "
-        "each peak's folded once-per-pixel sine (determine_allbox.py, "
-        "four-run agreement, outer_right tau +-0.001 px); sigma within the "
-        "<1 MHz band picked by CROSS-ORDER instrument-width consistency "
-        "(calibration frames only). outer_right additionally carries an "
-        "intrinsic near-core satellite (ratio 0.037 at -1.23 px), blind- "
-        "validated across runs. All 16 peak x run sines <1 MHz at this set "
-        "(verify_final_constants.py); water/glycerol width closures are "
-        "held-out validation, not inputs."
+        "Four 4001-point four-peak fine sweeps (Data/2026-9-2): adaptive "
+        "per-peak scans of each (sigma, tau) minimizing that peak's folded "
+        "once-per-pixel sine; four-run agreement +-0.02 px incl. a "
+        "realignment. The outer sigma/tau are EFFECTIVE (they absorb the "
+        "measured row-tilt smear). Known cost of the plain kernel: the "
+        "outer_right position wobbles once per pixel by ~3.2 MHz without "
+        "its measured near-core satellite (ratio 0.037 at -1.23 px, "
+        "blind-validated) — that term and the row-tilt boxcars are "
+        "preserved in psf/extras.py, deliberately outside the chain "
+        "(user decision 2026-09-04)."
     )
 
 

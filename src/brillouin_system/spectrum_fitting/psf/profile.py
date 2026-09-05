@@ -1,9 +1,10 @@
 """The detected profile of one Lorentzian line.
 
 Single responsibility: evaluate Lorentzian(gamma) ⊗ detection kernel
-at the requested pixels — the workhorse every peak model is built
-from. The fitted parameters are amp/cen/gamma; sigma/tau/box are the
-frozen instrument constants (see the fitting config).
+at the requested pixels — the ONE peak model every production fit is
+built from, identical in form for all four peaks. The fitted
+parameters are amp/cen/gamma; sigma/tau are the frozen per-peak
+instrument constants (see the fitting config).
 """
 import numpy as np
 
@@ -11,12 +12,11 @@ from .components import lorentzian
 from .kernel import DX, PAD_PX, detection_kernel
 
 
-def psf_profile(px, amp, cen, gamma, sigma, tau, box=0.0):
+def psf_profile(px, amp, cen, gamma, sigma, tau):
     """Lorentzian(gamma) through the pixel response, evaluated at px.
 
     amp is the peak height of the underlying Lorentzian, matching the
-    plain pixel-integrated Lorentzian model's convention. box: measured
-    row-tilt boxcar full width [px], 0 to disable.
+    plain pixel-integrated Lorentzian model's convention.
     """
     px = np.asarray(px, dtype=float)
 
@@ -27,7 +27,7 @@ def psf_profile(px, amp, cen, gamma, sigma, tau, box=0.0):
 
     lor = lorentzian(xf, cen, gamma)
 
-    k_x0, k = detection_kernel(float(sigma), float(tau), DX, float(box))
+    k_x0, k = detection_kernel(float(sigma), float(tau), DX)
     conv = np.convolve(lor, k) * DX
     conv_x0 = xf[0] + k_x0
     conv_x = conv_x0 + DX * np.arange(conv.size)

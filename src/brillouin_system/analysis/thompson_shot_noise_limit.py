@@ -258,21 +258,19 @@ def theoretical_precision(fs: FittedSpectrum,
                 p.calibration_width_left_peak,
                 calc.calibration_width_left_peak_dpx,
                 fs.left_peak_center_px),
-            k.psf_sigma_left_px, k.psf_tau_left_px, k.psf_box_left_px)
+            k.psf_sigma_left_px, k.psf_tau_left_px)
         w_r = detected_hwhm_px(
             fs.right_peak_width_px + vipa_hwhm(
                 p.calibration_width_right_peak,
                 calc.calibration_width_right_peak_dpx,
                 fs.right_peak_center_px),
-            k.psf_sigma_right_px, k.psf_tau_right_px, k.psf_box_right_px)
+            k.psf_sigma_right_px, k.psf_tau_right_px)
     elif is_psf_fit(fs.model):
         k = sline_from_frame_config.get()
         w_l = detected_hwhm_px(fs.left_peak_width_px,
-                               k.psf_sigma_left_px, k.psf_tau_left_px,
-                               k.psf_box_left_px)
+                               k.psf_sigma_left_px, k.psf_tau_left_px)
         w_r = detected_hwhm_px(fs.right_peak_width_px,
-                               k.psf_sigma_right_px, k.psf_tau_right_px,
-                               k.psf_box_right_px)
+                               k.psf_sigma_right_px, k.psf_tau_right_px)
     else:
         w_l, w_r = fs.left_peak_width_px, fs.right_peak_width_px
     s_l = a_l * float(w_l)
@@ -320,12 +318,10 @@ def theoretical_precision(fs: FittedSpectrum,
             k = sline_from_frame_config.get()
             w_ol = detected_hwhm_px(fs.outer_left_peak_width_px,
                                     k.psf_sigma_outer_left_px,
-                                    k.psf_tau_outer_left_px,
-                                    k.psf_box_outer_left_px)
+                                    k.psf_tau_outer_left_px)
             w_or = detected_hwhm_px(fs.outer_right_peak_width_px,
                                     k.psf_sigma_outer_right_px,
-                                    k.psf_tau_outer_right_px,
-                                    k.psf_box_outer_right_px)
+                                    k.psf_tau_outer_right_px)
         else:
             w_ol = fs.outer_left_peak_width_px
             w_or = fs.outer_right_peak_width_px

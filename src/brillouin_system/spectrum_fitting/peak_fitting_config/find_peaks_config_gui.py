@@ -51,10 +51,7 @@ class FindPeaksConfigDialog(QDialog):
         return ["psf_sigma_left_px", "psf_sigma_right_px",
                 "psf_tau_left_px", "psf_tau_right_px",
                 "psf_sigma_outer_left_px", "psf_sigma_outer_right_px",
-                "psf_tau_outer_left_px", "psf_tau_outer_right_px",
-                "psf_box_outer_left_px", "psf_box_left_px",
-                "psf_box_right_px", "psf_box_outer_right_px",
-                "psf_sat_ratio_outer_right", "psf_sat_delta_outer_right_px"]
+                "psf_tau_outer_left_px", "psf_tau_outer_right_px"]
 
     def na_field_names(self):
         # NA collection model (post-hoc scalar correction only, never in the
