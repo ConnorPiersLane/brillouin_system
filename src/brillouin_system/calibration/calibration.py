@@ -277,10 +277,16 @@ class CalibrationCalculator:
         """Sample HWHM from the OUTER orders: fitted width minus the outer
         instrument width, at each outer peak's own pixel — the outer-order
         counterpart of sample_linewidth_ghz (same rules: pixel-response fits
-        only, linear Lorentzian subtraction). The DHO branch does not apply:
-        'dho_x_psf' is inner-pair only, so a DHO fit carries no outer peaks."""
+        only, linear Lorentzian subtraction). A four-peak DHO fit
+        (2026-09-05) needs NO subtraction, exactly like the inner pair:
+        the outer instrument widths were folded into its kernels at fit
+        time, so the fitted widths ARE acoustic already."""
         raw_l, raw_r = self.hwhm_outer_ghz(fitting)
-        if raw_l is None or not is_psf_fit(fitting.model):
+        if raw_l is None:
+            return None, None
+        if is_dho_fit(fitting.model):
+            return raw_l, raw_r
+        if not is_psf_fit(fitting.model):
             return None, None
 
         inst_l, inst_r = self.instrument_hwhm_outer_ghz(
@@ -367,16 +373,16 @@ class CalibrationCalculator:
         return slope * dpx
 
     def calibration_width_left_peak_dpx(self, px):
-        """Ideal FWHM width of the left peak in pixels."""
+        """Instrument (EOM sideband) Lorentzian HWHM of the left peak in pixels, at px."""
         return np.polyval(self.p.calibration_width_left_peak, px)
 
     def calibration_width_right_peak_dpx(self, px):
-        """Ideal FWHM width of the right peak in pixels."""
+        """Instrument (EOM sideband) Lorentzian HWHM of the right peak in pixels, at px."""
         return np.polyval(self.p.calibration_width_right_peak, px)
 
     def calibration_width_left_peak_ghz(self, px):
         """
-        Convert the width (FWHM) of the left Brillouin peak from pixels to GHz.
+        Instrument Lorentzian HWHM of the left peak in GHz, at px.
 
         Parameters
         ----------
@@ -393,7 +399,7 @@ class CalibrationCalculator:
 
     def calibration_width_right_peak_ghz(self, px):
         """
-        Convert the width (FWHM) of the right Brillouin peak from pixels to GHz.
+        Instrument Lorentzian HWHM of the right peak in GHz, at px.
 
         Parameters
         ----------
@@ -458,6 +464,15 @@ class CalibrationCalculator:
                 )
             return np.asarray(coeffs, dtype=float)
 
+        def optional(coeffs):
+            # outer tracks: present only on four-peak calibrations — a
+            # missing/degenerate one downgrades to inner-only DHO
+            # (has_outer False) instead of raising.
+            if coeffs is None or not np.all(
+                    np.isfinite(np.asarray(coeffs, dtype=float))):
+                return None
+            return np.asarray(coeffs, dtype=float)
+
         return DhoAxes(
             freq_left_poly=checked(p.freq_left_peak, "freq_left_peak"),
             freq_right_poly=checked(p.freq_right_peak, "freq_right_peak"),
@@ -465,6 +480,12 @@ class CalibrationCalculator:
                 p.calibration_width_left_peak, "calibration_width_left_peak"),
             instrument_width_right_poly=checked(
                 p.calibration_width_right_peak, "calibration_width_right_peak"),
+            freq_outer_left_poly=optional(p.freq_outer_left_peak),
+            freq_outer_right_poly=optional(p.freq_outer_right_peak),
+            instrument_width_outer_left_poly=optional(
+                p.calibration_width_outer_left_peak),
+            instrument_width_outer_right_poly=optional(
+                p.calibration_width_outer_right_peak),
         )
 
     def hwhm_ghz(self, fitting: FittedSpectrum) -> tuple[float | None, float | None]:

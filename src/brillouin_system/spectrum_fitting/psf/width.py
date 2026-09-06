@@ -18,11 +18,11 @@ from functools import lru_cache
 
 import numpy as np
 
-from .components import gaussian_kernel, tail_kernel
+from .components import boxcar_kernel, gaussian_kernel, tail_kernel
 from .kernel import DX
 
 
-def detected_hwhm_px(gamma, sigma, tau) -> float:
+def detected_hwhm_px(gamma, sigma, tau, box=0.0) -> float:
     """HWHM [px] of the peak as it lands on the detector.
 
     The fitted gamma is the Lorentzian CORE before the camera PSF; the
@@ -33,23 +33,26 @@ def detected_hwhm_px(gamma, sigma, tau) -> float:
     gamma = max(float(gamma), 1e-9)
     sigma = float(sigma)
     tau = float(tau)
-    if sigma <= 0.0 and tau <= 0.0:
+    box = float(box)
+    if sigma <= 0.0 and tau <= 0.0 and box <= 0.0:
         return gamma
-    return _detected_hwhm_cached(int(round(gamma * 1000.0)), sigma, tau)
+    return _detected_hwhm_cached(int(round(gamma * 1000.0)), sigma, tau,
+                                 box)
 
 
 @lru_cache(maxsize=4096)
-def _detected_hwhm_cached(gamma_millipx: int, sigma: float,
-                          tau: float) -> float:
+def _detected_hwhm_cached(gamma_millipx: int, sigma: float, tau: float,
+                          box: float) -> float:
     gamma = max(gamma_millipx / 1000.0, 1e-9)
 
-    half = 10.0 * gamma + 6.0 * (sigma + tau) + 1.0
+    half = 10.0 * gamma + 6.0 * (sigma + tau) + box + 1.0
     n = int(round(2.0 * half / DX)) + 1
     x = -half + DX * np.arange(n)
     prof = 1.0 / (1.0 + (x / gamma) ** 2)
     x0 = x[0]
 
-    for k_x0, k in (gaussian_kernel(sigma, DX), tail_kernel(tau, DX)):
+    for k_x0, k in (gaussian_kernel(sigma, DX), tail_kernel(tau, DX),
+                    boxcar_kernel(box, DX)):
         if k.size > 1:
             prof = np.convolve(prof, k / k.sum())
             x0 += k_x0

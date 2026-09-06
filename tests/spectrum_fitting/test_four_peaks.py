@@ -52,7 +52,11 @@ def make_fitter(model="prm0", n_peaks=2) -> SpectrumFitter:
         psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
         psf_sigma_outer_left_px=SIGMA, psf_sigma_outer_right_px=SIGMA,
         psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
-        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR))
+        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR,
+        psf_sat_ratio_outer_right=0.0, psf_sat_delta_outer_right_px=0.0,
+        psf_box_outer_left_px=0.0, psf_box_outer_right_px=0.0,
+        env_slope_outer_left_perpx=0.0, env_slope_left_perpx=0.0,
+        env_slope_right_perpx=0.0, env_slope_outer_right_perpx=0.0))
     fitter.update_sample_config(make_config(model))
     fitter.update_reference_config(make_config("lorentzian_x_psf"))
     return fitter
@@ -67,37 +71,59 @@ def make_spectrum(seed=0, centers=CENTERS):
     return px, true + rng.normal(0.0, 2.0, size=true.shape)
 
 
-def test_extras_stay_out_of_production():
-    # the satellite and row-tilt boxcar are measured-but-not-production
-    # terms (user decision 2026-09-04): the config must refuse their old
-    # field names with a pointer to psf.extras, and the extras module
-    # must still reproduce them for analyses.
-    from brillouin_system.spectrum_fitting.psf import extras
-
+def test_boxcar_outer_only():
+    # the row-tilt boxcar is production for the OUTER orders only
+    # (2026-09-05): outer box fields exist, inner box names are refused
+    # BY MEASUREMENT (bell row profile — a top-hat is the wrong shape
+    # for the inner smear), and the box must widen the profile without
+    # changing its area.
     fitter = make_fitter(n_peaks=4)
-    with pytest.raises(AttributeError, match="extras"):
-        fitter.sline_config.psf_sat_ratio_outer_right
-    with pytest.raises(AttributeError, match="extras"):
-        fitter.sline_config.psf_box_outer_left_px
+    assert fitter.sline_config.psf_box_outer_left_px == 0.0  # test pin
+    with pytest.raises(AttributeError, match="MEASUREMENT"):
+        fitter.sline_config.psf_box_left_px
 
     px = np.arange(0.0, 200.0)
-    # psf4 with ratio 0 and box 0 must equal the production profile
-    plain = psf_profile(px, AMPS[3], CENTERS[3], GAMMA, SIGMA, TAUS[3])
-    same = extras.psf4(px, AMPS[3], CENTERS[3], GAMMA, SIGMA, TAUS[3],
-                       0.0, 0.0)
-    np.testing.assert_allclose(same, plain, rtol=0, atol=1e-9)
-    # with a satellite it must be the profile plus the displaced copy
-    sat = extras.psf4(px, AMPS[3], CENTERS[3], GAMMA, SIGMA, TAUS[3],
-                      0.08, -1.23)
-    copy = psf_profile(px, AMPS[3] * 0.08, CENTERS[3] - 1.23, GAMMA,
-                       SIGMA, TAUS[3])
-    np.testing.assert_allclose(sat, plain + copy, rtol=0, atol=1e-9)
-    # psf1's boxcar widens the detected profile (peak drops, area holds)
-    boxed = extras.psf1(px, AMPS[0], CENTERS[0], GAMMA, SIGMA, TAUS[0],
-                        1.95)
+    boxed = psf_profile(px, AMPS[0], CENTERS[0], GAMMA, SIGMA, TAUS[0],
+                        box=1.95)
     plain0 = psf_profile(px, AMPS[0], CENTERS[0], GAMMA, SIGMA, TAUS[0])
     assert boxed.max() < 0.95 * plain0.max()
     np.testing.assert_allclose(boxed.sum(), plain0.sum(), rtol=2e-3)
+
+
+def test_outer_right_satellite_removes_center_bias():
+    # the outer_right order carries an intrinsic near-core satellite
+    # (2026-09-02 determination, restored to production 2026-09-05):
+    # a spectrum synthesized WITH the satellite must fit without centre
+    # bias when the config carries the constants, and with a visible
+    # pull when the ratio is 0.
+    sat_r, sat_d = 0.08, -1.23      # exaggerated ratio for a crisp test
+    px = np.arange(0.0, 200.0)
+    true = np.full_like(px, OFFSET)
+    for a, c, tau in zip(AMPS, CENTERS, TAUS):
+        true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
+    true = true + psf_profile(px, AMPS[3] * sat_r, CENTERS[3] + sat_d,
+                              GAMMA, SIGMA, TAUS[3])
+    rng = np.random.default_rng(7)
+    sline = true + rng.normal(0.0, 2.0, size=true.shape)
+
+    def fit_with(ratio, delta):
+        fitter = make_fitter(n_peaks=4)
+        fitter.update_sline_config(replace(
+            fitter.sline_config,
+            psf_sat_ratio_outer_right=ratio,
+            psf_sat_delta_outer_right_px=delta))
+        r = fitter.fit(px, sline, is_reference_mode=True, n_peaks=4)
+        assert r.is_success
+        return r
+
+    with_sat = fit_with(sat_r, sat_d)
+    without = fit_with(0.0, 0.0)
+    err_with = abs(with_sat.outer_right_peak_center_px - CENTERS[3])
+    err_without = abs(without.outer_right_peak_center_px - CENTERS[3])
+    assert err_with < 0.03
+    assert err_without > 2.0 * err_with
+    assert abs(with_sat.left_peak_center_px - CENTERS[1]) < 0.03
+    assert abs(with_sat.right_peak_center_px - CENTERS[2]) < 0.03
 
 
 def test_n_peaks_validation():

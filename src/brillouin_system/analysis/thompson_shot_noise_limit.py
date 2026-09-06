@@ -318,10 +318,12 @@ def theoretical_precision(fs: FittedSpectrum,
             k = sline_from_frame_config.get()
             w_ol = detected_hwhm_px(fs.outer_left_peak_width_px,
                                     k.psf_sigma_outer_left_px,
-                                    k.psf_tau_outer_left_px)
+                                    k.psf_tau_outer_left_px,
+                                    k.psf_box_outer_left_px)
             w_or = detected_hwhm_px(fs.outer_right_peak_width_px,
                                     k.psf_sigma_outer_right_px,
-                                    k.psf_tau_outer_right_px)
+                                    k.psf_tau_outer_right_px,
+                                    k.psf_box_outer_right_px)
         else:
             w_ol = fs.outer_left_peak_width_px
             w_or = fs.outer_right_peak_width_px

@@ -1,23 +1,22 @@
-"""Composition of the detection kernel: Gauss ⊗ Tail ⊗ Pixel.
+"""Composition of the detection kernel: Gauss ⊗ Tail ⊗ [Boxcar ⊗] Pixel.
 
 Single responsibility: combine the single-responsibility components
-into ONE cached kernel on the fine grid. The constants (sigma, tau)
-are FROZEN instrument constants supplied by the fitting config —
-never fitted per frame. Coordinates are tracked explicitly: convolving
-arrays sampled from a0 and b0 yields a grid starting at a0 + b0, so
-the pixel top-hat (spanning -0.5..+0.5) and the one-sided tail
-(starting at 0) end up correctly placed instead of silently shifting
-the profile. The result is normalised to unit AREA (k.sum()*dx == 1).
-
-Measured-but-not-production terms (row-tilt boxcar, outer_right
-satellite) live in psf.extras, deliberately outside this chain
-(user decision 2026-09-04).
+into ONE cached kernel on the fine grid. The constants (sigma, tau,
+box) are FROZEN instrument constants supplied by the fitting config —
+never fitted per frame. box is the measured row-tilt smear, carried in
+production by the OUTER orders only (2026-09-05; 0 = off, identity).
+Coordinates are tracked explicitly: convolving arrays sampled from a0
+and b0 yields a grid starting at a0 + b0, so the pixel top-hat
+(spanning -0.5..+0.5) and the one-sided tail (starting at 0) end up
+correctly placed instead of silently shifting the profile. The result
+is normalised to unit AREA (k.sum()*dx == 1).
 """
 from functools import lru_cache
 
 import numpy as np
 
-from .components import gaussian_kernel, pixel_kernel, tail_kernel
+from .components import (boxcar_kernel, gaussian_kernel, pixel_kernel,
+                         tail_kernel)
 
 # Fine grid step [px] for the convolution. The frozen constants were
 # measured with 0.02 px; kernel features are ~0.25 px wide, so this is
@@ -28,12 +27,19 @@ PAD_PX = 4.0
 
 
 @lru_cache(maxsize=64)
-def detection_kernel(sigma: float, tau: float, dx: float):
+def detection_kernel(sigma: float, tau: float, dx: float,
+                     box: float = 0.0):
     """(x0, k): the full detection kernel for one peak."""
     g_x0, g = gaussian_kernel(sigma, dx)
     t_x0, t = tail_kernel(tau, dx)
     b_x0, b = pixel_kernel(dx)
+    # TOP-HAT smear, deliberately: the weighted row-profile comb
+    # (components/row_smear.py) is the more literal geometry but FAILS
+    # the outer_right calibration sine (4.1 vs 0.13 MHz floor, measured
+    # 2026-09-05 or_satellite_rescan) — the sine-VALIDATED kernel is
+    # the top-hat and only verified changes enter production.
+    w_x0, w = boxcar_kernel(box, dx)
 
-    k = np.convolve(np.convolve(g, t), b)
+    k = np.convolve(np.convolve(np.convolve(g, t), b), w)
     k = k / (k.sum() * dx)
-    return g_x0 + t_x0 + b_x0, k
+    return g_x0 + t_x0 + b_x0 + w_x0, k

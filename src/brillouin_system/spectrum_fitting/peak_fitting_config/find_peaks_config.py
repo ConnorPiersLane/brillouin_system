@@ -361,24 +361,56 @@ class SlineFromFrameConfig:
     # (four runs, agreement +-0.02 px across a realignment; residual
     # folded sines 0.06-0.09 MHz on outer_left/left/right; record in
     # Data/2026-9-2/determine_fourpeak_summary.txt + phase3 files).
-    # These are the ONLY kernel constants (user decision 2026-09-04:
-    # one model family, Gauss + one-sided tail, for every peak). The
-    # additionally MEASURED terms — the row-tilt boxcar and the
-    # outer_right near-core satellite — are deliberately NOT in
-    # production: they live in spectrum_fitting/psf/extras.py with the
-    # 09-04 constants recorded in psf_measurement.PSF_MEASURED. Their
-    # known cost: the outer_right position wobbles once per pixel by
-    # ~3.2 MHz without its satellite (no sigma/tau removes it), and the
-    # outer sigma/tau below are EFFECTIVE values that absorb each
-    # order's tilt smear (hence outer_left tau 0.95).
+    # One model family, Gauss + one-sided tail (+ measured row-tilt
+    # boxcar on the OUTER orders, restored 2026-09-05 for the outer
+    # width criterion — it took outer_left's water closure 0.82->0.94+;
+    # the inner peaks measurably REJECT the top-hat, their bell-shaped
+    # row smear already lives in sigma/tau). With the boxes in, the
+    # outer sigma/tau are the PHYSICAL 09-04 determination (four-run
+    # agreement; outer_right tau +-0.001 px), not the old effective
+    # 0.39/0.95, 0.36/0.0 that impersonated the smear.
     psf_sigma_left_px: float = 0.26
     psf_sigma_right_px: float = 0.27
     psf_tau_left_px: float = 0.39
     psf_tau_right_px: float = 0.17
-    psf_sigma_outer_left_px: float = 0.39
-    psf_sigma_outer_right_px: float = 0.36
-    psf_tau_outer_left_px: float = 0.95
-    psf_tau_outer_right_px: float = 0.0
+    psf_sigma_outer_left_px: float = 0.14
+    psf_sigma_outer_right_px: float = 0.15
+    psf_tau_outer_left_px: float = 0.13
+    psf_tau_outer_right_px: float = 0.08
+    psf_box_outer_left_px: float = 1.95
+    psf_box_outer_right_px: float = 0.85
+    # OUTER_RIGHT near-core satellite (RESTORED to production
+    # 2026-09-05, user): an intrinsic scaled displaced copy of that
+    # order's line (same gamma, same kernel, ratio at delta px),
+    # measured 2026-09-02 and blind-validated. Without it the
+    # outer_right position wobbles once per pixel by ~3.2 MHz and its
+    # four-peak-DHO resonance reads ~-11 MHz low (measured 09-05); no
+    # (sigma, tau) can absorb it. Applied to the outer_right peak in
+    # BOTH four-peak paths (lorentzian_x_psf and dho_x_psf); ratio 0
+    # disables.
+    psf_sat_ratio_outer_right: float = 0.037
+    psf_sat_delta_outer_right_px: float = -1.23
+    # VIPA intensity-envelope gradient per peak [1/px] (MEASURED
+    # 2026-09-06, roll-off-free same-frame amplitude ratios,
+    # Data/2026-9-2/envelope_slopes_clean.py). The envelope MULTIPLIES
+    # the spectrum; its gradient across a peak pulls a symmetric fit by
+    # ~k(gamma)*eps*gamma_px^2 toward the envelope top — the outer
+    # orders' long-standing shift systematic (predicted vs measured
+    # outer-inner offsets: water -12/-9 vs -11/-12, 50wt -67/-46 vs
+    # -68/-38, zero fitted parameters). Applied in the FOUR-PEAK fits
+    # only (all four peaks, multiplicative exp(eps*(x-cen)) on each
+    # peak model); the two-peak paper chain is deliberately untouched
+    # (correcting it would move the inner shift convention by ~+5 MHz
+    # at water — a PAPER decision, not a default). 0 disables.
+    # PRODUCTION: outer slopes only (09-06 verification: env on the
+    # INNER peaks inflates their fitted widths +15 MHz and is not
+    # needed for their shifts — inner slopes stay 0 in production; the
+    # measured inner values (+0.0239/−0.0265) live in the comment and
+    # the measurement script for the pending PAPER decision).
+    env_slope_outer_left_perpx: float = 0.0302
+    env_slope_left_perpx: float = 0.0
+    env_slope_right_perpx: float = 0.0
+    env_slope_outer_right_perpx: float = -0.0253
 
     def __post_init__(self):
         if self.row_selection not in ROW_SELECTIONS:
@@ -399,16 +431,13 @@ class SlineFromFrameConfig:
                 "SlineFromFrameConfig.psf_sigma_px was split per peak "
                 "(2026-08-31): use psf_sigma_left_px / psf_sigma_right_px."
             )
-        if name in ("psf_sat_ratio_outer_right",
-                    "psf_sat_delta_outer_right_px",
-                    "psf_box_outer_left_px", "psf_box_left_px",
-                    "psf_box_right_px", "psf_box_outer_right_px"):
+        if name in ("psf_box_left_px", "psf_box_right_px"):
             raise AttributeError(
-                f"SlineFromFrameConfig.{name} was removed from production "
-                "(2026-09-04): the satellite and row-tilt boxcar are "
-                "measured-but-not-production terms — see "
-                "spectrum_fitting/psf/extras.py and "
-                "psf_measurement.PSF_MEASURED."
+                f"SlineFromFrameConfig.{name} does not exist: the INNER "
+                "peaks carry no row-tilt boxcar BY MEASUREMENT (their "
+                "bell-weighted smear is Gauss+tail-shaped and lives in "
+                "sigma/tau; a top-hat there ruins their sines) — only "
+                "psf_box_outer_left_px / psf_box_outer_right_px are real."
             )
         raise AttributeError(
             f"{type(self).__name__!r} object has no attribute {name!r}")
@@ -452,11 +481,10 @@ def load_sline_from_frame_config(path: Path) -> SlineFromFrameConfig:
         shared = raw.pop("psf_sigma_px")
         raw.setdefault("psf_sigma_left_px", shared)
         raw.setdefault("psf_sigma_right_px", shared)
-    # A TOML from the brief boxcar/satellite production era (2026-09-04)
-    # carries these keys; the terms moved to psf/extras.py — drop them.
-    for key in ("psf_sat_ratio_outer_right", "psf_sat_delta_outer_right_px",
-                "psf_box_outer_left_px", "psf_box_left_px",
-                "psf_box_right_px", "psf_box_outer_right_px"):
+    # A TOML from the brief all-boxcar era (2026-09-04) carries INNER
+    # box keys; those never survived (the inner peaks reject the
+    # top-hat) — drop them. The outer box keys are real fields.
+    for key in ("psf_box_left_px", "psf_box_right_px"):
         raw.pop(key, None)
     return SlineFromFrameConfig(**raw)
 

@@ -179,10 +179,14 @@ def test_dho_requires_axes():
         fitter.fit(px, sline, is_reference_mode=False)
 
 
-def test_dho_refuses_four_peaks():
+def test_dho_four_peaks_needs_outer_axes():
+    # four-peak DHO (2026-09-05) is allowed, but ONLY with the outer
+    # calibration axes — inner-only axes must refuse loudly, never
+    # guess an outer instrument width (the center correction ~Gamma^2).
     px, sline = make_spectrum()
     fitter = make_fitter()
-    with pytest.raises(ValueError, match="n_peaks = 2 only"):
+    assert not AXES.has_outer
+    with pytest.raises(ValueError, match="outer-order calibration axes"):
         fitter.fit(px, sline, is_reference_mode=False, n_peaks=4,
                    dho_axes=AXES)
 

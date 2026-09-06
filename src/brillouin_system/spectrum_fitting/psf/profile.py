@@ -12,11 +12,12 @@ from .components import lorentzian
 from .kernel import DX, PAD_PX, detection_kernel
 
 
-def psf_profile(px, amp, cen, gamma, sigma, tau):
+def psf_profile(px, amp, cen, gamma, sigma, tau, box=0.0):
     """Lorentzian(gamma) through the pixel response, evaluated at px.
 
     amp is the peak height of the underlying Lorentzian, matching the
-    plain pixel-integrated Lorentzian model's convention.
+    plain pixel-integrated Lorentzian model's convention. box is the
+    measured row-tilt smear width [px] (outer orders; 0 disables).
     """
     px = np.asarray(px, dtype=float)
 
@@ -27,7 +28,7 @@ def psf_profile(px, amp, cen, gamma, sigma, tau):
 
     lor = lorentzian(xf, cen, gamma)
 
-    k_x0, k = detection_kernel(float(sigma), float(tau), DX)
+    k_x0, k = detection_kernel(float(sigma), float(tau), DX, float(box))
     conv = np.convolve(lor, k) * DX
     conv_x0 = xf[0] + k_x0
     conv_x = conv_x0 + DX * np.arange(conv.size)

@@ -63,11 +63,16 @@ class DhoAxes:
 
     Built from the scan's own calibration (CalibrationCalculator.dho_axes())
     and passed to SpectrumFitter.fit(dho_axes=...) — the same pattern as the
-    reflection background. Inner main pair only: the calibration stores no
-    width tracks for the outer orders (their readout taus are provisional —
-    positions yes, width claims no, 2026-08-20), and the DHO center
-    correction scales as Gamma^2, so a biased width input would land
-    directly in the resonance.
+    reflection background.
+
+    The outer-order fields are None on a two-peak calibration. They were
+    added 2026-09-05 (the original inner-only restriction dated from
+    before the outer width tracks existed, 2026-08-20; the tracks are
+    stored since 2026-09-02): a FOUR-peak DHO fit reports every order's
+    RESONANCE, the convention-free quantity, which removes the
+    lineshape-lean systematic that makes symmetric-model outer shifts
+    read low by ~Gamma^2/nu_B across tracks of different dispersion
+    (measured -12..-4 MHz on water 22-49 C, kernel-independent).
     """
     # px -> GHz shift from the peak's own elastic line (np.polyval coeffs).
     freq_left_poly: np.ndarray
@@ -75,16 +80,31 @@ class DhoAxes:
     # px -> instrument Lorentzian HWHM [px] (the calibration width polys).
     instrument_width_left_poly: np.ndarray
     instrument_width_right_poly: np.ndarray
+    # outer orders (four-peak calibrations only; None otherwise)
+    freq_outer_left_poly: np.ndarray | None = None
+    freq_outer_right_poly: np.ndarray | None = None
+    instrument_width_outer_left_poly: np.ndarray | None = None
+    instrument_width_outer_right_poly: np.ndarray | None = None
+
+    @property
+    def has_outer(self) -> bool:
+        return (self.freq_outer_left_poly is not None
+                and self.freq_outer_right_poly is not None
+                and self.instrument_width_outer_left_poly is not None
+                and self.instrument_width_outer_right_poly is not None)
 
 
 @lru_cache(maxsize=64)
-def _dho_kernel(g_inst_millipx: int, sigma: float, tau: float):
-    """Lorentzian(g_inst) (x) Gauss(sigma) (x) ExpTail(tau) (x) pixel.
+def _dho_kernel(g_inst_millipx: int, sigma: float, tau: float,
+                box: float = 0.0):
+    """Lorentzian(g_inst) (x) Gauss(sigma) (x) ExpTail(tau) (x) [Boxcar]
+    (x) pixel.
 
     Returns (x0, k) with k normalised to unit area (k.sum()*DX == 1) and x0
     the coordinate of k[0] relative to the kernel centre. g_inst is keyed in
     milli-px: it is frozen per peak per scan (evaluated at the found peak
     position before the fit), so within a scan every call is a cache hit.
+    box is the measured row-tilt smear (outer orders only; 0 = off).
     """
     g = max(g_inst_millipx / 1000.0, 1e-6)
     n = int(round(KERNEL_HALF_PX / DX))
@@ -92,12 +112,14 @@ def _dho_kernel(g_inst_millipx: int, sigma: float, tau: float):
     lor = 1.0 / (1.0 + (xk / g) ** 2)
     lor /= lor.sum()
 
-    cam_x0, cam = detection_kernel(float(sigma), float(tau), DX)  # unit area
+    cam_x0, cam = detection_kernel(float(sigma), float(tau), DX,
+                                   float(box))  # unit area
     k = np.convolve(lor, cam)
     return -KERNEL_HALF_PX + cam_x0, k
 
 
-def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau):
+def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau,
+                box=0.0):
     """Eq.-S2 DHO through the instrument chain, evaluated at pixels px.
 
     amp       peak height of the underlying DHO core (before the kernel),
@@ -105,6 +127,7 @@ def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau):
     cen       RESONANCE position [px]: nuB = polyval(freq_poly, cen).
     gamma_px  acoustic HWHM [px]; converted to GHz with the local dispersion
               at cen (Gamma = gamma_px * |d nu/d px|).
+    box       measured row-tilt smear width [px] (outer orders; 0 off).
     """
     px = np.asarray(px, dtype=float)
     gamma_px = max(float(gamma_px), 1e-9)
@@ -132,7 +155,7 @@ def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau):
     core = core / max(core_max, 1e-300)
 
     k_x0, k = _dho_kernel(int(round(float(g_inst_px) * 1000.0)),
-                          float(sigma), float(tau))
+                          float(sigma), float(tau), float(box))
     conv = np.convolve(core, k) * DX
     conv_x = (xf[0] + k_x0) + DX * np.arange(conv.size)
 
