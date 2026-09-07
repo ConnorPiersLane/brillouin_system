@@ -52,6 +52,10 @@ na_beam_diameter_mm = 5.5
 na_focal_length_mm = 10.0
 na_n_sample = 1.33
 reflection_margin_ghz = 0.7
+# instrument kernel of the DHO sample model: "measured" = stacked from the
+# scan's own calibration frames at each peak's position (2026-09-07);
+# "parametric" = Lorentzian x Gauss x tail x pixel from the width polynomials
+dho_kernel = "measured"
 
 [reference]
 prominence_fraction = 0.05

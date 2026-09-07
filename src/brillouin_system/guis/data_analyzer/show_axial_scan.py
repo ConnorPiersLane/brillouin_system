@@ -506,13 +506,14 @@ class AxialScanViewer(QWidget):
 
     def _dho_axes_for_fit(self):
         """The per-peak calibration axes for 'dho_x_psf' MC fits, or None —
-        same construction as fit_axial_scan (loud when the calibration
-        cannot supply them)."""
-        if self.axial_scan.system_state.is_reference_mode:
-            return None
-        if not config_requires_dho_axes(self.fitter.sample_config):
-            return None
-        return self.calc.dho_axes()
+        the SAME construction as fit_axial_scan (loud when the calibration
+        cannot supply them), including the measured instrument kernels
+        when the sample config asks for them."""
+        from brillouin_system.analysis.fit_axial_scan import _dho_axes_if_required
+        return _dho_axes_if_required(
+            self.fitter, self.calc, self.axial_scan.system_state,
+            calibration_data=self.axial_scan.calibration_data,
+            first_frame=np.asarray(self.axial_scan.measurements[0].frame_andor))
 
     def _scan_mean_frame(self) -> np.ndarray:
         """The MC truth (Fig-3 recipe): the scan-mean frame with the dark

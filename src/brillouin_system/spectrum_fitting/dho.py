@@ -85,6 +85,16 @@ class DhoAxes:
     freq_outer_right_poly: np.ndarray | None = None
     instrument_width_outer_left_poly: np.ndarray | None = None
     instrument_width_outer_right_poly: np.ndarray | None = None
+    # Measured instrument kernels for the inner pair (dho_kernel =
+    # "measured"): built from the scan's own calibration at the sample
+    # peaks' positions (measured_kernel.measured_kernels_for_frame). None
+    # = the parametric kernel from the width polynomials above.
+    kernel_left: object | None = None
+    kernel_right: object | None = None
+
+    @property
+    def has_measured_kernels(self) -> bool:
+        return self.kernel_left is not None and self.kernel_right is not None
 
     @property
     def has_outer(self) -> bool:
@@ -119,7 +129,7 @@ def _dho_kernel(g_inst_millipx: int, sigma: float, tau: float,
 
 
 def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau,
-                box=0.0):
+                box=0.0, kernel=None):
     """Eq.-S2 DHO through the instrument chain, evaluated at pixels px.
 
     amp       peak height of the underlying DHO core (before the kernel),
@@ -128,6 +138,15 @@ def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau,
     gamma_px  acoustic HWHM [px]; converted to GHz with the local dispersion
               at cen (Gamma = gamma_px * |d nu/d px|).
     box       measured row-tilt smear width [px] (outer orders; 0 off).
+    kernel    a MeasuredKernel (spectrum_fitting/measured_kernel.py): the
+              instrument response measured at this peak's position from the
+              scan's own calibration. When given it REPLACES the parametric
+              Lorentzian(g_inst) (x) Gauss (x) tail (x) pixel kernel
+              (g_inst_px, sigma, tau, box are then unused); it already
+              carries the instrument Lorentzian, so gamma_px stays the
+              acoustic width. Adopted 2026-09-07: the parametric Stokes
+              kernel has ~30 % too much wing, which read the acoustic width
+              3-4 % low.
     """
     px = np.asarray(px, dtype=float)
     gamma_px = max(float(gamma_px), 1e-9)
@@ -154,8 +173,11 @@ def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau,
         core_max = float(np.max(core))
     core = core / max(core_max, 1e-300)
 
-    k_x0, k = _dho_kernel(int(round(float(g_inst_px) * 1000.0)),
-                          float(sigma), float(tau), float(box))
+    if kernel is not None:
+        k_x0, k = kernel.x0, kernel.k
+    else:
+        k_x0, k = _dho_kernel(int(round(float(g_inst_px) * 1000.0)),
+                              float(sigma), float(tau), float(box))
     conv = np.convolve(core, k) * DX
     conv_x = (xf[0] + k_x0) + DX * np.arange(conv.size)
 

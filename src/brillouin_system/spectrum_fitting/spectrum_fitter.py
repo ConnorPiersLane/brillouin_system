@@ -566,12 +566,28 @@ class SpectrumFitter:
                         float(self.sline_config.env_slope_right_perpx),
                         float(self.sline_config.env_slope_outer_right_perpx)]
             else:
-                envs = [0.0, 0.0]
+                # two-peak fits read the inner slopes too (2026-09-06):
+                # production keeps them at 0.0, analyses may set them.
+                envs = [float(self.sline_config.env_slope_left_perpx),
+                        float(self.sline_config.env_slope_right_perpx)]
+
+            # measured instrument kernels (dho_kernel = "measured"): the
+            # scan's own calibration stacked at each inner peak's position
+            # replaces the parametric kernel for the INNER pair; the outer
+            # orders (four-peak fits) keep the parametric chain.
+            mk = ([dho_axes.kernel_left, dho_axes.kernel_right]
+                  if (n_peaks == 2 and dho_axes.has_measured_kernels)
+                  else [None, None])
 
             def peak(x, a, c, w, i):
                 if n_peaks == 2:
-                    return dho_profile(x, a, c, w, polys[i], g_inst[i],
-                                       sigmas[i], taus[i])
+                    out = dho_profile(x, a, c, w, polys[i], g_inst[i],
+                                      sigmas[i], taus[i], kernel=mk[i])
+                    if envs[i] != 0.0:
+                        # same multiplicative envelope as the lorentzian
+                        # branch (2026-09-06); production slopes are 0.0
+                        out = out * np.exp(envs[i] * (x - c))
+                    return out
                 out = np.zeros_like(x, dtype=float)
                 m = np.abs(x - c) <= DHO_REACH_PX
                 if np.any(m):

@@ -325,7 +325,7 @@ class HiBackend:
 
         try:
             reflection_bg = self._reflection_background_if_required(px)
-            dho_axes = self._dho_axes_if_required()
+            dho_axes = self._dho_axes_if_required(frame)
             return self.spectrum_fitter.fit(px, sline, is_reference_mode=self.is_reference_mode,
                                             reflection_background=reflection_bg,
                                             dho_axes=dho_axes)
@@ -387,13 +387,18 @@ class HiBackend:
             self._reflection_mapper_calc = self.calibration_calculator
         return self._reflection_mapper.render(px)
 
-    def _dho_axes_if_required(self):
+    def _dho_axes_if_required(self, frame=None):
         """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
 
         No degraded fallback (unlike the reflection template): without a
         calibration the DHO cannot fit at all, so this raises — the live
         loop catches it per frame and shows the unfitted sline until a
-        calibration is taken."""
+        calibration is taken.
+
+        With dho_kernel = "measured" the axes carry the instrument kernels
+        stacked from the live calibration's raw frames at the sample peaks
+        of `frame`; they are cached on (calibration, config) because the
+        stack costs ~41 reference fits, and rebuilt when either changes."""
         if self.is_reference_mode:
             return None
         if not config_requires_dho_axes(self.spectrum_fitter.sample_config):
@@ -403,7 +408,28 @@ class HiBackend:
                 "Model 'dho_x_psf' needs the current calibration's frequency "
                 "tracks and instrument widths, but no calibration is loaded."
             )
-        return self.calibration_calculator.dho_axes()
+        cfg = self.spectrum_fitter.sample_config
+        if getattr(cfg, "dho_kernel", "parametric") != "measured":
+            return self.calibration_calculator.dho_axes()
+        key = (id(self.calibration_calculator), id(cfg),
+               id(self.spectrum_fitter.sline_config))
+        cached = getattr(self, "_measured_dho_axes", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        if self.calibration_data is None or frame is None:
+            raise ValueError(
+                "dho_kernel = 'measured' needs the live calibration's raw "
+                "frames and a sample frame to build the instrument kernels."
+            )
+        from dataclasses import replace as _replace
+        from brillouin_system.spectrum_fitting.measured_kernel import (
+            measured_kernels_for_frame)
+        k_left, k_right = measured_kernels_for_frame(
+            self.calibration_data, self.spectrum_fitter, np.asarray(frame))
+        axes = _replace(self.calibration_calculator.dho_axes(),
+                        kernel_left=k_left, kernel_right=k_right)
+        self._measured_dho_axes = (key, axes)
+        return axes
 
     def _na_shift_ratio(self) -> float | None:
         """The post-hoc NA cone factor for the CURRENT sample config,

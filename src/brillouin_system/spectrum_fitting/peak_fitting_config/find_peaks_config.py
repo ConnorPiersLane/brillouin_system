@@ -305,9 +305,27 @@ class SampleFindPeaksConfig(FindPeaksConfig):
     # ReflectionBackgroundMapper docstring for the measured behaviour and
     # caveats (2026-08-25).
     reflection_margin_ghz: float = 0.7
+    # Instrument kernel of the 'dho_x_psf' sample model (ignored by every
+    # other model and by reference fits):
+    #   "parametric": Lorentzian(g_inst from the calibration width
+    #     polynomial) (x) Gauss(sigma) (x) ExpTail(tau) (x) pixel — the
+    #     centre-validated chain.
+    #   "measured": the instrument response stacked from the scan's own
+    #     calibration frames at each inner peak's position (no functional
+    #     form; spectrum_fitting/measured_kernel.py). Adopted 2026-09-07:
+    #     the parametric Stokes kernel carries ~30 % too much wing and read
+    #     the DHO acoustic width 3-4 % low; the measured kernel fits the
+    #     elastic lines to the noise, equalises the two peaks' widths and
+    #     leaves the resonance unchanged. Needs raw calibration frames.
+    dho_kernel: str = "parametric"
 
     def __post_init__(self):
         super().__post_init__()
+        if self.dho_kernel not in DHO_KERNELS:
+            raise ValueError(
+                f"Unknown dho_kernel '{self.dho_kernel}'. "
+                f"Choose one of {DHO_KERNELS}."
+            )
         if self.na_weighting not in NA_WEIGHTINGS:
             raise ValueError(
                 f"Unknown na_weighting '{self.na_weighting}'. "
@@ -319,6 +337,8 @@ class SampleFindPeaksConfig(FindPeaksConfig):
                 f"(got {self.reflection_margin_ghz})."
             )
 
+
+DHO_KERNELS = ["parametric", "measured"]
 
 ROW_SELECTIONS = ["manual", "auto"]
 

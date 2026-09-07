@@ -6,6 +6,7 @@ says; nothing stored on the scan steers it. Calibration and samples share the
 fitter, so they always share the row band.
 """
 import numpy as np
+from dataclasses import replace
 
 from brillouin_system.calibration.calibration import (
     CalibrationCalculator,
@@ -144,6 +145,8 @@ def _reflection_mapper_if_required(fitter: SpectrumFitter,
 def _dho_axes_if_required(fitter: SpectrumFitter,
                           calibration_calculator: CalibrationCalculator,
                           system_state: SystemState,
+                          calibration_data=None,
+                          first_frame=None,
                           ) -> DhoAxes | None:
     """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
 
@@ -151,12 +154,29 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     without its frequency tracks and instrument widths is not fittable, so
     a calibration that cannot supply them raises (loudly, before the scan
     loop starts) instead of silently fitting a different model.
+
+    With sample_config.dho_kernel == "measured" the axes also carry the
+    instrument kernels stacked from the scan's raw calibration frames at
+    the sample peaks' positions (located on first_frame); both inputs are
+    then required and their absence raises for the same reason.
     """
     if system_state.is_reference_mode:
         return None
     if not config_requires_dho_axes(fitter.sample_config):
         return None
-    return calibration_calculator.dho_axes()
+    axes = calibration_calculator.dho_axes()
+    if getattr(fitter.sample_config, "dho_kernel", "parametric") == "measured":
+        if calibration_data is None or first_frame is None:
+            raise ValueError(
+                "dho_kernel = 'measured' needs the scan's raw calibration "
+                "frames and a sample frame to build the instrument kernels."
+            )
+        from brillouin_system.spectrum_fitting.measured_kernel import (
+            measured_kernels_for_frame)
+        k_left, k_right = measured_kernels_for_frame(
+            calibration_data, fitter, first_frame)
+        axes = replace(axes, kernel_left=k_left, kernel_right=k_right)
+    return axes
 
 
 def fit_axial_scan(scan: AxialScan,
@@ -178,7 +198,9 @@ def fit_axial_scan(scan: AxialScan,
         fitter, calibration_calculator, scan.system_state,
         np.asarray(scan.measurements[0].frame_andor))
     dho_axes = _dho_axes_if_required(
-        fitter, calibration_calculator, scan.system_state)
+        fitter, calibration_calculator, scan.system_state,
+        calibration_data=scan.calibration_data,
+        first_frame=np.asarray(scan.measurements[0].frame_andor))
 
     return [
         analyze_frame(
