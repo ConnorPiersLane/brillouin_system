@@ -487,7 +487,17 @@ class SpectrumFitter:
         def width_bounds(i, floor=1e-12):
             if not use_window:
                 return floor, x_span / 2
-            lo_w = max(1e-6, 0.25 * float(wid[i]))
+            # wid[i] is the peak finder's OBSERVED width guess. The
+            # Lorentzian models fit that observed width, so a quarter of it
+            # is a safe floor. The DHO fits the ACOUSTIC width with the
+            # instrument Lorentzian folded into its kernel, which for narrow
+            # lines (water above ~30 C, low-viscosity samples) is well below
+            # a quarter of the observed width: the fit then sat on this bound
+            # (measured 2026-09-07: right peak pinned from 31 C, both peaks
+            # from ~41 C, reading widths up to 10 % too large and biasing the
+            # centre). The DHO floor is therefore 5 % of the observed width.
+            frac = 0.05 if model == "dho_x_psf" else 0.25
+            lo_w = max(1e-6, frac * float(wid[i]))
             return lo_w, max(lo_w * 2, 4.0 * float(wid[i]))
 
         if model == "dho_x_psf":
