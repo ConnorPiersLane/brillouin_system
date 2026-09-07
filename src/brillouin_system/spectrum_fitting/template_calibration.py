@@ -96,6 +96,13 @@ class TemplateProfiles:
     grid: np.ndarray                      # u [px], step DX, +-KERNEL_HALF_PX
     nodes: list = field(default_factory=list)      # per line: node positions [px]
     profiles: list = field(default_factory=list)   # per line: {node: unit-area profile}
+    # VIPA envelope slope per line [1/px] (sline config) that was DIVIDED OUT
+    # of every frame before stacking, so the profile is the instrument alone
+    # and the sample fit applies the envelope exactly once, as production
+    # does with the parametric kernel. (Leaving it in and applying it again
+    # put the outer orders 6 MHz off; dropping it on the sample side put
+    # them 3-8 MHz the other way — measured 2026-09-07 on scan 7.)
+    envs: list = field(default_factory=list)
     _frames: list = field(default_factory=list, repr=False)
     _smooth_centres: np.ndarray | None = field(default=None, repr=False)
 
@@ -108,7 +115,7 @@ class TemplateProfiles:
         from the frames whose (frequency-smoothed) centre lies within
         +-WINDOW_PX of it — the same stack the centres came from."""
         k, n = _stack(self._frames, self._smooth_centres, line, position_px,
-                      self.grid)
+                      self.grid, self.envs[line] if self.envs else 0.0)
         return MeasuredKernel(u=self.grid, k=k, position_px=float(position_px),
                               n_frames=n, g_median_px=_hwhm(self.grid, k))
 
@@ -177,7 +184,7 @@ def _cleaned(frame, line):
     return y
 
 
-def _stack(frames, smooth, line, position, grid):
+def _stack(frames, smooth, line, position, grid, env=0.0):
     U, Y, n = [], [], 0
     for i, fr in enumerate(frames):
         c = smooth[i, line]
@@ -185,6 +192,10 @@ def _stack(frames, smooth, line, position, grid):
             continue
         y = _cleaned(fr, line)
         u = fr.px - c
+        if env != 0.0:
+            # take the multiplicative VIPA envelope out: the stacked profile
+            # is then the instrument response alone (see TemplateProfiles)
+            y = y / np.exp(env * u)
         w = np.abs(u) <= KERNEL_HALF_PX + 0.5
         area = float(np.sum(y[w]))
         if not area > 0:
@@ -200,14 +211,14 @@ def _stack(frames, smooth, line, position, grid):
     return k / float(k.sum() * DX), n
 
 
-def _node_profiles(frames, smooth, line, grid):
+def _node_profiles(frames, smooth, line, grid, env=0.0):
     cs = smooth[:, line]
     nodes = np.arange(np.floor(cs.min()) + WINDOW_PX,
                       cs.max() - WINDOW_PX + 0.01, NODE_STEP_PX)
     profiles = {}
     for node in nodes:
         try:
-            profiles[float(node)], _ = _stack(frames, smooth, line, node, grid)
+            profiles[float(node)], _ = _stack(frames, smooth, line, node, grid, env)
         except ValueError:
             continue
     if not profiles:
@@ -215,7 +226,7 @@ def _node_profiles(frames, smooth, line, grid):
     return profiles
 
 
-def _template_centres(frames, profiles, line, grid):
+def _template_centres(frames, profiles, line, grid, env=0.0):
     nodes = np.array(sorted(profiles))
     for fr in frames:
         c0 = fr.centre[line]
@@ -223,7 +234,10 @@ def _template_centres(frames, profiles, line, grid):
         spline = CubicSpline(grid, p / p.max(), extrapolate=False)
 
         def template(x, a, c, o):
-            return o + a * np.nan_to_num(spline(x - c), nan=0.0)
+            t = np.nan_to_num(spline(x - c), nan=0.0)
+            if env != 0.0:
+                t = t * np.exp(env * (x - c))
+            return o + a * t
         m = np.abs(fr.px - c0) <= SEED_WINDOW_PX
         x, y = fr.px[m], fr.sline[m]
         try:
@@ -239,15 +253,21 @@ def build_template_calibration(calibration_data, fitter, n_lines: int):
     template centres on each frame."""
     grid = np.arange(-KERNEL_HALF_PX, KERNEL_HALF_PX + DX / 2, DX)
     frames = _read_frames(calibration_data, fitter, n_lines)
-    tp = TemplateProfiles(n_lines=n_lines, grid=grid)
+    sl = fitter.sline_config
+    if n_lines == 4:
+        envs = [float(sl.env_slope_outer_left_perpx), float(sl.env_slope_left_perpx),
+                float(sl.env_slope_right_perpx), float(sl.env_slope_outer_right_perpx)]
+    else:
+        envs = [float(sl.env_slope_left_perpx), float(sl.env_slope_right_perpx)]
+    tp = TemplateProfiles(n_lines=n_lines, grid=grid, envs=envs)
     for _ in range(N_PASSES):
         smooth = _smooth_centres(frames, n_lines)
         tp.nodes, tp.profiles = [], []
         for line in range(n_lines):
-            prof = _node_profiles(frames, smooth, line, grid)
+            prof = _node_profiles(frames, smooth, line, grid, envs[line])
             tp.nodes.append(np.array(sorted(prof)))
             tp.profiles.append(prof)
-            _template_centres(frames, prof, line, grid)
+            _template_centres(frames, prof, line, grid, envs[line])
     tp._frames = frames
     tp._smooth_centres = _smooth_centres(frames, n_lines)
     return frames, tp
