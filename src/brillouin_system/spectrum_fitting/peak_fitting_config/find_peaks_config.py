@@ -243,6 +243,16 @@ class FindPeaksConfig:
     # Baseline model, independent of the lineshape — see BACKGROUNDS above.
     background: str = "flat"
     beta: float = 4.0
+    # REFERENCE fits only: how the calibration-line centres (the px->GHz
+    # polynomials) are obtained.
+    #   "parametric": one Lorentzian(g) x Gauss(sigma) x tail(tau) x pixel
+    #     fit per frame — the centre-validated chain (sine ~0.1 MHz).
+    #   "template": no instrument model at all — plain-Lorentzian first
+    #     guess, stacking on frequency-smoothed centres, template refit
+    #     (spectrum_fitting/template_calibration.py; 2026-09-07, sine
+    #     0.05-0.13 MHz). The same stack supplies the DHO sample kernels,
+    #     so sample and calibration share one centre convention.
+    centre_method: str = "parametric"
 
     def __post_init__(self):
         # All legacy-name and preset rules live in resolve_fit_options —
@@ -262,6 +272,11 @@ class FindPeaksConfig:
         self.background = resolved.background
         self.use_window = resolved.use_window
         self.beta = resolved.beta
+        if self.centre_method not in CENTRE_METHODS:
+            raise ValueError(
+                f"Unknown centre_method '{self.centre_method}'. "
+                f"Choose one of {CENTRE_METHODS}."
+            )
 
 
 @dataclass
@@ -339,6 +354,7 @@ class SampleFindPeaksConfig(FindPeaksConfig):
 
 
 DHO_KERNELS = ["parametric", "measured"]
+CENTRE_METHODS = ["parametric", "template"]
 
 ROW_SELECTIONS = ["manual", "auto"]
 

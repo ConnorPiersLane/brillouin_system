@@ -421,13 +421,9 @@ class HiBackend:
                 "dho_kernel = 'measured' needs the live calibration's raw "
                 "frames and a sample frame to build the instrument kernels."
             )
-        from dataclasses import replace as _replace
-        from brillouin_system.spectrum_fitting.measured_kernel import (
-            measured_kernels_for_frame)
-        k_left, k_right = measured_kernels_for_frame(
-            self.calibration_data, self.spectrum_fitter, np.asarray(frame))
-        axes = _replace(self.calibration_calculator.dho_axes(),
-                        kernel_left=k_left, kernel_right=k_right)
+        from brillouin_system.analysis.fit_axial_scan import dho_axes_for_fit
+        axes = dho_axes_for_fit(self.spectrum_fitter, self.calibration_calculator,
+                                self.calibration_data, np.asarray(frame))
         self._measured_dho_axes = (key, axes)
         return axes
 

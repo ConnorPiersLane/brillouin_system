@@ -575,9 +575,15 @@ class SpectrumFitter:
             # scan's own calibration stacked at each inner peak's position
             # replaces the parametric kernel for the INNER pair; the outer
             # orders (four-peak fits) keep the parametric chain.
-            mk = ([dho_axes.kernel_left, dho_axes.kernel_right]
-                  if (n_peaks == 2 and dho_axes.has_measured_kernels)
-                  else [None, None])
+            if n_peaks == 2:
+                mk = ([dho_axes.kernel_left, dho_axes.kernel_right]
+                      if dho_axes.has_measured_kernels else [None, None])
+            else:
+                mk = ([dho_axes.kernel_outer_left, dho_axes.kernel_left,
+                       dho_axes.kernel_right, dho_axes.kernel_outer_right]
+                      if (dho_axes.has_measured_kernels
+                          and dho_axes.has_measured_outer_kernels)
+                      else [None] * 4)
 
             def peak(x, a, c, w, i):
                 if n_peaks == 2:
@@ -593,8 +599,8 @@ class SpectrumFitter:
                 if np.any(m):
                     out[m] = dho_profile(x[m], a, c, w, polys[i],
                                          g_inst[i], sigmas[i], taus[i],
-                                         box=boxes[i])
-                    if i == 3 and sat_r > 0.0:
+                                         box=boxes[i], kernel=mk[i])
+                    if i == 3 and sat_r > 0.0 and mk[i] is None:
                         out[m] = out[m] + dho_profile(
                             x[m], a * sat_r, c + sat_d, w, polys[i],
                             g_inst[i], sigmas[i], taus[i],

@@ -67,3 +67,7 @@ fitting_model = "lorentzian_x_psf"
 use_window = true
 background = "flat"
 beta = 3.0
+# calibration-line centres: "parametric" (Lor x Gauss x tail x pixel fit per
+# frame) or "template" (no instrument model: measured-profile template chain,
+# spectrum_fitting/template_calibration.py; also supplies the DHO kernels)
+centre_method = "parametric"

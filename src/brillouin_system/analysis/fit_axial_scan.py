@@ -165,18 +165,41 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     if not config_requires_dho_axes(fitter.sample_config):
         return None
     axes = calibration_calculator.dho_axes()
-    if getattr(fitter.sample_config, "dho_kernel", "parametric") == "measured":
-        if calibration_data is None or first_frame is None:
-            raise ValueError(
-                "dho_kernel = 'measured' needs the scan's raw calibration "
-                "frames and a sample frame to build the instrument kernels."
-            )
-        from brillouin_system.spectrum_fitting.measured_kernel import (
-            measured_kernels_for_frame)
+    if getattr(fitter.sample_config, "dho_kernel", "parametric") != "measured":
+        return axes
+    if calibration_data is None or first_frame is None:
+        raise ValueError(
+            "dho_kernel = 'measured' needs the scan's raw calibration "
+            "frames and a sample frame to build the instrument kernels."
+        )
+    from brillouin_system.spectrum_fitting.measured_kernel import (
+        measured_kernels_for_frame, sample_peak_positions)
+    profiles = getattr(calibration_calculator.p, "template_profiles", None)
+    n_peaks = int(fitter.sline_config.n_peaks)
+    if profiles is None:
+        # parametric centres, measured shape (inner pair)
         k_left, k_right = measured_kernels_for_frame(
             calibration_data, fitter, first_frame)
-        axes = replace(axes, kernel_left=k_left, kernel_right=k_right)
-    return axes
+        return replace(axes, kernel_left=k_left, kernel_right=k_right)
+    # template chain: centres AND kernels from the same stack, every line
+    positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
+    names = profiles.names
+    kernels = {nm: profiles.kernel_at(i, positions[i])
+               for i, nm in enumerate(names)}
+    return replace(axes,
+                   kernel_left=kernels["left"], kernel_right=kernels["right"],
+                   kernel_outer_left=kernels.get("outer_left"),
+                   kernel_outer_right=kernels.get("outer_right"))
+
+
+def dho_axes_for_fit(fitter, calibration_calculator, calibration_data, frame):
+    """The DhoAxes (with measured kernels when configured) for a SAMPLE fit —
+    the one construction shared by fit_axial_scan, the live GUI and the
+    analyzer."""
+    from types import SimpleNamespace
+    return _dho_axes_if_required(
+        fitter, calibration_calculator, SimpleNamespace(is_reference_mode=False),
+        calibration_data=calibration_data, first_frame=frame)
 
 
 def fit_axial_scan(scan: AxialScan,

@@ -178,11 +178,11 @@ def build_measured_kernel(calibration_data, fitter, position_px: float,
                           n_frames=len(G), g_median_px=float(np.median(G)))
 
 
-def sample_peak_positions(fitter, frame) -> tuple[float, float]:
-    """Inner-pair centres of a sample frame from a parametric Lorentzian
-    fit — the positions the measured kernels are built for. The DHO model
-    itself needs the kernels, so the positions come from the Lorentzian
-    sibling of the sample config (same window, same background)."""
+def sample_peak_positions(fitter, frame, n_peaks: int = 2):
+    """Sample-peak centres of a frame from a parametric Lorentzian fit —
+    the positions the measured kernels are built for (the DHO model itself
+    needs the kernels). Returns (left, right) for two peaks and
+    (outer_left, left, right, outer_right) for four."""
     sample_cfg = fitter.sample_config
     probe = replace(sample_cfg, fitting_model="lorentzian_x_psf")
     saved = fitter.sample_config
@@ -190,12 +190,15 @@ def sample_peak_positions(fitter, frame) -> tuple[float, float]:
         fitter.update_sample_config(probe)
         px, sline = fitter.get_px_sline_from_image(np.asarray(frame, dtype=float))
         r = fitter.fit(np.asarray(px, dtype=float), np.asarray(sline, dtype=float),
-                       is_reference_mode=False, n_peaks=2)
+                       is_reference_mode=False, n_peaks=n_peaks)
     finally:
         fitter.update_sample_config(saved)
     if not r.is_success:
         raise ValueError("Could not locate the sample peaks to build the "
                          "measured kernels.")
+    if n_peaks == 4:
+        return (float(r.outer_left_peak_center_px), float(r.left_peak_center_px),
+                float(r.right_peak_center_px), float(r.outer_right_peak_center_px))
     return float(r.left_peak_center_px), float(r.right_peak_center_px)
 
 

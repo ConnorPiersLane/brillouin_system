@@ -91,10 +91,17 @@ class DhoAxes:
     # = the parametric kernel from the width polynomials above.
     kernel_left: object | None = None
     kernel_right: object | None = None
+    kernel_outer_left: object | None = None
+    kernel_outer_right: object | None = None
 
     @property
     def has_measured_kernels(self) -> bool:
         return self.kernel_left is not None and self.kernel_right is not None
+
+    @property
+    def has_measured_outer_kernels(self) -> bool:
+        return (self.kernel_outer_left is not None
+                and self.kernel_outer_right is not None)
 
     @property
     def has_outer(self) -> bool:

@@ -695,6 +695,17 @@ def calibrate(data: CalibrationData, polyfit_degree,
     degree = polyfit_degree
     sf = fitter if fitter is not None else SpectrumFitter()
 
+    if getattr(sf.reference_config, "centre_method", "parametric") == "template":
+        # non-parametric chain: centres from the measured profile itself
+        # (template_calibration.py); the profiles ride along on the
+        # parameters object for the sample kernels (not persisted).
+        from brillouin_system.spectrum_fitting.template_calibration import (
+            calibration_parameters_from_template)
+        params, profiles = calibration_parameters_from_template(
+            data, sf, int(sf.sline_config.n_peaks), degree)
+        params.template_profiles = profiles
+        return params
+
     all_fits = []
     freqs_all = []
 
