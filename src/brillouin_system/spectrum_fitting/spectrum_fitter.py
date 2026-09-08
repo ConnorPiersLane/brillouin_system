@@ -570,6 +570,10 @@ class SpectrumFitter:
                 # production keeps them at 0.0, analyses may set them.
                 envs = [float(self.sline_config.env_slope_left_perpx),
                         float(self.sline_config.env_slope_right_perpx)]
+            if dho_axes.env_slopes is not None:
+                # per-scan slopes measured from this scan's calibration
+                # (envelope_source = "measured"), one per peak in fit order
+                envs = [float(e) for e in dho_axes.env_slopes]
 
             # measured instrument kernels (dho_kernel = "measured"): the
             # scan's own calibration stacked at each inner peak's position

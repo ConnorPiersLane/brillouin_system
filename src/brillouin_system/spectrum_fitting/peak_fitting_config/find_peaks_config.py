@@ -355,6 +355,7 @@ class SampleFindPeaksConfig(FindPeaksConfig):
 
 DHO_KERNELS = ["parametric", "measured"]
 CENTRE_METHODS = ["parametric", "template"]
+ENVELOPE_SOURCES = ["config", "measured"]
 
 ROW_SELECTIONS = ["manual", "auto"]
 
@@ -447,8 +448,22 @@ class SlineFromFrameConfig:
     env_slope_left_perpx: float = 0.0
     env_slope_right_perpx: float = 0.0
     env_slope_outer_right_perpx: float = -0.0253
+    # Where the envelope slopes come from:
+    #   "config":   the four constants above (measured on the 9-2 sweeps).
+    #   "measured": per scan, from the scan's own calibration frames — the
+    #     same-sideband line areas along the sweep give ln g(x_a) - ln g(x_b)
+    #     with the drive roll-off cancelled (spectrum_fitting/envelope.py,
+    #     validated 2026-09-06: inner slopes stable to 3 % within a state,
+    #     but a factor two between alignment states). Needs the four-order
+    #     ROI; falls back to the constants when the frames carry two lines.
+    envelope_source: str = "config"
 
     def __post_init__(self):
+        if self.envelope_source not in ENVELOPE_SOURCES:
+            raise ValueError(
+                f"Unknown envelope_source '{self.envelope_source}'. "
+                f"Choose one of {ENVELOPE_SOURCES}."
+            )
         if self.row_selection not in ROW_SELECTIONS:
             raise ValueError(
                 f"Unknown row_selection '{self.row_selection}'. "

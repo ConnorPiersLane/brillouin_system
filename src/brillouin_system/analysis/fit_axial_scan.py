@@ -176,20 +176,30 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
         measured_kernels_for_frame, sample_peak_positions)
     profiles = getattr(calibration_calculator.p, "template_profiles", None)
     n_peaks = int(fitter.sline_config.n_peaks)
+    measured_env = getattr(fitter.sline_config, "envelope_source", "config") == "measured"
     if profiles is None:
         # parametric centres, measured shape (inner pair)
         k_left, k_right = measured_kernels_for_frame(
             calibration_data, fitter, first_frame)
-        return replace(axes, kernel_left=k_left, kernel_right=k_right)
-    # template chain: centres AND kernels from the same stack, every line
+        axes = replace(axes, kernel_left=k_left, kernel_right=k_right)
+        if measured_env:
+            from brillouin_system.spectrum_fitting.envelope import envelope_from_calibration
+            env = envelope_from_calibration(calibration_data, fitter)
+            positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
+            axes = replace(axes, env_slopes=tuple(env.slope(x) for x in positions))
+        return axes
+    # template chain: centres, kernels AND envelope from the same calibration
     positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
     names = profiles.names
     kernels = {nm: profiles.kernel_at(i, positions[i])
                for i, nm in enumerate(names)}
+    env_slopes = (tuple(profiles.env_slope(i, positions[i]) for i in range(len(names)))
+                  if profiles.envelope is not None else None)
     return replace(axes,
                    kernel_left=kernels["left"], kernel_right=kernels["right"],
                    kernel_outer_left=kernels.get("outer_left"),
-                   kernel_outer_right=kernels.get("outer_right"))
+                   kernel_outer_right=kernels.get("outer_right"),
+                   env_slopes=env_slopes)
 
 
 def dho_axes_for_fit(fitter, calibration_calculator, calibration_data, frame):

@@ -103,8 +103,16 @@ class TemplateProfiles:
     # put the outer orders 6 MHz off; dropping it on the sample side put
     # them 3-8 MHz the other way — measured 2026-09-07 on scan 7.)
     envs: list = field(default_factory=list)
+    # per-scan EnvelopeModel (envelope_source = "measured"); None = constants
+    envelope: object | None = None
     _frames: list = field(default_factory=list, repr=False)
     _smooth_centres: np.ndarray | None = field(default=None, repr=False)
+
+    def env_slope(self, line: int, x: float) -> float:
+        """The envelope slope applied for `line` at position x."""
+        if self.envelope is not None:
+            return float(self.envelope.slope(x))
+        return float(self.envs[line]) if self.envs else 0.0
 
     @property
     def names(self):
@@ -115,7 +123,7 @@ class TemplateProfiles:
         from the frames whose (frequency-smoothed) centre lies within
         +-WINDOW_PX of it — the same stack the centres came from."""
         k, n = _stack(self._frames, self._smooth_centres, line, position_px,
-                      self.grid, self.envs[line] if self.envs else 0.0)
+                      self.grid, self.env_slope(line, position_px))
         return MeasuredKernel(u=self.grid, k=k, position_px=float(position_px),
                               n_frames=n, g_median_px=_hwhm(self.grid, k))
 
@@ -211,14 +219,15 @@ def _stack(frames, smooth, line, position, grid, env=0.0):
     return k / float(k.sum() * DX), n
 
 
-def _node_profiles(frames, smooth, line, grid, env=0.0):
+def _node_profiles(frames, smooth, line, grid, env_at):
     cs = smooth[:, line]
     nodes = np.arange(np.floor(cs.min()) + WINDOW_PX,
                       cs.max() - WINDOW_PX + 0.01, NODE_STEP_PX)
     profiles = {}
     for node in nodes:
         try:
-            profiles[float(node)], _ = _stack(frames, smooth, line, node, grid, env)
+            profiles[float(node)], _ = _stack(frames, smooth, line, node, grid,
+                                              env_at(node))
         except ValueError:
             continue
     if not profiles:
@@ -226,12 +235,13 @@ def _node_profiles(frames, smooth, line, grid, env=0.0):
     return profiles
 
 
-def _template_centres(frames, profiles, line, grid, env=0.0):
+def _template_centres(frames, profiles, line, grid, env_at):
     nodes = np.array(sorted(profiles))
     for fr in frames:
         c0 = fr.centre[line]
         p = profiles[float(nodes[np.argmin(np.abs(nodes - c0))])]
         spline = CubicSpline(grid, p / p.max(), extrapolate=False)
+        env = env_at(c0)
 
         def template(x, a, c, o):
             t = np.nan_to_num(spline(x - c), nan=0.0)
@@ -259,15 +269,25 @@ def build_template_calibration(calibration_data, fitter, n_lines: int):
                 float(sl.env_slope_right_perpx), float(sl.env_slope_outer_right_perpx)]
     else:
         envs = [float(sl.env_slope_left_perpx), float(sl.env_slope_right_perpx)]
-    tp = TemplateProfiles(n_lines=n_lines, grid=grid, envs=envs)
+    envelope = None
+    if getattr(sl, "envelope_source", "config") == "measured":
+        from brillouin_system.spectrum_fitting.envelope import envelope_from_calibration
+        try:
+            envelope = envelope_from_calibration(calibration_data, fitter)
+        except ValueError as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[template_calibration] {e} — using the config envelope slopes.")
+    tp = TemplateProfiles(n_lines=n_lines, grid=grid, envs=envs, envelope=envelope)
     for _ in range(N_PASSES):
         smooth = _smooth_centres(frames, n_lines)
         tp.nodes, tp.profiles = [], []
         for line in range(n_lines):
-            prof = _node_profiles(frames, smooth, line, grid, envs[line])
+            env_at = (lambda x, line=line: tp.env_slope(line, x))
+            prof = _node_profiles(frames, smooth, line, grid, env_at)
             tp.nodes.append(np.array(sorted(prof)))
             tp.profiles.append(prof)
-            _template_centres(frames, prof, line, grid, envs[line])
+            _template_centres(frames, prof, line, grid, env_at)
     tp._frames = frames
     tp._smooth_centres = _smooth_centres(frames, n_lines)
     return frames, tp

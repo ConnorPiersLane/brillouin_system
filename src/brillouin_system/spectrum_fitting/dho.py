@@ -93,6 +93,10 @@ class DhoAxes:
     kernel_right: object | None = None
     kernel_outer_left: object | None = None
     kernel_outer_right: object | None = None
+    # Per-scan envelope slopes [1/px] at the sample peaks, in fit order
+    # (left, right) or (outer_left, left, right, outer_right); None = the
+    # config constants (envelope_source = "config").
+    env_slopes: tuple | None = None
 
     @property
     def has_measured_kernels(self) -> bool:
