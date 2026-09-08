@@ -588,6 +588,20 @@ class SpectrumFitter:
                       if (dho_axes.has_measured_kernels
                           and dho_axes.has_measured_outer_kernels)
                       else [None] * 4)
+            profiles = getattr(dho_axes, "profiles", None)
+            if profiles is not None and mk[0] is not None:
+                # template chain: kernel (and envelope slope) looked up
+                # PER FRAME at each peak's found position from the node
+                # table, so peaks that move along a scan (cornea depth)
+                # always get the profile measured where they are.
+                fit_names = (("left", "right") if n_peaks == 2
+                             else ("outer_left", "left", "right", "outer_right"))
+                idx = [profiles.names.index(nm) for nm in fit_names]
+                mk = [profiles.kernel_at(j, float(cen[i]))
+                      for i, j in enumerate(idx)]
+                if profiles.envelope is not None:
+                    envs = [profiles.env_slope(j, float(cen[i]))
+                            for i, j in enumerate(idx)]
 
             def peak(x, a, c, w, i):
                 if n_peaks == 2:

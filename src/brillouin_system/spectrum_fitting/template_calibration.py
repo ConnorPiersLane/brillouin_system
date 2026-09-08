@@ -103,6 +103,9 @@ class TemplateProfiles:
     # put the outer orders 6 MHz off; dropping it on the sample side put
     # them 3-8 MHz the other way — measured 2026-09-07 on scan 7.)
     envs: list = field(default_factory=list)
+    # frames that contributed to each node profile: list (per line) of
+    # {node: n_frames}
+    node_frames: list = field(default_factory=list)
     # per-scan EnvelopeModel (envelope_source = "measured"); None = constants
     envelope: object | None = None
     _frames: list = field(default_factory=list, repr=False)
@@ -118,10 +121,42 @@ class TemplateProfiles:
     def names(self):
         return LINE_NAMES[self.n_lines]
 
+    def node_at(self, line: int, position_px: float) -> float:
+        """The node (px) whose profile serves `position_px` on `line`: the
+        nearest of the 1-px node ladder. Raises when the position lies
+        outside the calibration sweep's coverage (no node within
+        +-WINDOW_PX), where no frames sampled the profile."""
+        nodes = np.asarray(self.nodes[line], dtype=float)
+        j = int(np.argmin(np.abs(nodes - float(position_px))))
+        if abs(nodes[j] - float(position_px)) > WINDOW_PX:
+            raise ValueError(
+                f"No template node within +-{WINDOW_PX} px of px "
+                f"{position_px:.1f} on line {self.names[line]} (nodes "
+                f"{nodes.min():.1f}..{nodes.max():.1f}).")
+        return float(nodes[j])
+
     def kernel_at(self, line: int, position_px: float) -> MeasuredKernel:
-        """The measured instrument kernel of `line` at `position_px`, stacked
-        from the frames whose (frequency-smoothed) centre lies within
-        +-WINDOW_PX of it — the same stack the centres came from."""
+        """The measured instrument kernel of `line` at `position_px`: the
+        two NODE profiles bracketing it (nodes every 1 px along the track,
+        each stacked from the frames within +-WINDOW_PX) blended linearly
+        by distance. Adjacent nodes differ by ~1 % of the peak (stack
+        noise of ~14 frames each; scan 7, 2026-09-07), so the blend keeps
+        the kernel continuous as a peak walks along a scan (cornea depth)
+        and averages that noise instead of switching at the midpoint.
+        Same profiles — and the same blend — the template centres were
+        fitted with, so calibration and sample share one kernel family;
+        a lookup instead of a restack, picked PER FRAME by the fitter from
+        the found peak position."""
+        self.node_at(line, position_px)              # coverage check
+        k, n = _blend(self.nodes[line], self.profiles[line],
+                      self.node_frames[line], position_px)
+        return MeasuredKernel(u=self.grid, k=k, position_px=float(position_px),
+                              n_frames=n, g_median_px=_hwhm(self.grid, k))
+
+    def stack_at(self, line: int, position_px: float) -> MeasuredKernel:
+        """The exact restack at `position_px` (analysis/diagnostics; the
+        production path is kernel_at). Agrees with the nearest node to
+        ~0.1 % of the peak."""
         k, n = _stack(self._frames, self._smooth_centres, line, position_px,
                       self.grid, self.env_slope(line, position_px))
         return MeasuredKernel(u=self.grid, k=k, position_px=float(position_px),
@@ -223,23 +258,41 @@ def _node_profiles(frames, smooth, line, grid, env_at):
     cs = smooth[:, line]
     nodes = np.arange(np.floor(cs.min()) + WINDOW_PX,
                       cs.max() - WINDOW_PX + 0.01, NODE_STEP_PX)
-    profiles = {}
+    profiles, counts = {}, {}
     for node in nodes:
         try:
-            profiles[float(node)], _ = _stack(frames, smooth, line, node, grid,
-                                              env_at(node))
+            profiles[float(node)], counts[float(node)] = _stack(
+                frames, smooth, line, node, grid, env_at(node))
         except ValueError:
             continue
     if not profiles:
         raise ValueError(f"No node profile could be built for line {line}.")
-    return profiles
+    return profiles, counts
 
 
-def _template_centres(frames, profiles, line, grid, env_at):
+def _blend(nodes, profiles, counts, position):
+    """Linear blend of the two node profiles bracketing `position` (the
+    end profile alone beyond the ladder). Unit-area in, unit-area out."""
+    nodes = np.asarray(nodes, dtype=float)
+    x = float(position)
+    if x <= nodes[0]:
+        a = b = float(nodes[0]); t = 0.0
+    elif x >= nodes[-1]:
+        a = b = float(nodes[-1]); t = 0.0
+    else:
+        j = int(np.searchsorted(nodes, x, side="right")) - 1
+        a, b = float(nodes[j]), float(nodes[j + 1])
+        t = (x - a) / (b - a)
+    k = (1.0 - t) * profiles[a] + t * profiles[b]
+    n = int(round((1.0 - t) * counts.get(a, 0) + t * counts.get(b, 0)))
+    return k, n
+
+
+def _template_centres(frames, profiles, counts, line, grid, env_at):
     nodes = np.array(sorted(profiles))
     for fr in frames:
         c0 = fr.centre[line]
-        p = profiles[float(nodes[np.argmin(np.abs(nodes - c0))])]
+        p, _ = _blend(nodes, profiles, counts, c0)
         spline = CubicSpline(grid, p / p.max(), extrapolate=False)
         env = env_at(c0)
 
@@ -281,13 +334,14 @@ def build_template_calibration(calibration_data, fitter, n_lines: int):
     tp = TemplateProfiles(n_lines=n_lines, grid=grid, envs=envs, envelope=envelope)
     for _ in range(N_PASSES):
         smooth = _smooth_centres(frames, n_lines)
-        tp.nodes, tp.profiles = [], []
+        tp.nodes, tp.profiles, tp.node_frames = [], [], []
         for line in range(n_lines):
             env_at = (lambda x, line=line: tp.env_slope(line, x))
-            prof = _node_profiles(frames, smooth, line, grid, env_at)
+            prof, counts = _node_profiles(frames, smooth, line, grid, env_at)
             tp.nodes.append(np.array(sorted(prof)))
             tp.profiles.append(prof)
-            _template_centres(frames, prof, line, grid, env_at)
+            tp.node_frames.append(counts)
+            _template_centres(frames, prof, counts, line, grid, env_at)
     tp._frames = frames
     tp._smooth_centres = _smooth_centres(frames, n_lines)
     return frames, tp

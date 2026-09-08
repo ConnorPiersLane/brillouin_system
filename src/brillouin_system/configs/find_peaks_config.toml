@@ -45,9 +45,13 @@ min_peak_width = 1
 min_peak_height = 5
 rel_height = 0.5
 wlen_pixels = 10
-fitting_model = "lorentzian_x_psf"
+# sample model of record (2026-09-07): DHO core on each peak's own frequency
+# track, convolved with the measured kernel, flat per-peak offset ("prm0").
+# The Lorentzian tracks the lineshape lean with temperature (9.6 -> 6.6 MHz
+# over 22-34 C on the stirred-beaker series); the DHO resonance stays flat.
+fitting_model = "dho_x_psf"
 use_window = true
-background = "reflection"
+background = "flat"
 beta = 3.0
 na_weighting = "uniform"
 na_collection = 0.14

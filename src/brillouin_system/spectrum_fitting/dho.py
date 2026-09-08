@@ -97,6 +97,14 @@ class DhoAxes:
     # (left, right) or (outer_left, left, right, outer_right); None = the
     # config constants (envelope_source = "config").
     env_slopes: tuple | None = None
+    # The scan's TemplateProfiles (centre_method = "template"): the node
+    # profiles (every 1 px along each line's track) and the per-scan
+    # envelope. When present the fitter picks each peak's kernel and
+    # envelope slope PER FRAME from the found peak position, so a scan
+    # whose shift changes along the way (cornea depth) always uses the
+    # profile measured where the peak actually is. The kernel_* fields
+    # above then only serve as the first-frame snapshot / capability flag.
+    profiles: object | None = None
 
     @property
     def has_measured_kernels(self) -> bool:

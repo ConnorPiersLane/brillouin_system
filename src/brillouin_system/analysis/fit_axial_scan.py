@@ -158,7 +158,9 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     With sample_config.dho_kernel == "measured" the axes also carry the
     instrument kernels stacked from the scan's raw calibration frames at
     the sample peaks' positions (located on first_frame); both inputs are
-    then required and their absence raises for the same reason.
+    then required and their absence raises for the same reason. On the
+    template chain the axes carry the whole node table as well, and the
+    fitter picks each frame's kernel from it at the found peak position.
     """
     if system_state.is_reference_mode:
         return None
@@ -195,11 +197,13 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
                for i, nm in enumerate(names)}
     env_slopes = (tuple(profiles.env_slope(i, positions[i]) for i in range(len(names)))
                   if profiles.envelope is not None else None)
+    # the kernel_* / env_slopes fields are the first-frame snapshot; the
+    # fitter re-selects per frame from `profiles` (node table)
     return replace(axes,
                    kernel_left=kernels["left"], kernel_right=kernels["right"],
                    kernel_outer_left=kernels.get("outer_left"),
                    kernel_outer_right=kernels.get("outer_right"),
-                   env_slopes=env_slopes)
+                   env_slopes=env_slopes, profiles=profiles)
 
 
 def dho_axes_for_fit(fitter, calibration_calculator, calibration_data, frame):
