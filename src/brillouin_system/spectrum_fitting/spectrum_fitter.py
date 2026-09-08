@@ -687,7 +687,10 @@ class SpectrumFitter:
                     boxes = [0.0, 0.0]
                     sat_r = 0.0
                     sat_d = 0.0
-                    envs = [0.0, 0.0]
+                    # inner envelope slopes apply to two-peak fits as well
+                    # (2026-09-06); production config keeps them at 0.0.
+                    envs = [float(self.sline_config.env_slope_left_perpx),
+                            float(self.sline_config.env_slope_right_perpx)]
 
                 def peak(x, a, c, w, i):
                     base = psf_profile(x, a, c, w, sigmas[i], taus[i],
