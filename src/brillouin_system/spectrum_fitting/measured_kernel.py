@@ -179,20 +179,24 @@ def build_measured_kernel(calibration_data, fitter, position_px: float,
 
 
 def sample_peak_positions(fitter, frame, n_peaks: int = 2):
-    """Sample-peak centres of a frame from a parametric Lorentzian fit —
-    the positions the measured kernels are built for (the DHO model itself
-    needs the kernels). Returns (left, right) for two peaks and
-    (outer_left, left, right, outer_right) for four."""
-    sample_cfg = fitter.sample_config
-    probe = replace(sample_cfg, fitting_model="lorentzian_x_psf")
-    saved = fitter.sample_config
+    """Sample-peak centres of a frame from a PLAIN Lorentzian fit — only a
+    position is needed here (good to ~0.05 px; the nodes are 1 px apart and
+    blended), so no instrument kernel and no camera-PSF constants enter.
+    Returns (left, right) for two peaks and (outer_left, left, right,
+    outer_right) for four."""
+    saved_sample, saved_ref = fitter.sample_config, fitter.reference_config
+    # the reference model is swapped alongside only to pass the model-mixing
+    # guard (that guard protects fitted SHIFTS; this fit yields a position
+    # for a 1-px node ladder, where the 0.27 px convention offset is moot)
     try:
-        fitter.update_sample_config(probe)
+        fitter.update_sample_config(replace(saved_sample, fitting_model="lorentzian"))
+        fitter.update_reference_config(replace(saved_ref, fitting_model="lorentzian"))
         px, sline = fitter.get_px_sline_from_image(np.asarray(frame, dtype=float))
         r = fitter.fit(np.asarray(px, dtype=float), np.asarray(sline, dtype=float),
                        is_reference_mode=False, n_peaks=n_peaks)
     finally:
-        fitter.update_sample_config(saved)
+        fitter.update_sample_config(saved_sample)
+        fitter.update_reference_config(saved_ref)
     if not r.is_success:
         raise ValueError("Could not locate the sample peaks to build the "
                          "measured kernels.")

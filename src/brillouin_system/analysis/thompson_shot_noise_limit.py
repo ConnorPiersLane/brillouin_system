@@ -243,8 +243,12 @@ def theoretical_precision(fs: FittedSpectrum,
     # the camera spread, from the same calibration width polynomial the fit
     # used; without a width model (a stored DHO tag analyzed against an old
     # calibration) the acoustic width is used as-is (optimistic bound).
+    # Template calibration (centre_method = "template"): its width
+    # polynomials carry the HWHM of the MEASURED profile, i.e. the whole
+    # instrument response (VIPA line, camera blur, tails, pixel) — so the
+    # detected width is acoustic + profile, with NO camera-PSF constants.
+    template_cal = getattr(calc.p, "template_profiles", None) is not None
     if is_dho_fit(fs.model):
-        k = sline_from_frame_config.get()
         p = calc.p
 
         def vipa_hwhm(coeffs, width_dpx, px):
@@ -253,18 +257,23 @@ def theoretical_precision(fs: FittedSpectrum,
                 return 0.0
             return abs(float(width_dpx(px)))
 
-        w_l = detected_hwhm_px(
-            fs.left_peak_width_px + vipa_hwhm(
-                p.calibration_width_left_peak,
-                calc.calibration_width_left_peak_dpx,
-                fs.left_peak_center_px),
-            k.psf_sigma_left_px, k.psf_tau_left_px)
-        w_r = detected_hwhm_px(
-            fs.right_peak_width_px + vipa_hwhm(
-                p.calibration_width_right_peak,
-                calc.calibration_width_right_peak_dpx,
-                fs.right_peak_center_px),
-            k.psf_sigma_right_px, k.psf_tau_right_px)
+        inst_l = vipa_hwhm(p.calibration_width_left_peak,
+                           calc.calibration_width_left_peak_dpx,
+                           fs.left_peak_center_px)
+        inst_r = vipa_hwhm(p.calibration_width_right_peak,
+                           calc.calibration_width_right_peak_dpx,
+                           fs.right_peak_center_px)
+        if template_cal:
+            w_l = fs.left_peak_width_px + inst_l
+            w_r = fs.right_peak_width_px + inst_r
+        else:
+            # parametric calibration: the width polynomial is the VIPA
+            # Lorentzian core only; the camera spread is added on top
+            k = sline_from_frame_config.get()
+            w_l = detected_hwhm_px(fs.left_peak_width_px + inst_l,
+                                   k.psf_sigma_left_px, k.psf_tau_left_px)
+            w_r = detected_hwhm_px(fs.right_peak_width_px + inst_r,
+                                   k.psf_sigma_right_px, k.psf_tau_right_px)
     elif is_psf_fit(fs.model):
         k = sline_from_frame_config.get()
         w_l = detected_hwhm_px(fs.left_peak_width_px,
@@ -324,6 +333,12 @@ def theoretical_precision(fs: FittedSpectrum,
                                     k.psf_sigma_outer_right_px,
                                     k.psf_tau_outer_right_px,
                                     k.psf_box_outer_right_px)
+        elif is_dho_fit(fs.model) and template_cal:
+            # acoustic + measured outer profile, same rule as the inner pair
+            w_ol = fs.outer_left_peak_width_px + abs(float(
+                calc.calibration_width_outer_left_peak_dpx(fs.outer_left_peak_center_px)))
+            w_or = fs.outer_right_peak_width_px + abs(float(
+                calc.calibration_width_outer_right_peak_dpx(fs.outer_right_peak_center_px)))
         else:
             w_ol = fs.outer_left_peak_width_px
             w_or = fs.outer_right_peak_width_px
