@@ -106,7 +106,7 @@ def test_call_matches_kernel_and_applies_the_envelope_once():
 def test_save_load_roundtrip(tmp_path):
     freqs, pxs, slines = synthetic_sweep(np.random.default_rng(10), n_points=61)
     e = Epsf(freqs, pxs, slines, 2, env_slope=[0.01, -0.01])
-    path = tmp_path / "epsf.npz"
+    path = tmp_path / "epsf.csv"
     e.save(path)
     e2 = Epsf.load(path)
     for line, c in ((0, CEN_LEFT + 0.3), (1, CEN_RIGHT - 0.7)):

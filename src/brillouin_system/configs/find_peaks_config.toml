@@ -38,6 +38,13 @@ env_slope_outer_right_perpx = -0.0253
 # "config" = the four constants above; "measured" = per scan from the calibration
 # line areas (spectrum_fitting/envelope.py), needs the four-order ROI
 envelope_source = "measured"
+# DHO sample kernels (dho_kernel = "measured"): "scan" = the scan's own 41-point
+# calibration node table; "file" = the stored node table kernel_file (built on a
+# 401-point fine sweep, Epsf.save) for kernel_file_lines ("outer" | "all"); the
+# frequency axis and the envelope slopes stay per scan either way
+kernel_source = "scan"
+kernel_file = "C:/Users/cplan/Dropbox (Personal)/Boston/Data/ePSFs/epsf_2026-9-7_calibration_401.csv"
+kernel_file_lines = "outer"
 
 [sample]
 prominence_fraction = 0.001

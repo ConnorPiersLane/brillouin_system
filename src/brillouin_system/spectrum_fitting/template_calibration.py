@@ -92,3 +92,37 @@ def sine_mhz(frames, line, degree=SMOOTH_DEGREE):
     fq = np.array([f.freq for f in frames])
     cs = np.array([f.centre[line] for f in frames])
     return Epsf.sine_of(fq, cs, degree)
+
+
+def save_epsf_file(calibration_h5, out_csv, fitter=None, n_lines=None):
+    """Build the Epsf of a stored calibration (e.g. a 401-point fine sweep,
+    Data/2026-9-7/NA014/calibration_401.h5) under the fitter's live config
+    and write its node table (CSV) for kernel_source = "file". Returns the Epsf.
+
+    The table carries the sweep's own envelope slopes (divided out before
+    stacking) as provenance only; a scan fitted with it keeps its own
+    envelope. Refresh the file after every realignment (2026-09-09 rule)."""
+    from brillouin_system.saving_and_loading.known_dataclasses_lookup import known_classes
+    from brillouin_system.saving_and_loading.safe_and_load_hdf5 import (
+        dict_to_dataclass_tree, load_dict_from_hdf5)
+    from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+
+    cal = dict_to_dataclass_tree(load_dict_from_hdf5(str(calibration_h5)), known_classes)
+    if not hasattr(cal, "measured_freqs"):
+        raise ValueError(f"{calibration_h5} does not hold a CalibrationData.")
+    sf = fitter if fitter is not None else SpectrumFitter()
+    epsf = Epsf.from_calibration(cal, sf, n_lines)
+    epsf.save(out_csv, source=str(calibration_h5))
+    return epsf
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 3:
+        sys.exit("usage: python -m brillouin_system.spectrum_fitting."
+                 "template_calibration <calibration.h5> <out.csv>")
+    e = save_epsf_file(sys.argv[1], sys.argv[2])
+    for line, nm in enumerate(e.names):
+        print(f"{nm:12s} nodes {e.nodes[line].min():.1f}..{e.nodes[line].max():.1f} "
+              f"({len(e.nodes[line])}), frames/node {int(np.median(e.node_frames[line]))}, "
+              f"sine {e.sine_mhz(line)[0]:.2f} MHz")

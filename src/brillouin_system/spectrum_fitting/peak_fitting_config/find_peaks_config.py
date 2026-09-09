@@ -356,6 +356,11 @@ class SampleFindPeaksConfig(FindPeaksConfig):
 DHO_KERNELS = ["parametric", "measured"]
 CENTRE_METHODS = ["parametric", "template"]
 ENVELOPE_SOURCES = ["config", "measured"]
+# Where the measured DHO sample kernels come from (dho_kernel = "measured",
+# centre_method = "template"): the scan's own calibration, or a stored node
+# table (Epsf.save) for the lines named by kernel_file_lines.
+KERNEL_SOURCES = ["scan", "file"]
+KERNEL_FILE_LINES = ["outer", "all"]
 
 ROW_SELECTIONS = ["manual", "auto"]
 
@@ -457,12 +462,48 @@ class SlineFromFrameConfig:
     #     but a factor two between alignment states). Needs the four-order
     #     ROI; falls back to the constants when the frames carry two lines.
     envelope_source: str = "config"
+    # Where the measured DHO sample KERNELS come from (dho_kernel =
+    # "measured" on the template chain; ignored otherwise):
+    #   "scan": the scan's own calibration node table (the 41-point sweep).
+    #   "file": a stored node table (Epsf.save, e.g. built on a 401-point
+    #     fine sweep) for the lines named by kernel_file_lines; the other
+    #     lines, the FREQUENCY AXIS (template centres) and the ENVELOPE
+    #     slopes always stay per scan. Motivation (2026-09-09): the standard
+    #     41-point sweep steps the outer-left line by 0.54 px per frame, a
+    #     half-pixel alias that leaves its stacked profile wiggly and 5 %
+    #     too narrow, while the inner pair and outer_right are sampled fine.
+    #     A stored table pins the sample kernel's centre CONVENTION to the
+    #     file's profile while the axis carries the scan's, so the inner
+    #     distance must be checked against kernel_source = "scan" whenever
+    #     the file changes (< 0.3 MHz; see spectrum_fitting/epsf.py).
+    kernel_source: str = "scan"
+    # path of the stored node table (Epsf.save); required for "file"
+    kernel_file: str = ""
+    # "outer": outer_left + outer_right from the file, inner pair per scan;
+    # "all": every fitted line from the file
+    kernel_file_lines: str = "outer"
 
     def __post_init__(self):
         if self.envelope_source not in ENVELOPE_SOURCES:
             raise ValueError(
                 f"Unknown envelope_source '{self.envelope_source}'. "
                 f"Choose one of {ENVELOPE_SOURCES}."
+            )
+        if self.kernel_source not in KERNEL_SOURCES:
+            raise ValueError(
+                f"Unknown kernel_source '{self.kernel_source}'. "
+                f"Choose one of {KERNEL_SOURCES}."
+            )
+        if self.kernel_file_lines not in KERNEL_FILE_LINES:
+            raise ValueError(
+                f"Unknown kernel_file_lines '{self.kernel_file_lines}'. "
+                f"Choose one of {KERNEL_FILE_LINES}."
+            )
+        self.kernel_file = str(self.kernel_file or "")
+        if self.kernel_source == "file" and not self.kernel_file.strip():
+            raise ValueError(
+                "kernel_source = 'file' needs kernel_file (the path of a "
+                "stored ePSF node table written by Epsf.save)."
             )
         if self.row_selection not in ROW_SELECTIONS:
             raise ValueError(

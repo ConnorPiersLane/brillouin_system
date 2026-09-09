@@ -66,3 +66,68 @@ def test_apply_round_trips_the_switches(app, monkeypatch):
         find_peaks_sample_config.update(dho_kernel=sample0.dho_kernel)
         find_peaks_reference_config.update(centre_method=ref0.centre_method)
         sline_from_frame_config.update(envelope_source=glob0.envelope_source)
+
+
+def test_kernel_switch_loads_and_round_trips(app, monkeypatch):
+    """kernel_source / kernel_file / kernel_file_lines (2026-09-09) ride in
+    the [global] section like envelope_source; the file fields grey out on
+    'scan'."""
+    from PyQt5.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    glob0 = sline_from_frame_config.get()
+    dlg = FindPeaksConfigDialog()
+    assert dlg.global_inputs["kernel_source"].currentText() == glob0.kernel_source
+    assert dlg.global_inputs["kernel_file_lines"].currentText() == glob0.kernel_file_lines
+    assert dlg.global_inputs["kernel_file"].text() == str(glob0.kernel_file)
+    try:
+        dlg.global_inputs["kernel_source"].setCurrentText("scan")
+        assert not dlg.global_inputs["kernel_file"].isEnabled()
+        dlg.global_inputs["kernel_source"].setCurrentText("file")
+        assert dlg.global_inputs["kernel_file"].isEnabled()
+        dlg.global_inputs["kernel_file_lines"].setCurrentText("all")
+        dlg.global_inputs["kernel_file"].setText("some/table.csv")
+        dlg.apply_config()
+        cfg = sline_from_frame_config.get()
+        assert (cfg.kernel_source, cfg.kernel_file_lines, cfg.kernel_file) == ("file", "all", "some/table.csv")
+    finally:
+        sline_from_frame_config.update(kernel_source=glob0.kernel_source,
+                                       kernel_file_lines=glob0.kernel_file_lines,
+                                       kernel_file=glob0.kernel_file)
+
+
+def test_load_and_compile_psf_buttons(app, monkeypatch, tmp_path):
+    """'Load PSF...' takes a stored table and switches the source to file;
+    'Compile from sweep...' builds one next to the .h5 and loads it."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+    from PyQt5.QtWidgets import QFileDialog, QMessageBox
+    from test_template_nodes import _profiles
+    from brillouin_system.spectrum_fitting.peak_fitting_config import find_peaks_config_gui as gui_mod
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    glob0 = sline_from_frame_config.get()
+    table = tmp_path / "epsf_fine.csv"
+    _profiles({0}).save(table, source="fine.h5")
+    dlg = FindPeaksConfigDialog()
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(table), ""))
+    dlg._pick_kernel_file()
+    assert dlg.global_inputs["kernel_file"].text() == str(table)
+    assert dlg.global_inputs["kernel_source"].currentText() == "file"
+    assert "left" in dlg._kernel_info.text() and "fine.h5" in dlg._kernel_info.text()
+    # compile: the builder is stubbed (it needs a real sweep), the naming and
+    # the load path are exercised
+    h5 = tmp_path / "calibration_401.h5"
+    h5.write_bytes(b"")
+    calls = []
+
+    def fake_save(cal, out, fitter=None, n_lines=None):
+        calls.append((cal, str(out)))
+        _profiles({0}).save(out, source=str(cal))
+    import brillouin_system.spectrum_fitting.template_calibration as tc
+    monkeypatch.setattr(tc, "save_epsf_file", fake_save)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(h5), ""))
+    dlg._compile_kernel_file()
+    assert calls == [(str(h5), str(tmp_path / "epsf_calibration_401.csv"))]
+    assert dlg.global_inputs["kernel_file"].text() == str(tmp_path / "epsf_calibration_401.csv")
+    assert (tmp_path / "epsf_calibration_401.csv").is_file()
+    # nothing applied to the live config until Apply
+    assert sline_from_frame_config.get().kernel_file == glob0.kernel_file

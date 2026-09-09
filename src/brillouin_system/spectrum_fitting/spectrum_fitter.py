@@ -593,7 +593,10 @@ class SpectrumFitter:
                 # template chain: kernel (and envelope slope) looked up
                 # PER FRAME at each peak's found position from the node
                 # table, so peaks that move along a scan (cornea depth)
-                # always get the profile measured where they are.
+                # always get the profile measured where they are. With
+                # kernel_source = "file" `profiles` is an epsf.FileKernels:
+                # the named lines answer from the stored table, the
+                # envelope slope always from the scan.
                 fit_names = (("left", "right") if n_peaks == 2
                              else ("outer_left", "left", "right", "outer_right"))
                 idx = [profiles.names.index(nm) for nm in fit_names]

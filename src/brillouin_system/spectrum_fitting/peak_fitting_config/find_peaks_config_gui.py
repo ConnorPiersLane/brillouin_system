@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox, QCheckBox
+    QPushButton, QComboBox, QGroupBox, QApplication, QMessageBox, QCheckBox,
+    QFileDialog,
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from brillouin_system.spectrum_fitting.peak_fitting_config.psf_measurement import (
@@ -11,7 +14,8 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     save_config_section, FIND_PEAKS_TOML_PATH,
     FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
     NA_WEIGHTINGS, ROW_SELECTIONS, FittingConfigs,
-    DHO_KERNELS, CENTRE_METHODS, ENVELOPE_SOURCES,
+    DHO_KERNELS, CENTRE_METHODS, ENVELOPE_SOURCES, KERNEL_SOURCES,
+    KERNEL_FILE_LINES,
 )
 
 
@@ -299,6 +303,55 @@ class FindPeaksConfigDialog(QDialog):
         row.addWidget(env_combo)
         layout.addLayout(row)
 
+        # DHO sample kernels: the scan's own node table, or a stored one
+        # (fine sweep) for the outer orders / all lines
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Kernel source"))
+        k_src = QComboBox()
+        k_src.addItems(KERNEL_SOURCES)
+        k_src.setToolTip(
+            "Where the measured DHO sample kernels come from (dho_kernel = "
+            "measured, centre_method = template). "
+            "scan: this scan's own 41-point calibration node table. "
+            "file: the stored node table below (built on a 401-point fine "
+            "sweep with Epsf.save) for the lines chosen; the frequency axis "
+            "and the envelope slopes stay per scan."
+        )
+        self.global_inputs["kernel_source"] = k_src
+        row.addWidget(k_src)
+        row.addWidget(QLabel("for"))
+        k_lines = QComboBox()
+        k_lines.addItems(KERNEL_FILE_LINES)
+        k_lines.setToolTip("outer: outer_left + outer_right from the file, inner "
+                           "pair per scan. all: every fitted line from the file.")
+        self.global_inputs["kernel_file_lines"] = k_lines
+        row.addWidget(k_lines)
+        layout.addLayout(row)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Kernel file"))
+        k_file = QLineEdit()
+        k_file.setToolTip("Path of the stored ePSF node table (CSV written by "
+                          "Epsf.save / template_calibration.save_epsf_file).")
+        self.global_inputs["kernel_file"] = k_file
+        row.addWidget(k_file)
+        load_btn = QPushButton("Load PSF...")
+        load_btn.setToolTip("Pick a stored ePSF node table (CSV) and use it as the "
+                            "kernel file (kernel source -> file).")
+        load_btn.clicked.connect(self._pick_kernel_file)
+        row.addWidget(load_btn)
+        build_btn = QPushButton("Compile from sweep...")
+        build_btn.setToolTip("Pick a calibration fine sweep (.h5, e.g. 401 points 4-8 "
+                             "GHz), build its ePSF node table under the CURRENT "
+                             "fitting config, store it as epsf_<name>.csv next to "
+                             "the .h5 and use it as the kernel file.")
+        build_btn.clicked.connect(self._compile_kernel_file)
+        row.addWidget(build_btn)
+        layout.addLayout(row)
+        self._kernel_info = QLabel("")
+        self._kernel_info.setWordWrap(True)
+        layout.addWidget(self._kernel_info)
+        k_src.currentTextChanged.connect(lambda _t: self._update_kernel_file_enabled())
+
         # Camera PSF working values — part of the [global] fitting config,
         # shared by the sample and reference fits. The label shows the
         # MEASURED value from psf_measurement.PSF_MEASURED in brackets: that
@@ -356,6 +409,10 @@ class FindPeaksConfigDialog(QDialog):
         self.sample_inputs["dho_kernel"].setCurrentText(sample.dho_kernel)
         self.reference_inputs["centre_method"].setCurrentText(reference.centre_method)
         self.global_inputs["envelope_source"].setCurrentText(global_cfg.envelope_source)
+        self.global_inputs["kernel_source"].setCurrentText(global_cfg.kernel_source)
+        self.global_inputs["kernel_file_lines"].setCurrentText(global_cfg.kernel_file_lines)
+        self.global_inputs["kernel_file"].setText(str(global_cfg.kernel_file))
+        self._update_kernel_file_enabled()
 
         # Global settings
         self.global_inputs["pixel_offset_left"].setText(str(global_cfg.pixel_offset_left))
@@ -390,6 +447,9 @@ class FindPeaksConfigDialog(QDialog):
                 "n_rows": max(self._parse(self.global_inputs["n_rows"].text(), "int"), 1),
                 "n_peaks": int(self.global_inputs["n_peaks"].currentText()),
                 "envelope_source": self.global_inputs["envelope_source"].currentText(),
+                "kernel_source": self.global_inputs["kernel_source"].currentText(),
+                "kernel_file_lines": self.global_inputs["kernel_file_lines"].currentText(),
+                "kernel_file": self.global_inputs["kernel_file"].text().strip(),
             }
             # Camera PSF working values ride in the same [global] config.
             global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
@@ -451,6 +511,59 @@ class FindPeaksConfigDialog(QDialog):
             else:
                 enabled = True
             inputs[field].setEnabled(enabled)
+
+    def _update_kernel_file_enabled(self):
+        on = self.global_inputs["kernel_source"].currentText() == "file"
+        self.global_inputs["kernel_file"].setEnabled(on)
+        self.global_inputs["kernel_file_lines"].setEnabled(on)
+
+    def set_kernel_file(self, path: str):
+        """Use the stored ePSF table at `path`: read it (a bad file raises
+        before anything changes), fill the field, switch the kernel source
+        to 'file' and show what the table holds. Apply/Save as usual."""
+        from brillouin_system.spectrum_fitting.epsf import load_epsf_file
+        e = load_epsf_file(path)
+        self.global_inputs["kernel_file"].setText(str(path))
+        self.global_inputs["kernel_source"].setCurrentText("file")
+        lines = ", ".join(f"{nm} {e.nodes[i].min():.0f}-{e.nodes[i].max():.0f} px "
+                          f"({len(e.nodes[i])} nodes)" for i, nm in enumerate(e.names))
+        self._kernel_info.setText(f"PSF table: {lines}; source {e.source or '-'}")
+        return e
+
+    def _pick_kernel_file(self):
+        start = str(Path(self.global_inputs["kernel_file"].text() or ".").parent)
+        path, _ = QFileDialog.getOpenFileName(self, "Stored ePSF node table", start,
+                                              "ePSF table (*.csv);;All files (*)")
+        if not path:
+            return
+        try:
+            self.set_kernel_file(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Load PSF", f"Could not read {path}: {e}")
+
+    def compile_kernel_file(self, calibration_h5: str) -> str:
+        """Build the ePSF table of a calibration fine sweep under the CURRENT
+        (applied) fitting config, store it as epsf_<stem>.csv next to the
+        .h5 and use it. Returns the table's path."""
+        from brillouin_system.spectrum_fitting.template_calibration import save_epsf_file
+        out = Path(calibration_h5).with_name(f"epsf_{Path(calibration_h5).stem}.csv")
+        save_epsf_file(calibration_h5, out)
+        self.set_kernel_file(str(out))
+        return str(out)
+
+    def _compile_kernel_file(self):
+        start = str(Path(self.global_inputs["kernel_file"].text() or ".").parent)
+        path, _ = QFileDialog.getOpenFileName(self, "Calibration fine sweep", start,
+                                              "calibration (*.h5);;All files (*)")
+        if not path:
+            return
+        try:
+            out = self.compile_kernel_file(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Compile PSF",
+                                 f"Could not build the table from {path}: {e}")
+            return
+        QMessageBox.information(self, "Compile PSF", f"Stored {out} and selected it as the kernel file.")
 
     def psf_constants_in_use(self) -> bool:
         """True when some selected path still reads the parametric camera

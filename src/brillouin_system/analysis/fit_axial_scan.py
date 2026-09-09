@@ -161,6 +161,10 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     then required and their absence raises for the same reason. On the
     template chain the axes carry the whole node table as well, and the
     fitter picks each frame's kernel from it at the found peak position.
+    With sline_config.kernel_source == "file" the node table of the lines
+    named by kernel_file_lines is the stored one (kernel_file, e.g. a
+    401-point fine sweep); the axis, the other kernels and the envelope
+    slopes stay the scan's own (epsf.FileKernels).
     """
     if system_state.is_reference_mode:
         return None
@@ -180,6 +184,12 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     n_peaks = int(fitter.sline_config.n_peaks)
     measured_env = getattr(fitter.sline_config, "envelope_source", "config") == "measured"
     if profiles is None:
+        if getattr(fitter.sline_config, "kernel_source", "scan") == "file":
+            raise ValueError(
+                "kernel_source = 'file' needs centre_method = 'template': "
+                "a stored node table carries the template centre "
+                "convention, and a parametric axis with a template kernel "
+                "is the ~55 MHz convention-mixing trap.")
         # parametric centres, measured shape (inner pair)
         k_left, k_right = measured_kernels_for_frame(
             calibration_data, fitter, first_frame)
@@ -191,8 +201,22 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
             axes = replace(axes, env_slopes=tuple(env.slope(x) for x in positions))
         return axes
     # template chain: centres, kernels AND envelope from the same calibration
+    # (kernel_source = "file": the named lines' kernels from the stored table)
+    from brillouin_system.spectrum_fitting.epsf import kernels_for_fit
+    profiles = kernels_for_fit(profiles, fitter.sline_config)
     positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
     names = profiles.names
+    if hasattr(profiles, "check"):
+        # the quick match check: file profile vs this scan's own at the
+        # sample positions, logged once per scan, a warning on a mismatch
+        matches = profiles.check(positions)
+        text = profiles.report(positions)
+        if all(m.ok for m in matches):
+            log.info("[kernels] " + text)
+        else:
+            log.warning("[kernels] MISMATCH between the stored kernel table and "
+                        "this scan's calibration (realignment since the fine "
+                        "sweep? refresh kernel_file):\n" + text)
     kernels = {nm: profiles.kernel_at(i, positions[i])
                for i, nm in enumerate(names)}
     env_slopes = (tuple(profiles.env_slope(i, positions[i]) for i in range(len(names)))
