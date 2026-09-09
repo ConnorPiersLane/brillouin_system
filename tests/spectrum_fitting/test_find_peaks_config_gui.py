@@ -138,7 +138,8 @@ def test_analyzer_mismatch_dialog_routes_the_decision(app, monkeypatch):
     recalculate from the scan's calibration, No = keep the stored PSF."""
     from PyQt5.QtWidgets import QMessageBox
     from types import SimpleNamespace
-    import brillouin_system.analysis.fit_axial_scan as fas
+    import importlib
+    fas = importlib.import_module("brillouin_system.analysis.fit_axial_scan")
     from brillouin_system.guis.data_analyzer.kernel_mismatch_dialog import (
         install_kernel_mismatch_dialog)
     bad = [SimpleNamespace(name="outer_left")]
