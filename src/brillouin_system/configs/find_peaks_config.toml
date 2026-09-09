@@ -42,7 +42,7 @@ envelope_source = "measured"
 # calibration node table; "file" = the stored node table kernel_file (built on a
 # 401-point fine sweep, Epsf.save) for kernel_file_lines ("outer" | "all"); the
 # frequency axis and the envelope slopes stay per scan either way
-kernel_source = "scan"
+kernel_source = "file"
 kernel_file = "C:/Users/cplan/Dropbox (Personal)/Boston/Data/ePSFs/epsf_2026-9-7_calibration_401.csv"
 kernel_file_lines = "outer"
 
