@@ -206,9 +206,10 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     profiles = kernels_for_fit(profiles, fitter.sline_config)
     positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
     names = profiles.names
-    if hasattr(profiles, "check"):
+    if hasattr(profiles, "check") and getattr(fitter.sline_config, "kernel_check", True):
         # the quick match check: file profile vs this scan's own at the
         # sample positions, logged once per scan, a warning on a mismatch
+        # (sline config kernel_check = false switches it off)
         matches = profiles.check(positions)
         text = profiles.report(positions)
         if all(m.ok for m in matches):

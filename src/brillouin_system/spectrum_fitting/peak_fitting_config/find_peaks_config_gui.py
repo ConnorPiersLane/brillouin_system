@@ -347,6 +347,9 @@ class FindPeaksConfigDialog(QDialog):
         build_btn.clicked.connect(self._compile_kernel_file)
         row.addWidget(build_btn)
         layout.addLayout(row)
+        k_check = QCheckBox("Check the stored PSF against each scan's calibration (log, ~1 ms per scan)")
+        self.global_inputs["kernel_check"] = k_check
+        layout.addWidget(k_check)
         self._kernel_info = QLabel("")
         self._kernel_info.setWordWrap(True)
         layout.addWidget(self._kernel_info)
@@ -412,6 +415,7 @@ class FindPeaksConfigDialog(QDialog):
         self.global_inputs["kernel_source"].setCurrentText(global_cfg.kernel_source)
         self.global_inputs["kernel_file_lines"].setCurrentText(global_cfg.kernel_file_lines)
         self.global_inputs["kernel_file"].setText(str(global_cfg.kernel_file))
+        self.global_inputs["kernel_check"].setChecked(bool(global_cfg.kernel_check))
         self._update_kernel_file_enabled()
 
         # Global settings
@@ -450,6 +454,7 @@ class FindPeaksConfigDialog(QDialog):
                 "kernel_source": self.global_inputs["kernel_source"].currentText(),
                 "kernel_file_lines": self.global_inputs["kernel_file_lines"].currentText(),
                 "kernel_file": self.global_inputs["kernel_file"].text().strip(),
+                "kernel_check": self.global_inputs["kernel_check"].isChecked(),
             }
             # Camera PSF working values ride in the same [global] config.
             global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
@@ -516,6 +521,7 @@ class FindPeaksConfigDialog(QDialog):
         on = self.global_inputs["kernel_source"].currentText() == "file"
         self.global_inputs["kernel_file"].setEnabled(on)
         self.global_inputs["kernel_file_lines"].setEnabled(on)
+        self.global_inputs["kernel_check"].setEnabled(on)
 
     def set_kernel_file(self, path: str):
         """Use the stored ePSF table at `path`: read it (a bad file raises

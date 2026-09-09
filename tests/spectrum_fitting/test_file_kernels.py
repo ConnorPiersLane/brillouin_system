@@ -172,6 +172,26 @@ def test_dho_axes_carry_file_kernels_for_the_named_lines(tmp_path, monkeypatch):
     assert np.allclose(axes.kernel_left.k, _true_kernel(0))
     assert np.allclose(axes.kernel_right.k, _true_kernel(1))
     assert axes.env_slopes is None                 # scan.envelope is None here
+    # the match check is logged once per scan, and kernel_check = False silences it
+    import logging
+    logger = fas.log
+    records = []
+    h = logging.Handler(); h.emit = lambda r: records.append(r.getMessage())
+    logger.addHandler(h)
+    level0 = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
+                                  calibration_data=object(), first_frame=np.zeros((27, 200)))
+        assert any("[kernels]" in m and "left" in m for m in records)
+        records.clear()
+        fitter.update_sline_config(replace(fitter.sline_config, kernel_check=False))
+        fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
+                                  calibration_data=object(), first_frame=np.zeros((27, 200)))
+        assert not any("[kernels]" in m for m in records)
+    finally:
+        logger.removeHandler(h)
+        logger.setLevel(level0)
     # switched off: the scan's own table, wrong profile and all
     fitter.update_sline_config(replace(fitter.sline_config, kernel_source="scan"))
     axes = fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),

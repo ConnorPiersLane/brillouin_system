@@ -86,13 +86,16 @@ def test_kernel_switch_loads_and_round_trips(app, monkeypatch):
         assert dlg.global_inputs["kernel_file"].isEnabled()
         dlg.global_inputs["kernel_file_lines"].setCurrentText("all")
         dlg.global_inputs["kernel_file"].setText("some/table.csv")
+        dlg.global_inputs["kernel_check"].setChecked(False)
         dlg.apply_config()
         cfg = sline_from_frame_config.get()
         assert (cfg.kernel_source, cfg.kernel_file_lines, cfg.kernel_file) == ("file", "all", "some/table.csv")
+        assert cfg.kernel_check is False
     finally:
         sline_from_frame_config.update(kernel_source=glob0.kernel_source,
                                        kernel_file_lines=glob0.kernel_file_lines,
-                                       kernel_file=glob0.kernel_file)
+                                       kernel_file=glob0.kernel_file,
+                                       kernel_check=glob0.kernel_check)
 
 
 def test_load_and_compile_psf_buttons(app, monkeypatch, tmp_path):
