@@ -607,26 +607,38 @@ class Epsf:
 # ------------------------------------------------------------ file kernels
 OUTER_LINES = ("outer_left", "outer_right")
 _FILE_CACHE: dict = {}
-# Match thresholds of a file kernel against the scan's own profile at the
-# same position (FileKernels.check): the centre offset between the two
-# profiles [px] (the convention-mixing lever: 0.01 px ~ 3 MHz on an outer
-# order), the HWHM ratio and the rms difference within +-2 px [% of peak].
-# Set 2026-09-09 from 200 calibrations across three alignment states (9-2,
-# 9-7, 9-8): the well-sampled lines agree with the stored table to 0.005 px,
-# 1 % HWHM and 0.6 % rms; the outer-left alias of a 41-point sweep reaches
-# 0.027 px, 3.2 % and 2.6 %. The thresholds sit above everything seen, so
-# the alias never trips them and a changed instrument does. A line beyond
-# them falls back to the scan's own kernel (fit_axial_scan), with a WARNING.
-MATCH_SHIFT_PX = 0.03
-MATCH_HWHM_FRACTION = 0.06
-MATCH_RMS_PERCENT = 4.0
+# The core window of the profile comparison (FileKernels.check) [px].
 MATCH_CORE_PX = 2.0
+
+
+@dataclass(frozen=True)
+class MatchLimits:
+    """How far a file kernel may sit from the scan's own profile before the
+    line falls back to the scan. The values live in the sline fitting
+    config (kernel_match_*), never here: centre offset [px] for the inner
+    pair and the outer orders (the convention-mixing lever, ~300 MHz/px),
+    HWHM ratio and rms difference within +-MATCH_CORE_PX [% of peak]."""
+    shift_px_inner: float
+    shift_px_outer: float
+    hwhm_fraction: float
+    rms_percent: float
+
+    @classmethod
+    def from_config(cls, sline_config):
+        return cls(shift_px_inner=float(sline_config.kernel_match_shift_px_inner),
+                   shift_px_outer=float(sline_config.kernel_match_shift_px_outer),
+                   hwhm_fraction=float(sline_config.kernel_match_hwhm_fraction),
+                   rms_percent=float(sline_config.kernel_match_rms_percent))
+
+    def shift_px(self, name: str) -> float:
+        return self.shift_px_outer if name in OUTER_LINES else self.shift_px_inner
 
 
 @dataclass
 class KernelMatch:
     """How a FILE kernel compares with the SCAN's own profile of the same
-    line at one position (both unit area on the fine grid)."""
+    line at one position (both unit area on the fine grid), judged against
+    `limits`."""
     name: str
     position_px: float
     hwhm_file_px: float
@@ -634,6 +646,7 @@ class KernelMatch:
     shift_px: float            # file profile centre minus scan profile centre
     rms_percent: float         # rms(file - scan shifted) within +-MATCH_CORE_PX, % of peak
     n_frames_scan: int         # frames behind the scan's node blend (coverage)
+    limits: MatchLimits
     in_use: bool = True        # this line's sample kernel comes from the file
 
     @property
@@ -642,15 +655,16 @@ class KernelMatch:
 
     @property
     def ok(self) -> bool:
-        return (abs(self.shift_px) <= MATCH_SHIFT_PX
-                and abs(self.hwhm_ratio - 1.0) <= MATCH_HWHM_FRACTION
-                and self.rms_percent <= MATCH_RMS_PERCENT)
+        return (abs(self.shift_px) <= self.limits.shift_px(self.name)
+                and abs(self.hwhm_ratio - 1.0) <= self.limits.hwhm_fraction
+                and self.rms_percent <= self.limits.rms_percent)
 
     def __str__(self):
         return (f"{self.name:12s} px {self.position_px:6.1f}: HWHM file/scan "
                 f"{self.hwhm_file_px:.3f}/{self.hwhm_scan_px:.3f} px "
-                f"({100 * (self.hwhm_ratio - 1):+.1f} %), centre offset "
-                f"{self.shift_px:+.3f} px, rms {self.rms_percent:.1f} % of peak "
+                f"({100 * (self.hwhm_ratio - 1):+.1f} %, limit {100 * self.limits.hwhm_fraction:.0f} %), "
+                f"centre offset {self.shift_px:+.3f} px (limit {self.limits.shift_px(self.name):.3f}), "
+                f"rms {self.rms_percent:.1f} % of peak (limit {self.limits.rms_percent:.1f}) "
                 f"({self.n_frames_scan} scan frames)"
                 + ("" if self.in_use else " [scan kernel in use]")
                 + ("" if self.ok else "  <-- MISMATCH"))
@@ -771,15 +785,16 @@ class FileKernels:
             return self.scan
         return FileKernels(self.scan, self.file, keep, path=self.path)
 
-    def check(self, positions) -> list:
+    def check(self, positions, limits: MatchLimits) -> list:
         """Compare the file profile with the scan's own profile at each
         line's position (`positions` in fit order, one per fitted line),
         for EVERY line the file carries, whether or not its kernel is in
-        use: the quick match check the axial-scan analysis logs, so a
-        stale table (realignment since the fine sweep) shows up. On a
-        line the scan under-samples (outer_left on a 41-point sweep) the
-        SCAN profile is the rough one, so a mismatch there is read
-        together with the well-sampled lines."""
+        use, judged against `limits` (MatchLimits.from_config): the quick
+        match check the axial-scan analysis logs, so a stale table
+        (instrument change since the fine sweep) shows up. On a line the
+        scan under-samples (outer_left on a 41-point sweep) the SCAN
+        profile is the rough one, so a mismatch there is read together
+        with the well-sampled lines."""
         out = []
         for line, nm in enumerate(self.names):
             if nm not in self.file.names:
@@ -797,12 +812,13 @@ class FileKernels:
                 name=self.names[line], position_px=x,
                 hwhm_file_px=_hwhm(kf.u, kf.k), hwhm_scan_px=_hwhm(ks.u, ks.k),
                 shift_px=d, rms_percent=100.0 * float(np.sqrt(np.mean(resid ** 2))) / float(kf.k.max()),
-                n_frames_scan=int(ks.n_frames), in_use=line in self._file_index))
+                n_frames_scan=int(ks.n_frames), limits=limits,
+                in_use=line in self._file_index))
         return out
 
-    def report(self, positions) -> str:
+    def report(self, positions, limits: MatchLimits) -> str:
         head = f"file kernels ({self.path}) for {', '.join(self.file_lines)} vs this scan's profile:"
-        return "\n".join([head] + ["  " + str(m) for m in self.check(positions)])
+        return "\n".join([head] + ["  " + str(m) for m in self.check(positions, limits)])
 
 
 def kernels_for_fit(scan_epsf, sline_config):

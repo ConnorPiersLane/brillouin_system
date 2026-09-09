@@ -492,9 +492,19 @@ class SlineFromFrameConfig:
     kernel_file_lines: str = "outer"
     # With "file" every scan's own calibration profile is compared with the
     # stored one at the sample positions (epsf.FileKernels.check, ~1 ms,
-    # always on, logged): a line beyond the epsf.MATCH_* thresholds falls
-    # back to the scan's own kernel with a WARNING (a GUI may ask first,
-    # fit_axial_scan.set_kernel_mismatch_handler).
+    # always on, logged): a line beyond the limits below falls back to the
+    # scan's own kernel with a WARNING (a GUI may ask first,
+    # fit_axial_scan.set_kernel_mismatch_handler). The limits (2026-09-09,
+    # 200 calibrations over three alignment states): the well-sampled lines
+    # agree with the stored table to 0.005 px centre offset, 1 % HWHM and
+    # 0.6 % rms; the outer-left alias of a 41-point sweep reaches 0.027 px,
+    # 3.2 % and 2.6 %. Centre offset = the shift that lays the scan's
+    # profile on the file's (px); it is directly a shift error on that
+    # order (~300 MHz/px), hence tighter on the inner pair (user 09-09).
+    kernel_match_shift_px_inner: float = 0.01
+    kernel_match_shift_px_outer: float = 0.03
+    kernel_match_hwhm_fraction: float = 0.06
+    kernel_match_rms_percent: float = 4.0
 
     def __post_init__(self):
         if self.envelope_source not in ENVELOPE_SOURCES:
@@ -518,6 +528,10 @@ class SlineFromFrameConfig:
                 f"Choose one of {KERNEL_FILE_LINES}."
             )
         self.kernel_file = str(self.kernel_file or "")
+        for f in ("kernel_match_shift_px_inner", "kernel_match_shift_px_outer",
+                  "kernel_match_hwhm_fraction", "kernel_match_rms_percent"):
+            if not float(getattr(self, f)) > 0.0:
+                raise ValueError(f"{f} must be > 0, got {getattr(self, f)!r}.")
         if self.kernel_source == "file" and not self.kernel_file.strip():
             raise ValueError(
                 "kernel_source = 'file' needs kernel_file (the path of a "

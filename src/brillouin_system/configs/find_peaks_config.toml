@@ -49,6 +49,12 @@ envelope_apply = "slope"
 kernel_source = "file"
 kernel_file = "C:/Users/cplan/Dropbox (Personal)/Boston/Data/ePSFs/epsf_2026-9-7_calibration_401.csv"
 kernel_file_lines = "outer"
+# stored-PSF vs scan-profile match limits (a line beyond them falls back to the
+# scan's own kernel): centre offset [px] inner / outer, HWHM ratio, rms % of peak
+kernel_match_shift_px_inner = 0.01
+kernel_match_shift_px_outer = 0.03
+kernel_match_hwhm_fraction = 0.06
+kernel_match_rms_percent = 4.0
 
 [sample]
 prominence_fraction = 0.001

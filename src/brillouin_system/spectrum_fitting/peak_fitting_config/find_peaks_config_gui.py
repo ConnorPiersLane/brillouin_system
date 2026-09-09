@@ -347,6 +347,26 @@ class FindPeaksConfigDialog(QDialog):
         build_btn.clicked.connect(self._compile_kernel_file)
         row.addWidget(build_btn)
         layout.addLayout(row)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("PSF match limits"))
+        for key, label, tip in (
+                ("kernel_match_shift_px_inner", "offset inner [px]",
+                 "Largest centre offset between the stored and the scan's own profile "
+                 "on the inner pair before the line falls back to the scan kernel "
+                 "(~300 MHz/px)."),
+                ("kernel_match_shift_px_outer", "offset outer [px]",
+                 "Same for the outer orders (the 41-point alias alone reaches 0.027 px on outer_left)."),
+                ("kernel_match_hwhm_fraction", "HWHM ratio",
+                 "Largest |HWHM_file / HWHM_scan - 1|."),
+                ("kernel_match_rms_percent", "rms [%]",
+                 "Largest rms difference within +-2 px, in % of the peak.")):
+            row.addWidget(QLabel(label))
+            edit = QLineEdit()
+            edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
+            edit.setToolTip(tip)
+            self.global_inputs[key] = edit
+            row.addWidget(edit)
+        layout.addLayout(row)
         self._kernel_info = QLabel("")
         self._kernel_info.setWordWrap(True)
         layout.addWidget(self._kernel_info)
@@ -412,6 +432,8 @@ class FindPeaksConfigDialog(QDialog):
         self.global_inputs["kernel_source"].setCurrentText(global_cfg.kernel_source)
         self.global_inputs["kernel_file_lines"].setCurrentText(global_cfg.kernel_file_lines)
         self.global_inputs["kernel_file"].setText(str(global_cfg.kernel_file))
+        for key in self.kernel_match_field_names():
+            self.global_inputs[key].setText(str(getattr(global_cfg, key)))
         self._update_kernel_file_enabled()
 
         # Global settings
@@ -451,6 +473,8 @@ class FindPeaksConfigDialog(QDialog):
                 "kernel_file_lines": self.global_inputs["kernel_file_lines"].currentText(),
                 "kernel_file": self.global_inputs["kernel_file"].text().strip(),
             }
+            global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
+                                  for f in self.kernel_match_field_names()})
             # Camera PSF working values ride in the same [global] config.
             global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
                                   for f in self.pr_field_names()})
@@ -512,10 +536,16 @@ class FindPeaksConfigDialog(QDialog):
                 enabled = True
             inputs[field].setEnabled(enabled)
 
+    def kernel_match_field_names(self):
+        return ["kernel_match_shift_px_inner", "kernel_match_shift_px_outer",
+                "kernel_match_hwhm_fraction", "kernel_match_rms_percent"]
+
     def _update_kernel_file_enabled(self):
         on = self.global_inputs["kernel_source"].currentText() == "file"
         self.global_inputs["kernel_file"].setEnabled(on)
         self.global_inputs["kernel_file_lines"].setEnabled(on)
+        for key in self.kernel_match_field_names():
+            self.global_inputs[key].setEnabled(on)
 
     def set_kernel_file(self, path: str):
         """Use the stored ePSF table at `path`: read it (a bad file raises
@@ -595,7 +625,7 @@ class FindPeaksConfigDialog(QDialog):
         return (
             "fraction" in field or "rel" in field
             or field == "beta" or field.startswith("na_")
-            or field.startswith("psf_")
+            or field.startswith("psf_") or field.startswith("kernel_match_")
         )
 
     def _parse(self, value, field):

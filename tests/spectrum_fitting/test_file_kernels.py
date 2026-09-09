@@ -21,7 +21,7 @@ import pytest
 
 from brillouin_system.spectrum_fitting.dho import DhoAxes
 from brillouin_system.spectrum_fitting.epsf import (
-    Epsf, FileKernels, OUTER_LINES, kernels_for_fit, load_epsf_file)
+    Epsf, FileKernels, MatchLimits, OUTER_LINES, kernels_for_fit, load_epsf_file)
 from brillouin_system.spectrum_fitting.measured_kernel import MeasuredKernel
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     SlineFromFrameConfig)
@@ -184,6 +184,36 @@ def test_dho_axes_carry_file_kernels_for_the_named_lines(tmp_path, monkeypatch):
                                      calibration_data=object(), first_frame=np.zeros((27, 200)))
     assert axes.profiles is scan
     assert np.allclose(axes.kernel_left.k, _wrong_kernel(0))
+
+
+def test_match_limits_come_from_the_config_and_are_per_line(tmp_path):
+    """The limits are fitting-config values (no constants in epsf.py); the
+    centre-offset limit is tighter on the inner pair than on the outers."""
+    cfg = _sline_config(kernel_match_shift_px_inner=0.01, kernel_match_shift_px_outer=0.03,
+                        kernel_match_hwhm_fraction=0.06, kernel_match_rms_percent=4.0)
+    lim = MatchLimits.from_config(cfg)
+    assert (lim.shift_px("left"), lim.shift_px("outer_left")) == (0.01, 0.03)
+    with pytest.raises(ValueError, match="kernel_match_rms_percent"):
+        _sline_config(kernel_match_rms_percent=0.0)
+    scan, path = _tables(tmp_path)
+    fine = load_epsf_file(path)
+    # a file whose profile is the scan's own shifted by +0.02 px
+    shifted = _profiles(set())
+    for line in range(2):
+        shifted.profiles[line] = np.array([np.interp(GRID - 0.02, GRID, k, left=0.0, right=0.0)
+                                           for k in shifted.profiles[line]])
+    p2 = tmp_path / "shifted.csv"
+    shifted.save(p2)
+    fk = FileKernels(scan, load_epsf_file(p2), ("left", "right"))
+    m = fk.check((CEN_LEFT, CEN_RIGHT), lim)
+    assert all(abs(x.shift_px - 0.02) < 0.004 for x in m)
+    assert not any(x.ok for x in m)                       # 0.02 > inner limit 0.01
+    loose = MatchLimits(shift_px_inner=0.03, shift_px_outer=0.03, hwhm_fraction=0.06, rms_percent=4.0)
+    assert all(x.ok for x in fk.check((CEN_LEFT, CEN_RIGHT), loose))
+    assert "limit 0.010" in str(m[0])
+    # the same table against itself passes and reports its limits
+    same = FileKernels(fine, fine, ("left", "right"))
+    assert all(x.ok for x in same.check((CEN_LEFT, CEN_RIGHT), lim))
 
 
 def test_save_load_carries_provenance(tmp_path):

@@ -225,8 +225,10 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
         # positions, once per scan (~1 ms), always logged. A file line that
         # fails falls back to the scan's own kernel (or the installed
         # handler decides), with a WARNING either way.
-        matches = profiles.check(positions)
-        text = profiles.report(positions)
+        from brillouin_system.spectrum_fitting.epsf import MatchLimits
+        limits = MatchLimits.from_config(fitter.sline_config)
+        matches = profiles.check(positions, limits)
+        text = profiles.report(positions, limits)
         bad = [m for m in matches if m.in_use and not m.ok]
         if not bad:
             log.info("[kernels] " + text)
