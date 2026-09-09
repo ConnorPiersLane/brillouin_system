@@ -1,6 +1,6 @@
 """The sample fit takes its kernel from the template NODE table, per frame.
 
-TemplateProfiles.kernel_at must blend the two 1-px node profiles bracketing
+Epsf.kernel_at must blend the two 1-px node profiles bracketing
 the position (no restack, continuous along the track), and a DHO fit given
 the node table must pick, for every frame, the kernel at that frame's found
 peak position: a scan whose peaks move (cornea depth) is fitted with the
@@ -18,7 +18,7 @@ import pytest
 from brillouin_system.spectrum_fitting.dho import DhoAxes, dho_profile
 from brillouin_system.spectrum_fitting.measured_kernel import MeasuredKernel
 from brillouin_system.spectrum_fitting.psf import DX, psf_profile
-from brillouin_system.spectrum_fitting.template_calibration import TemplateProfiles
+from brillouin_system.spectrum_fitting.epsf import Epsf
 
 from test_measured_kernel import (
     CEN_LEFT, CEN_RIGHT, FLOOR, G_INST, POLY_LEFT, POLY_RIGHT, PX, SIGMA,
@@ -53,8 +53,7 @@ def _profiles(good_offsets):
         nodes.append(nd)
         profiles.append(prof)
         counts.append({float(n): 14 for n in nd})
-    return TemplateProfiles(n_lines=2, grid=GRID, nodes=nodes, profiles=profiles,
-                            node_frames=counts, envs=[0.0, 0.0])
+    return Epsf.from_table(GRID, nodes, profiles, counts, env_slope=[0.0, 0.0])
 
 
 def test_kernel_at_blends_the_two_bracketing_nodes():
