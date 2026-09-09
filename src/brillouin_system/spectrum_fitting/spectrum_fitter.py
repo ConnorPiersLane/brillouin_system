@@ -605,6 +605,15 @@ class SpectrumFitter:
                 if profiles.envelope is not None:
                     envs = [profiles.env_slope(j, float(cen[i]))
                             for i, j in enumerate(idx)]
+            # envelope_apply = "curve" (2026-09-09 analysis knob): the
+            # FOUR-PEAK fit multiplies each peak by the full measured
+            # curve exp(g(x) - g(c)) over its window instead of the local
+            # slope; the two-peak path keeps the slope (untouched).
+            env_curve = None
+            if (n_peaks == 4 and profiles is not None and mk[0] is not None
+                    and getattr(profiles, "envelope", None) is not None
+                    and getattr(self.sline_config, "envelope_apply", "slope") == "curve"):
+                env_curve = profiles.envelope
 
             def peak(x, a, c, w, i):
                 if n_peaks == 2:
@@ -626,7 +635,9 @@ class SpectrumFitter:
                             x[m], a * sat_r, c + sat_d, w, polys[i],
                             g_inst[i], sigmas[i], taus[i],
                             box=boxes[i])
-                    if envs[i] != 0.0:
+                    if env_curve is not None:
+                        out[m] = out[m] * env_curve.factor(x[m], c)
+                    elif envs[i] != 0.0:
                         out[m] = out[m] * np.exp(envs[i] * (x[m] - c))
                 return out
 

@@ -356,6 +356,11 @@ class SampleFindPeaksConfig(FindPeaksConfig):
 DHO_KERNELS = ["parametric", "measured"]
 CENTRE_METHODS = ["parametric", "template"]
 ENVELOPE_SOURCES = ["config", "measured"]
+# How the measured envelope enters a FOUR-PEAK DHO fit (envelope_source =
+# "measured", template chain): the local slope at the found centre,
+# exp(g'(c) (x - c)), or the full curve exp(g(x) - g(c)) over the window.
+# The two-peak path always uses the slope. Analysis knob (2026-09-09).
+ENVELOPE_APPLY = ["slope", "curve"]
 # Where the measured DHO sample kernels come from (dho_kernel = "measured",
 # centre_method = "template"): the scan's own calibration, or a stored node
 # table (Epsf.save) for the lines named by kernel_file_lines.
@@ -462,6 +467,9 @@ class SlineFromFrameConfig:
     #     but a factor two between alignment states). Needs the four-order
     #     ROI; falls back to the constants when the frames carry two lines.
     envelope_source: str = "config"
+    # "slope" (production) or "curve": see ENVELOPE_APPLY. Only the
+    # four-peak DHO path on the template chain reads it.
+    envelope_apply: str = "slope"
     # Where the measured DHO sample KERNELS come from (dho_kernel =
     # "measured" on the template chain; ignored otherwise):
     #   "scan": the scan's own calibration node table (the 41-point sweep).
@@ -488,6 +496,11 @@ class SlineFromFrameConfig:
             raise ValueError(
                 f"Unknown envelope_source '{self.envelope_source}'. "
                 f"Choose one of {ENVELOPE_SOURCES}."
+            )
+        if self.envelope_apply not in ENVELOPE_APPLY:
+            raise ValueError(
+                f"Unknown envelope_apply '{self.envelope_apply}'. "
+                f"Choose one of {ENVELOPE_APPLY}."
             )
         if self.kernel_source not in KERNEL_SOURCES:
             raise ValueError(

@@ -38,6 +38,10 @@ env_slope_outer_right_perpx = -0.0253
 # "config" = the four constants above; "measured" = per scan from the calibration
 # line areas (spectrum_fitting/envelope.py), needs the four-order ROI
 envelope_source = "measured"
+# how the measured envelope enters the FOUR-PEAK DHO fit: "slope" = the local
+# slope at the found centre (production), "curve" = the full curve exp(g(x)-g(c))
+# over the window (analysis knob, 2026-09-09: both agree to 0.02 MHz on water)
+envelope_apply = "slope"
 # DHO sample kernels (dho_kernel = "measured"): "scan" = the scan's own 41-point
 # calibration node table; "file" = the stored node table kernel_file (built on a
 # 401-point fine sweep, Epsf.save) for kernel_file_lines ("outer" | "all"); the
