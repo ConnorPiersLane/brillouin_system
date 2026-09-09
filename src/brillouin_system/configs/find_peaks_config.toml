@@ -49,8 +49,6 @@ envelope_apply = "slope"
 kernel_source = "file"
 kernel_file = "C:/Users/cplan/Dropbox (Personal)/Boston/Data/ePSFs/epsf_2026-9-7_calibration_401.csv"
 kernel_file_lines = "outer"
-# log the stored-profile vs scan-profile match once per scan (~1 ms); false = silent
-kernel_check = true
 
 [sample]
 prominence_fraction = 0.001

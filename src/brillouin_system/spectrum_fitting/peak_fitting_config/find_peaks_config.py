@@ -490,11 +490,11 @@ class SlineFromFrameConfig:
     # "outer": outer_left + outer_right from the file, inner pair per scan;
     # "all": every fitted line from the file
     kernel_file_lines: str = "outer"
-    # With kernel_source = "file": compare the stored profile with the scan's
-    # own at the sample positions once per scan (all lines the file carries,
-    # ~1 ms) and log it, a WARNING beyond the epsf.MATCH_* thresholds. Off =
-    # no comparison, no log line.
-    kernel_check: bool = True
+    # With "file" every scan's own calibration profile is compared with the
+    # stored one at the sample positions (epsf.FileKernels.check, ~1 ms,
+    # always on, logged): a line beyond the epsf.MATCH_* thresholds falls
+    # back to the scan's own kernel with a WARNING (a GUI may ask first,
+    # fit_axial_scan.set_kernel_mismatch_handler).
 
     def __post_init__(self):
         if self.envelope_source not in ENVELOPE_SOURCES:
@@ -518,7 +518,6 @@ class SlineFromFrameConfig:
                 f"Choose one of {KERNEL_FILE_LINES}."
             )
         self.kernel_file = str(self.kernel_file or "")
-        self.kernel_check = bool(self.kernel_check)
         if self.kernel_source == "file" and not self.kernel_file.strip():
             raise ValueError(
                 "kernel_source = 'file' needs kernel_file (the path of a "

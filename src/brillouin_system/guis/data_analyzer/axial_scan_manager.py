@@ -93,6 +93,11 @@ class AxialScanManager(QWidget):
         self.open_viewers: dict = {}
 
         self.init_ui()
+        # a stored PSF table that fails the per-scan check asks the user
+        # here instead of falling back silently (kernel_mismatch_dialog)
+        from brillouin_system.guis.data_analyzer.kernel_mismatch_dialog import (
+            install_kernel_mismatch_dialog)
+        install_kernel_mismatch_dialog(self)
 
     def init_ui(self):
         outer = QHBoxLayout(self)

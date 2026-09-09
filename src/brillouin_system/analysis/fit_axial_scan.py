@@ -35,6 +35,20 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import (
 log = get_logger(__name__)
 
 
+# Decision on a stored-PSF mismatch (kernel_source = "file"): called with
+# the failed KernelMatch list and the FileKernels, returns True to hand the
+# failed lines back to the scan's own calibration kernels. None = always
+# fall back (scripts, batch analyses, the live loop). A GUI installs a
+# dialog with set_kernel_mismatch_handler (the data analyzer does).
+_kernel_mismatch_handler = None
+
+
+def set_kernel_mismatch_handler(handler):
+    """Install (or clear with None) the mismatch decision, see above."""
+    global _kernel_mismatch_handler
+    _kernel_mismatch_handler = handler
+
+
 # One-shot flag: "photon calibration unavailable" is reported once per
 # process, not once per frame (a scan would repeat it hundreds of times).
 _photon_calibration_warned = False
@@ -206,18 +220,30 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     profiles = kernels_for_fit(profiles, fitter.sline_config)
     positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
     names = profiles.names
-    if hasattr(profiles, "check") and getattr(fitter.sline_config, "kernel_check", True):
-        # the quick match check: file profile vs this scan's own at the
-        # sample positions, logged once per scan, a warning on a mismatch
-        # (sline config kernel_check = false switches it off)
+    if hasattr(profiles, "check"):
+        # the match check: file profile vs this scan's own at the sample
+        # positions, once per scan (~1 ms), always logged. A file line that
+        # fails falls back to the scan's own kernel (or the installed
+        # handler decides), with a WARNING either way.
         matches = profiles.check(positions)
         text = profiles.report(positions)
-        if all(m.ok for m in matches):
+        bad = [m for m in matches if m.in_use and not m.ok]
+        if not bad:
             log.info("[kernels] " + text)
         else:
-            log.warning("[kernels] MISMATCH between the stored kernel table and "
-                        "this scan's calibration (realignment since the fine "
-                        "sweep? refresh kernel_file):\n" + text)
+            bad_names = ", ".join(m.name for m in bad)
+            log.warning("[kernels] MISMATCH between the stored PSF table and this "
+                        "scan's calibration on " + bad_names + " (instrument change "
+                        "since the fine sweep? recompile kernel_file):\n" + text)
+            fallback = (True if _kernel_mismatch_handler is None
+                        else bool(_kernel_mismatch_handler(bad, profiles)))
+            if fallback:
+                profiles = profiles.without([m.name for m in bad])
+                log.warning("[kernels] " + bad_names + ": kernel recalculated from this "
+                            "scan's own calibration instead of the stored table.")
+            else:
+                log.warning("[kernels] " + bad_names + ": stored kernel kept on user "
+                            "decision despite the mismatch.")
     kernels = {nm: profiles.kernel_at(i, positions[i])
                for i, nm in enumerate(names)}
     env_slopes = (tuple(profiles.env_slope(i, positions[i]) for i in range(len(names)))

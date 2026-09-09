@@ -86,16 +86,13 @@ def test_kernel_switch_loads_and_round_trips(app, monkeypatch):
         assert dlg.global_inputs["kernel_file"].isEnabled()
         dlg.global_inputs["kernel_file_lines"].setCurrentText("all")
         dlg.global_inputs["kernel_file"].setText("some/table.csv")
-        dlg.global_inputs["kernel_check"].setChecked(False)
         dlg.apply_config()
         cfg = sline_from_frame_config.get()
         assert (cfg.kernel_source, cfg.kernel_file_lines, cfg.kernel_file) == ("file", "all", "some/table.csv")
-        assert cfg.kernel_check is False
     finally:
         sline_from_frame_config.update(kernel_source=glob0.kernel_source,
                                        kernel_file_lines=glob0.kernel_file_lines,
-                                       kernel_file=glob0.kernel_file,
-                                       kernel_check=glob0.kernel_check)
+                                       kernel_file=glob0.kernel_file)
 
 
 def test_load_and_compile_psf_buttons(app, monkeypatch, tmp_path):
@@ -134,3 +131,23 @@ def test_load_and_compile_psf_buttons(app, monkeypatch, tmp_path):
     assert (tmp_path / "epsf_calibration_401.csv").is_file()
     # nothing applied to the live config until Apply
     assert sline_from_frame_config.get().kernel_file == glob0.kernel_file
+
+
+def test_analyzer_mismatch_dialog_routes_the_decision(app, monkeypatch):
+    """The data analyzer's dialog answers the stored-PSF mismatch: Yes =
+    recalculate from the scan's calibration, No = keep the stored PSF."""
+    from PyQt5.QtWidgets import QMessageBox
+    from types import SimpleNamespace
+    import brillouin_system.analysis.fit_axial_scan as fas
+    from brillouin_system.guis.data_analyzer.kernel_mismatch_dialog import (
+        install_kernel_mismatch_dialog)
+    bad = [SimpleNamespace(name="outer_left")]
+    profiles = SimpleNamespace(path="table.csv")
+    try:
+        install_kernel_mismatch_dialog()
+        monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+        assert fas._kernel_mismatch_handler(bad, profiles) is True
+        monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+        assert fas._kernel_mismatch_handler(bad, profiles) is False
+    finally:
+        fas.set_kernel_mismatch_handler(None)

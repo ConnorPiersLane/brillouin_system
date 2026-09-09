@@ -166,32 +166,18 @@ def test_dho_axes_carry_file_kernels_for_the_named_lines(tmp_path, monkeypatch):
     calc = SimpleNamespace(p=SimpleNamespace(template_profiles=scan), dho_axes=lambda: base)
     monkeypatch.setattr("brillouin_system.spectrum_fitting.measured_kernel.sample_peak_positions",
                         lambda fitter, frame, n_peaks=2: (CEN_LEFT, CEN_RIGHT))
-    axes = fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
-                                     calibration_data=object(), first_frame=np.zeros((27, 200)))
+    # the WRONG scan profile fails the match check against the TRUE file on
+    # purpose here; keep the file (handler says no fallback) to test the plumbing
+    fas.set_kernel_mismatch_handler(lambda bad, prof: False)
+    try:
+        axes = fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
+                                         calibration_data=object(), first_frame=np.zeros((27, 200)))
+    finally:
+        fas.set_kernel_mismatch_handler(None)
     assert isinstance(axes.profiles, FileKernels)
     assert np.allclose(axes.kernel_left.k, _true_kernel(0))
     assert np.allclose(axes.kernel_right.k, _true_kernel(1))
     assert axes.env_slopes is None                 # scan.envelope is None here
-    # the match check is logged once per scan, and kernel_check = False silences it
-    import logging
-    logger = fas.log
-    records = []
-    h = logging.Handler(); h.emit = lambda r: records.append(r.getMessage())
-    logger.addHandler(h)
-    level0 = logger.level
-    logger.setLevel(logging.INFO)
-    try:
-        fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
-                                  calibration_data=object(), first_frame=np.zeros((27, 200)))
-        assert any("[kernels]" in m and "left" in m for m in records)
-        records.clear()
-        fitter.update_sline_config(replace(fitter.sline_config, kernel_check=False))
-        fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
-                                  calibration_data=object(), first_frame=np.zeros((27, 200)))
-        assert not any("[kernels]" in m for m in records)
-    finally:
-        logger.removeHandler(h)
-        logger.setLevel(level0)
     # switched off: the scan's own table, wrong profile and all
     fitter.update_sline_config(replace(fitter.sline_config, kernel_source="scan"))
     axes = fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
@@ -207,3 +193,78 @@ def test_save_load_carries_provenance(tmp_path):
     e2 = Epsf.load(p)
     assert e2.source == "sweep.h5" and e2.path == str(p)
     assert np.allclose(e2.kernel(0, CEN_LEFT).k, _true_kernel(0))
+
+
+def _axes_with(fitter, scan, path, monkeypatch, fas):
+    from test_measured_kernel import G_INST, POLY_LEFT, POLY_RIGHT
+    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT,
+                   instrument_width_left_poly=np.array([G_INST]),
+                   instrument_width_right_poly=np.array([G_INST]))
+    calc = SimpleNamespace(p=SimpleNamespace(template_profiles=scan), dho_axes=lambda: base)
+    monkeypatch.setattr("brillouin_system.spectrum_fitting.measured_kernel.sample_peak_positions",
+                        lambda fitter, frame, n_peaks=2: (CEN_LEFT, CEN_RIGHT))
+    return fas._dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
+                                     calibration_data=object(), first_frame=np.zeros((27, 200)))
+
+
+def test_mismatched_file_lines_fall_back_to_the_scan_kernel(tmp_path, monkeypatch):
+    """The stored table is checked against the scan's own profile once per
+    scan. A line that fails (here: the file's TRUE profile vs the scan's
+    WRONG one, twice the width) is handed back to the scan's calibration
+    kernel with a warning; a line that matches keeps the file kernel; an
+    installed handler may veto the fallback (the analyzer's dialog)."""
+    import importlib
+    import logging
+    fas = importlib.import_module("brillouin_system.analysis.fit_axial_scan")
+    # scan: WRONG on both lines; file: TRUE on the left, WRONG on the right
+    scan = _profiles(set())
+    file = _profiles(set())
+    file.profiles[0] = np.array([_true_kernel(0)] * len(file.nodes[0]))
+    path = tmp_path / "fine.csv"
+    file.save(path, source="fine.h5")
+    fitter = make_fitter()
+    fitter.update_sample_config(replace(fitter.sample_config, dho_kernel="measured"))
+    fitter.update_sline_config(replace(fitter.sline_config, kernel_source="file",
+                                       kernel_file=str(path), kernel_file_lines="all"))
+    records = []
+    h = logging.Handler(); h.emit = lambda r: records.append((r.levelno, r.getMessage()))
+    fas.log.addHandler(h)
+    level0 = fas.log.level
+    fas.log.setLevel(logging.INFO)
+    try:
+        axes = _axes_with(fitter, scan, path, monkeypatch, fas)
+        # left mismatched -> scan kernel (WRONG); right matched -> file kernel (= WRONG too, but from the file)
+        assert isinstance(axes.profiles, FileKernels)
+        assert axes.profiles.file_lines == ("right",)
+        assert np.allclose(axes.kernel_left.k, _wrong_kernel(0))
+        assert any(lvl == logging.WARNING and "MISMATCH" in m and "left" in m for lvl, m in records)
+        assert any("recalculated from this scan" in m for _, m in records)
+        # a handler that says "keep the file" wins
+        records.clear()
+        seen = []
+        fas.set_kernel_mismatch_handler(lambda bad, prof: (seen.append([m.name for m in bad]), False)[1])
+        try:
+            axes = _axes_with(fitter, scan, path, monkeypatch, fas)
+        finally:
+            fas.set_kernel_mismatch_handler(None)
+        assert seen == [["left"]]
+        assert axes.profiles.file_lines == ("left", "right")
+        assert np.allclose(axes.kernel_left.k, _true_kernel(0))
+        assert any("kept on user decision" in m for _, m in records)
+        # every file line failing -> the scan's own Epsf, plain
+        scan2 = _profiles(set())
+        file2 = _profiles({-3, -2, -1, 0, 1, 2, 3})
+        path2 = tmp_path / "fine2.csv"
+        file2.save(path2)
+        fitter.update_sline_config(replace(fitter.sline_config, kernel_file=str(path2)))
+        axes = _axes_with(fitter, scan2, path2, monkeypatch, fas)
+        assert axes.profiles is scan2
+        # matching lines are logged at INFO, no warning
+        records.clear()
+        fitter.update_sline_config(replace(fitter.sline_config, kernel_file=str(path)))
+        _axes_with(fitter, file, path, monkeypatch, fas)      # the file against itself
+        assert any(lvl == logging.INFO and "[kernels]" in m for lvl, m in records)
+        assert not any(lvl == logging.WARNING for lvl, _ in records)
+    finally:
+        fas.log.removeHandler(h)
+        fas.log.setLevel(level0)

@@ -611,9 +611,12 @@ _FILE_CACHE: dict = {}
 # same position (FileKernels.check): the centre offset between the two
 # profiles [px] (the convention-mixing lever: 0.01 px ~ 3 MHz on an outer
 # order), the HWHM ratio and the rms difference within +-2 px [% of peak].
-# Set 2026-09-09 from the same-day (9-7) and next-day (9-8) comparisons on
-# the water series; a value beyond them is logged as a warning by the
-# axial-scan analysis, not refused.
+# Set 2026-09-09 from 200 calibrations across three alignment states (9-2,
+# 9-7, 9-8): the well-sampled lines agree with the stored table to 0.005 px,
+# 1 % HWHM and 0.6 % rms; the outer-left alias of a 41-point sweep reaches
+# 0.027 px, 3.2 % and 2.6 %. The thresholds sit above everything seen, so
+# the alias never trips them and a changed instrument does. A line beyond
+# them falls back to the scan's own kernel (fit_axial_scan), with a WARNING.
 MATCH_SHIFT_PX = 0.03
 MATCH_HWHM_FRACTION = 0.06
 MATCH_RMS_PERCENT = 4.0
@@ -758,6 +761,15 @@ class FileKernels:
 
     def __call__(self, line, cen, px, amp=1.0, offset=0.0):
         return self.scan(line, cen, px, amp, offset)
+
+    def without(self, names):
+        """This object with the kernels of `names` handed back to the scan
+        (the mismatch fallback); the scan's Epsf itself when no file line
+        remains."""
+        keep = tuple(nm for nm in self.file_lines if nm not in set(names))
+        if not keep:
+            return self.scan
+        return FileKernels(self.scan, self.file, keep, path=self.path)
 
     def check(self, positions) -> list:
         """Compare the file profile with the scan's own profile at each
