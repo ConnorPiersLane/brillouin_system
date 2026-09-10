@@ -1,0 +1,30 @@
+# Predefined measurement template.
+# One step-source per line. Two forms, chosen by whether a trailing
+# maxTime is present:
+#
+#   Fixed cycles (7 cols):  x,cycles,z,R,phi,deltac,maxTime
+#   Timed        (6 cols):  x,maxTime,z,R,phi,deltac
+#
+# With NO trailing maxTime, the 2nd column IS the max time (seconds) and the
+# step runs as a TIMED sweep: as many in-out cycles as fit in that budget.
+#
+#   x        target depth past the plane [um] -> SweepScanConfig.target_depth_um
+#   cycles   number of in-out cycles          -> SweepScanConfig.n_repeats (fixed only)
+#   maxTime  max sweep time [s]               -> SweepScanConfig.max_time_s
+#   z        number of sweep scans (replicates) at this depth
+#   R        target laser radius [mm]         -> Move XY
+#   phi      target laser angle  [deg]        -> Move XY
+#   deltac   target delta-c [mm]              -> Move Z
+#
+# Blank lines and lines starting with '#' are ignored.
+# Each line expands to z steps, IDs "depth<x>num<1..z>".
+
+# Timed: at each depth, take as many cycles as fit in 30 s, 5 replicates.
+50,10,5,0,0,2
+100,10,5,0,0,2
+200,10,5,0,0,2
+300,10,5,0,0,2
+400,10,5,0,0,2
+
+# Fixed-cycle equivalents would instead look like (6 cycles, 300 s cap):
+# 50,6,5,0,0,2,300
