@@ -16,13 +16,19 @@ from brillouin_system.helpers.thread_safe_config import LazyThreadSafeConfig, Th
 # meant for wide-linewidth (viscous) samples where the DHO center offset
 # (~Gamma^2/nu_B-scaled) matters. Sample-only, n_peaks = 2 only, and fits
 # need dho_axes from the scan's calibration (see spectrum_fitting/dho.py).
+# Four sample models (2026-09-10): a Lorentzian or a DHO core, bare (pixel
+# box only) or through the MEASURED instrument kernel ('_x_psf'). The
+# kernel and DHO models fit against the scan's own calibration axes and
+# are sample-only; a '_x_psf' fit's width is the sample width.
 FITTING_MODELS_SAMPLE = [
     "lorentzian",
+    "lorentzian_x_psf",
+    "dho",
     "dho_x_psf",
 ]
-# The calibration lines are located by the template chain (epsf.py), so the
-# reference lineshape only displays calibration frames and seeds peak
-# positions: a plain Lorentzian is all there is.
+# The calibration lines are elastic — their profile IS the instrument
+# kernel — so the reference fit is the plain Lorentzian (peak location and
+# the live display; the axis itself comes from the template chain).
 FITTING_MODELS_REFERENCE = [
     "lorentzian",
 ]
@@ -55,35 +61,6 @@ _LEGACY_BACKGROUNDS = {
 #                     v0 comes from na_beam_diameter_mm (the per-session knob,
 #                     calibrated on water) and na_focal_length_mm.
 NA_WEIGHTINGS = ["none", "uniform", "uniform_gaussian"]
-
-# Models that were removed, with the migration hint shown if one is still set.
-_REMOVED_MODELS = {
-    "lorentzian_x_psf": "the parametric camera-PSF kernel was removed "
-                        "2026-09-10; the measured ePSF chain (template "
-                        "calibration + 'dho_x_psf') replaced it, and "
-                        "'lorentzian' is the plain lineshape",
-    "prm0": "preset of the removed 'lorentzian_x_psf' (2026-09-10); use "
-            "'dho_x_psf' with background='flat'",
-    "prm1": "preset of the removed 'lorentzian_x_psf' (2026-09-10); use "
-            "'dho_x_psf' with background='linear'",
-    "prmr": "preset of the removed 'lorentzian_x_psf' (2026-09-10); use "
-            "'dho_x_psf' with background='reflection'",
-    "pixel_response": "the parametric camera-PSF kernel was removed "
-                      "2026-09-10; use 'dho_x_psf' or 'lorentzian'",
-    "asym_lorentzian": "tested on calibration data and rejected (it triples the "
-                       "residual sine); the measured ePSF carries the asymmetry",
-    "lorentzian_quad_bg": "never implemented; use background='linear' "
-                          "(a quadratic baseline was tested and is degenerate "
-                          "with the Lorentzian wings)",
-    "voigt": "removed 2026-08-20 (unused; the DHO/voigt lineshape question "
-             "was answered — estimator choice, not physics)",
-    "na_lorentzian": "NA lineshape models removed 2026-08-20; the high-NA "
-                     "recipe is the POST-HOC scalar correction (na_weighting "
-                     "config + na_lineshape.na_mean_shift_ratio)",
-    "na_gauss_lorentzian": "NA lineshape models removed 2026-08-20; use the "
-                           "post-hoc correction with na_weighting = "
-                           "'uniform_gaussian'",
-}
 
 # Legacy model names that folded a baseline choice into the lineshape name.
 _LEGACY_BACKGROUND_MODELS = {
@@ -143,10 +120,11 @@ class FindPeaksConfig:
         # All legacy-name and preset rules live in resolve_fit_options —
         # the same path the fitter uses on configs that bypass this method.
         resolved = resolve_fit_options(self)
-        if resolved.model in _REMOVED_MODELS:
+        if resolved.model not in FITTING_MODELS_SAMPLE:
             raise ValueError(
-                f"Fitting model '{resolved.model}' has been removed: "
-                f"{_REMOVED_MODELS[resolved.model]}."
+                f"Unknown fitting_model '{resolved.model}'. Choose one of "
+                f"{FITTING_MODELS_SAMPLE} (reference fits: "
+                f"{FITTING_MODELS_REFERENCE})."
             )
         if resolved.background not in BACKGROUNDS:
             raise ValueError(
@@ -191,7 +169,7 @@ class SampleFindPeaksConfig(FindPeaksConfig):
     na_focal_length_mm: float = 0.0
     na_n_sample: float = 1.33
     # How far beyond the calibrated EOM sweep the reflection-background
-    # registration is trusted, per side [GHz] (prmr fits only; outside the
+    # registration is trusted, per side [GHz] (reflection-background fits only; outside the
     # trusted range the rendered template is 0). 0.7 = the validated
     # production default. Raise DELIBERATELY for high-shift samples whose
     # peaks sit beyond the sweep — e.g. 2.0 on a 4-8 GHz sweep reaches
@@ -369,44 +347,50 @@ class FittingConfigs:
 
 FIND_PEAKS_TOML_PATH = CONFIG_DIR / "find_peaks_config.toml"
 
-# Keys an older TOML may still carry in the [sample]/[reference] sections:
-# the pre-2026-08-31 pr_* camera constants, na_* (sample-only now), n_peaks
-# (moved to [global] 2026-08-21) and the two chain switches retired
-# 2026-09-10 with the parametric PSF (dho_kernel, centre_method). Dropped
-# silently so those files keep loading; any other unknown key still raises.
-_MOVED_SECTION_KEYS = {
-    "pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px",
-    "na_weighting", "na_collection", "na_beam_diameter_mm",
-    "na_focal_length_mm", "na_n_sample", "n_peaks",
-    "dho_kernel", "centre_method",
+# Keys a TOML must NOT carry any more. They are refused with the reason, never
+# dropped silently (user rule 2026-09-10): a stale key means a stale file.
+_RETIRED_KEYS = {
+    **{k: "the parametric camera PSF was removed 2026-09-10" for k in (
+        "psf_sigma_px", "psf_sigma_left_px", "psf_sigma_right_px",
+        "psf_tau_left_px", "psf_tau_right_px",
+        "psf_sigma_outer_left_px", "psf_sigma_outer_right_px",
+        "psf_tau_outer_left_px", "psf_tau_outer_right_px",
+        "psf_box_left_px", "psf_box_right_px",
+        "psf_box_outer_left_px", "psf_box_outer_right_px",
+        "psf_sat_ratio_outer_right", "psf_sat_delta_outer_right_px",
+        "pr_sigma_px", "pr_tau_left_px", "pr_tau_right_px",
+        "dho_kernel", "centre_method")},
+    "kernel_check": "the stored-PSF check is always on since 2026-09-09",
+    "n_peaks": "moved to the [global] section 2026-08-21",
+    "save_calibration_frames": "removed 2026-08-24, the frames always travel",
 }
-# [global] keys of the removed parametric camera PSF (2026-09-10).
-_RETIRED_GLOBAL_KEYS = (
-    "psf_sigma_px", "psf_sigma_left_px", "psf_sigma_right_px",
-    "psf_tau_left_px", "psf_tau_right_px",
-    "psf_sigma_outer_left_px", "psf_sigma_outer_right_px",
-    "psf_tau_outer_left_px", "psf_tau_outer_right_px",
-    "psf_box_left_px", "psf_box_right_px",
-    "psf_box_outer_left_px", "psf_box_outer_right_px",
-    "psf_sat_ratio_outer_right", "psf_sat_delta_outer_right_px",
-    "kernel_check",
-)
+
+
+def _refuse_unknown_keys(raw: dict, names: set, section: str, path: Path):
+    unknown = [k for k in raw if k not in names]
+    if not unknown:
+        return
+    reasons = "; ".join(f"'{k}': {_RETIRED_KEYS[k]}" if k in _RETIRED_KEYS
+                        else f"'{k}': not a field" for k in unknown)
+    raise ValueError(
+        f"{path.name} [{section}] carries keys this config does not have — "
+        f"{reasons}. Delete them from the file.")
+
 
 def load_config_section(path: Path, section: str) -> FindPeaksConfig:
     cls = SampleFindPeaksConfig if section == "sample" else FindPeaksConfig
     with path.open("rb") as f:
         raw = tomli.load(f)[section]
-    names = {f.name for f in fields(cls)}
-    kwargs = {k: v for k, v in raw.items()
-              if k in names or k not in _MOVED_SECTION_KEYS}
-    return cls(**kwargs)
+    _refuse_unknown_keys(raw, {f.name for f in fields(cls)}, section, path)
+    return cls(**raw)
+
 
 def load_sline_from_frame_config(path: Path) -> SlineFromFrameConfig:
     with path.open("rb") as f:
         raw = tomli.load(f)["global"]
-    for key in _RETIRED_GLOBAL_KEYS:
-        raw.pop(key, None)
+    _refuse_unknown_keys(raw, {f.name for f in fields(SlineFromFrameConfig)}, "global", path)
     return SlineFromFrameConfig(**raw)
+
 
 def save_config_section(path: Path, section: str, config: ThreadSafeConfig):
     with path.open("rb") as f:

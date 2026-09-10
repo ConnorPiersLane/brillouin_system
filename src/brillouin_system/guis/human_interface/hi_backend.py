@@ -56,7 +56,7 @@ class HiBackend:
         self.spectrum_fitter = SpectrumFitter()
 
         # Reflection background ("ReflectionBG") for the reflection
-        # background / prmr preset: the current template comes from the
+        # background 'reflection': the current template comes from the
         # runtime registry (no default fallback — with none loaded, fits
         # warn and drop the reflection term); the mapper is rebuilt whenever
         # the template, calibration or row band changes.
@@ -349,7 +349,7 @@ class HiBackend:
         """The mapped reflection background for sample fits, or None.
 
         Only built when the sample config uses the reflection background
-        (the prmr preset). The CURRENT template (runtime registry, no
+        (background 'reflection'). The CURRENT template (runtime registry, no
         default fallback — None makes fit() warn once and drop the
         reflection term) is registered onto the CURRENT calibration in
         frequency space, so it survives VIPA realignment; raises if no
@@ -388,7 +388,7 @@ class HiBackend:
         return self._reflection_mapper.render(px)
 
     def _dho_axes_if_required(self, frame=None):
-        """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
+        """The per-peak calibration axes for kernel / DHO sample fits, or None.
 
         No degraded fallback (unlike the reflection template): without a
         calibration the DHO cannot fit at all, so this raises — the live
@@ -404,7 +404,7 @@ class HiBackend:
             return None
         if self.calibration_calculator is None:
             raise ValueError(
-                "Model 'dho_x_psf' needs the current calibration's frequency "
+                "A kernel / DHO sample fit needs the current calibration's frequency "
                 "tracks and instrument widths, but no calibration is loaded."
             )
         cfg = self.spectrum_fitter.sample_config
@@ -415,7 +415,7 @@ class HiBackend:
             return cached[1]
         if self.calibration_data is None or frame is None:
             raise ValueError(
-                "Model 'dho_x_psf' needs the live calibration's raw "
+                "A kernel / DHO sample fit needs the live calibration's raw "
                 "frames and a sample frame to build the instrument kernels."
             )
         from brillouin_system.analysis.fit_axial_scan import dho_axes_for_fit

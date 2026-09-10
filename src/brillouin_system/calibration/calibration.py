@@ -9,7 +9,7 @@ from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
 from brillouin_system.spectrum_fitting.dho import DhoAxes
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
-    is_dho_fit,
+    is_kernel_fit,
 )
 
 log = get_logger(__name__)
@@ -370,7 +370,7 @@ class CalibrationCalculator:
         raw_l, raw_r = self.hwhm_outer_ghz(fitting)
         if raw_l is None:
             return None, None
-        if is_dho_fit(fitting.model):
+        if is_kernel_fit(fitting.model):
             return raw_l, raw_r
         # a plain-Lorentzian fit carries no instrument model: no linewidth
         return None, None
@@ -519,7 +519,7 @@ class CalibrationCalculator:
         )
 
     def dho_axes(self) -> DhoAxes:
-        """The frequency tracks a 'dho_x_psf' sample fit needs from THIS
+        """The frequency tracks a kernel / DHO sample fit needs from THIS
         calibration: the inner pair's px->GHz polynomials, plus the outer
         orders' on a four-peak calibration. The measured kernels and the
         envelope are added by analysis.fit_axial_scan.dho_axes_for_fit."""
@@ -529,7 +529,7 @@ class CalibrationCalculator:
             if coeffs is None or not np.all(
                     np.isfinite(np.asarray(coeffs, dtype=float))):
                 raise ValueError(
-                    f"This calibration cannot drive a 'dho_x_psf' fit: "
+                    f"This calibration cannot drive a kernel / DHO fit: "
                     f"'{name}' is missing or non-finite. The DHO needs the "
                     f"inner pair's frequency tracks from the scan's own "
                     f"calibration."
@@ -584,14 +584,15 @@ class CalibrationCalculator:
         the validated width recipe, and only a calibration carrying a width
         model can supply the instrument term.
 
-        A DHO fit ('dho_x_psf') needs NO subtraction: the instrument
-        Lorentzian was folded into its kernel at fit time, so the fitted
-        width IS the sample's acoustic HWHM — subtracting again would
-        double-count the instrument.
+        A kernel fit ('lorentzian_x_psf', 'dho_x_psf') needs NO
+        subtraction: the measured instrument profile was folded into its
+        kernel at fit time, so the fitted width IS the sample's HWHM. The
+        bare models ('lorentzian', 'dho') carry no instrument model and
+        report no linewidth.
         """
         if not fitting.is_success:
             return None, None
-        if is_dho_fit(fitting.model):
+        if is_kernel_fit(fitting.model):
             return self.hwhm_ghz(fitting)
         # a plain-Lorentzian fit carries no instrument model: no linewidth
         return None, None

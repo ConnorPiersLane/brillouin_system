@@ -1,4 +1,4 @@
-"""Viewer for the reflection background the prmr fits will use.
+"""Viewer for the reflection background the reflection-background fits will use.
 
 Top: the template's 2D frame (the stored bias-subtracted mean image).
 Bottom: its row-band sline, with the session's calibration sideband

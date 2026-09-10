@@ -130,7 +130,7 @@ def _reflection_mapper_if_required(fitter: SpectrumFitter,
                                    system_state: SystemState,
                                    first_frame: np.ndarray,
                                    ) -> ReflectionBackgroundMapper | None:
-    """The mapped reflection template for prmr sample fits, or None.
+    """The mapped reflection template for reflection-background sample fits, or None.
 
     The current template (user-selected, no default fallback) is registered
     onto THIS scan's own calibration — frequency-anchored, so it applies
@@ -162,7 +162,7 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
                           calibration_data=None,
                           first_frame=None,
                           ) -> DhoAxes | None:
-    """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
+    """The per-peak calibration axes for kernel / DHO sample fits, or None.
 
     Unlike the reflection background there is NO degraded fallback: a DHO
     without its frequency tracks and measured kernels is not fittable, so a
@@ -185,7 +185,7 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     axes = calibration_calculator.dho_axes()
     if calibration_data is None or first_frame is None:
         raise ValueError(
-            "Model 'dho_x_psf' needs the scan's raw calibration frames (the "
+            "A kernel / DHO sample fit needs the scan's raw calibration frames (the "
             "measured instrument kernels come from them) and a sample frame "
             "to locate the peaks."
         )
@@ -195,7 +195,7 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
         raise ValueError(
             "This calibration carries no measured profile (template_profiles): "
             "re-fit it from its raw frames (calibration_calculator_for_scan / "
-            "calibrate) before a 'dho_x_psf' fit."
+            "calibrate) before a kernel / DHO fit."
         )
     n_peaks = int(fitter.sline_config.n_peaks)
     # template chain: centres, kernels AND envelope from the same calibration

@@ -158,7 +158,7 @@ class AxialScanManager(QWidget):
 
         layout.addLayout(config_row)
 
-        # --- reflection background (the template prmr fits use) ---
+        # --- reflection background (the template reflection-background fits use) ---
         bg_row = QHBoxLayout()
 
         self.load_bg_btn = QPushButton("Load Background")
@@ -172,10 +172,10 @@ class AxialScanManager(QWidget):
         self.bg_label = QLabel("Background: none loaded")
         self.bg_label.setToolTip(
             "The reflection background used by 'reflection'-background "
-            "(prmr) sample fits. Load one from a reflection-plane scan of "
+            "(background 'reflection') sample fits. Load one from a reflection-plane scan of "
             "the session's own alignment (e.g. a 'reflection_background' "
             "scan taken with the GUI's Take Background button). With none "
-            "loaded, prmr fits warn and use per-peak offsets only — there "
+            "loaded, reflection-background fits warn and use per-peak offsets only — there "
             "is deliberately no default template.")
         bg_row.addWidget(self.bg_label, stretch=1)
 
@@ -461,7 +461,7 @@ class AxialScanManager(QWidget):
             QMessageBox.information(
                 self, "No Background",
                 "No reflection background is loaded — use 'Load Background' "
-                "first. (prmr fits currently warn and use per-peak offsets "
+                "first. (reflection-background fits currently warn and use per-peak offsets "
                 "only.)")
             return
         title = self.bg_label.text().replace("Background: ",

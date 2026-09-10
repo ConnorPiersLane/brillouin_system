@@ -4,7 +4,7 @@ The laser carries a stable satellite comb (measured 2026-08-19: components at
 ~-0.9 / +-1.6 / +-4.0 / +-6.8 GHz from the carrier, pattern stable to 0.03%
 and linear in intensity over a 5x range). Every elastic light path images this
 comb through the VIPA, which puts a faint frequency-anchored background under
-the Brillouin peaks — the structure prm1's linear slope used to absorb.
+the Brillouin peaks — the structure a linear background used to absorb.
 
 The production correction fits the measured pattern with ONE shared scale:
 
@@ -200,7 +200,7 @@ class ReflectionBackground:
 # (the analyzer's "Load Background" button) and there is deliberately NO
 # fallback to the packaged default (user decision 2026-08-24): silently
 # fitting with a stale-alignment template is worse than fitting without the
-# reflection term. With no template loaded, prmr fits warn and degrade to
+# reflection term. With no template loaded, reflection-background fits warn and degrade to
 # per-peak flat offsets (see SpectrumFitter.fit).
 _current_background: ReflectionBackground | None = None
 

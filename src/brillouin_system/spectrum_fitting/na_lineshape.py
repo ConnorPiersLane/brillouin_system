@@ -81,7 +81,7 @@ def na_mean_shift_ratio(config, n_quad: int = 2001) -> float:
     configured collection weight (config.na_weighting).
 
     This is the paper's post-hoc correction route (Figs. 4/5): fit with the
-    standard symmetric model (prm0/prm1, unchanged), then DIVIDE the measured
+    standard symmetric model (unchanged), then DIVIDE the measured
     shift by this ratio to recover the true 180-degree shift. The integral is a
     pure constant per aperture/weighting — it never enters the fit, and leaves
     split, width and precision untouched (tested 2026-08-05).

@@ -44,23 +44,18 @@ def make_spectrum(seed=0):
     return px, true + rng.normal(0.0, 2.0, size=true.shape)
 
 
-def test_the_remaining_models():
-    assert SUPPORTED_MODELS == ("lorentzian", "dho_x_psf")
-    assert FITTING_MODELS_SAMPLE == ["lorentzian", "dho_x_psf"]
+def test_the_four_models():
+    assert SUPPORTED_MODELS == ("lorentzian", "lorentzian_x_psf", "dho", "dho_x_psf")
+    assert FITTING_MODELS_SAMPLE == list(SUPPORTED_MODELS)
     assert FITTING_MODELS_REFERENCE == ["lorentzian"]
+    for name in SUPPORTED_MODELS:
+        assert make_config(name).fitting_model == name
 
 
-@pytest.mark.parametrize("name", ["lorentzian_x_psf", "prm0", "prm1", "prmr", "pixel_response"])
-def test_parametric_psf_models_are_retired_with_a_hint(name):
-    with pytest.raises(ValueError, match="removed"):
+@pytest.mark.parametrize("name", ["prm0", "prm1", "prmr", "pixel_response", "voigt", "na_lorentzian"])
+def test_old_model_names_are_unknown(name):
+    with pytest.raises(ValueError, match="Unknown fitting_model"):
         make_config(name)
-
-
-def test_removed_models_raise_with_migration_hint():
-    with pytest.raises(ValueError, match="removed"):
-        make_config("voigt")
-    with pytest.raises(ValueError, match="removed"):
-        make_config("na_lorentzian")
 
 
 def test_legacy_names_normalise():
@@ -107,20 +102,23 @@ def test_packaged_reference_config():
     assert cfg.background == "flat"
 
 
-def test_old_tomls_with_the_retired_keys_still_load(tmp_path):
+def test_stale_toml_keys_are_refused_with_the_reason(tmp_path):
+    """No silent dropping (user rule 2026-09-10): a retired key names why."""
     toml = tmp_path / "old.toml"
     toml.write_text(
         "[global]\npixel_offset_left = 0\npixel_offset_right = 0\n"
-        "selected_rows = [1, 2]\npsf_sigma_px = 0.31\npsf_tau_left_px = 0.4\n"
-        "psf_box_outer_left_px = 1.95\npsf_sat_ratio_outer_right = 0.037\n"
-        "kernel_check = true\n"
+        "selected_rows = [1, 2]\npsf_sigma_left_px = 0.31\n"
         "[sample]\nprominence_fraction = 0.05\nmin_peak_width = 1\nmin_peak_height = 5\n"
         "rel_height = 0.5\nwlen_pixels = 10\nfitting_model = \"dho_x_psf\"\n"
         "dho_kernel = \"measured\"\n"
         "[reference]\nprominence_fraction = 0.05\nmin_peak_width = 1\nmin_peak_height = 800\n"
         "rel_height = 0.5\nwlen_pixels = 40\nfitting_model = \"lorentzian\"\n"
-        "centre_method = \"template\"\n", encoding="utf-8")
-    g = load_sline_from_frame_config(toml)
-    assert g.selected_rows == [1, 2] and not hasattr(g, "psf_sigma_left_px")
-    assert load_config_section(toml, "sample").fitting_model == "dho_x_psf"
-    assert load_config_section(toml, "reference").fitting_model == "lorentzian"
+        "typo_key = 1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="psf_sigma_left_px.*parametric camera PSF was removed"):
+        load_sline_from_frame_config(toml)
+    with pytest.raises(ValueError, match="dho_kernel.*removed 2026-09-10"):
+        load_config_section(toml, "sample")
+    with pytest.raises(ValueError, match="typo_key.*not a field"):
+        load_config_section(toml, "reference")
+    # the shipped file has none of them
+    assert load_sline_from_frame_config(FIND_PEAKS_TOML_PATH).n_peaks in (2, 4)

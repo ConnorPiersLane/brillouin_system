@@ -23,7 +23,8 @@ from brillouin_system.calibration.calibration import (
     CalibrationPolyfitParameters,
 )
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.spectrum_fitting.dho import DhoAxes, dho_profile
+from brillouin_system.spectrum_fitting.dho import (
+    DhoAxes, dho_profile, lorentzian_profile, pixel_box_kernel)
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FITTING_MODELS_REFERENCE,
     FITTING_MODELS_SAMPLE,
@@ -33,6 +34,7 @@ from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
     config_requires_dho_axes,
     is_dho_fit,
+    is_kernel_fit,
 )
 
 from synthetic_lines import measured_kernel
@@ -139,7 +141,7 @@ def test_dho_fit_recovers_resonance_and_acoustic_width():
     fitter = make_fitter()
     fit = fitter.fit(px, sline, is_reference_mode=False, dho_axes=AXES)
     assert fit.is_success
-    assert is_dho_fit(fit.model)
+    assert is_dho_fit(fit.model) and is_kernel_fit(fit.model)
     # noiseless self-closure: the resonance pixel comes back essentially
     # exactly, so the standard freq chain reports the true resonance
     assert abs(fit.left_peak_center_px - CEN_LEFT) < 0.02
@@ -199,14 +201,70 @@ def test_dho_single_found_peak_fails_instead_of_degrading():
     assert not fit.is_success
 
 
+# ---------------- the other two kernel / DHO models ----------------
+
+def test_bare_dho_fits_through_the_pixel_box_only():
+    # 'dho': the DHO core integrated over the pixel, no measured kernel —
+    # the truth built the same way comes back exactly, and the fit needs
+    # only the frequency tracks
+    box = pixel_box_kernel()
+    assert abs(box.k.sum() * 0.02 - 1.0) < 1e-9 and box.u.min() == -0.5
+    px = np.arange(16, 116, dtype=float)
+    sline = (dho_profile(px, AMP, CEN_LEFT, gamma_px(SLOPE_LEFT), POLY_LEFT, box)
+             + dho_profile(px, AMP, CEN_RIGHT, gamma_px(SLOPE_RIGHT), POLY_RIGHT, box)
+             + OFFSET)
+    fitter = make_fitter(sample_model="dho")
+    tracks_only = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT)
+    fit = fitter.fit(px, sline, is_reference_mode=False, dho_axes=tracks_only)
+    assert fit.is_success and is_dho_fit(fit.model) and not is_kernel_fit(fit.model)
+    assert abs(fit.left_peak_center_px - CEN_LEFT) < 0.02
+    assert abs(fit.right_peak_center_px - CEN_RIGHT) < 0.02
+    assert abs(fit.left_peak_width_px - gamma_px(SLOPE_LEFT)) < 0.02
+    assert abs(fit.right_peak_width_px - gamma_px(SLOPE_RIGHT)) < 0.02
+
+
+def test_lorentzian_x_psf_recovers_the_core_through_the_kernel():
+    # 'lorentzian_x_psf': a symmetric core through the measured kernel —
+    # centre and CORE width come back, the instrument width stays in the
+    # kernel (the fitted width is the sample width)
+    px = np.arange(16, 116, dtype=float)
+    w_l, w_r = 1.1, 0.9
+    sline = (lorentzian_profile(px, AMP, CEN_LEFT, w_l, KERNEL)
+             + lorentzian_profile(px, AMP, CEN_RIGHT, w_r, KERNEL) + OFFSET)
+    fitter = make_fitter(sample_model="lorentzian_x_psf")
+    fit = fitter.fit(px, sline, is_reference_mode=False, dho_axes=AXES)
+    assert fit.is_success and is_kernel_fit(fit.model) and not is_dho_fit(fit.model)
+    assert abs(fit.left_peak_center_px - CEN_LEFT) < 0.02
+    assert abs(fit.right_peak_center_px - CEN_RIGHT) < 0.02
+    assert abs(fit.left_peak_width_px - w_l) < 0.02
+    assert abs(fit.right_peak_width_px - w_r) < 0.02
+    # the plain Lorentzian on the same data reads the wider detected line
+    plain = make_fitter(sample_model="lorentzian").fit(px, sline, is_reference_mode=False)
+    assert plain.left_peak_width_px > w_l + 0.15
+    # without kernels the kernel model refuses instead of guessing
+    with pytest.raises(ValueError, match="measured instrument kernel"):
+        fitter.fit(px, sline, is_reference_mode=False,
+                   dho_axes=DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT))
+
+
+@pytest.mark.parametrize("model", ["lorentzian_x_psf", "dho", "dho_x_psf"])
+def test_kernel_and_dho_models_are_sample_only_and_need_axes(model):
+    px, sline = make_spectrum()
+    fitter = make_fitter(sample_model=model)
+    with pytest.raises(ValueError, match="dho_axes"):
+        fitter.fit(px, sline, is_reference_mode=False)
+    fitter.update_reference_config(make_config(model))
+    with pytest.raises(ValueError, match="sample-only"):
+        fitter.fit(px, sline, is_reference_mode=True, dho_axes=AXES)
+
+
 # ---------------- config wiring ----------------
 
 def test_dho_is_a_sample_model_only():
-    assert "dho_x_psf" in FITTING_MODELS_SAMPLE
-    assert "dho_x_psf" not in FITTING_MODELS_REFERENCE
-    cfg = make_config("dho_x_psf")
-    assert cfg.fitting_model == "dho_x_psf"
-    assert config_requires_dho_axes(cfg)
+    for model in ("lorentzian_x_psf", "dho", "dho_x_psf"):
+        assert model in FITTING_MODELS_SAMPLE
+        assert model not in FITTING_MODELS_REFERENCE
+        assert config_requires_dho_axes(make_config(model))
     assert not config_requires_dho_axes(make_config("lorentzian"))
 
 

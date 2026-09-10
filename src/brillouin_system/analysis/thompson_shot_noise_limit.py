@@ -44,7 +44,7 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     sline_from_frame_config,
 )
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
-    is_dho_fit,
+    is_kernel_fit,
 )
 
 # Thompson's photon term s^2/N is derived for a GAUSSIAN profile. Brillouin
@@ -235,16 +235,16 @@ def theoretical_precision(fs: FittedSpectrum,
     a_l = abs(calc.df_left_peak(px=fs.left_peak_center_px, dpx=1))
     a_r = abs(calc.df_right_peak(px=fs.right_peak_center_px, dpx=1))
 
-    # s is the width of the photon distribution AS DETECTED: for a plain
-    # Lorentzian fit the fitted width already is it. A DHO fit's width is
-    # the ACOUSTIC core only — the measured instrument profile (VIPA line,
-    # camera blur, tails, pixel) was folded into its kernel — so the
-    # profile's HWHM at the peak, from the calibration width track, is
-    # added back first (Lorentzian widths add). Without a width track (a
-    # stored DHO tag analysed against an old calibration) the acoustic
-    # width is used as-is (optimistic bound). The pixel top-hat stays OUT
-    # of s (it is the separate a^2/12 pixelation term).
-    if is_dho_fit(fs.model):
+    # s is the width of the photon distribution AS DETECTED: for a bare
+    # fit ('lorentzian', 'dho') the fitted width already is it. A kernel
+    # fit's width ('lorentzian_x_psf', 'dho_x_psf') is the SAMPLE core only
+    # — the measured instrument profile (VIPA line, camera blur, tails,
+    # pixel) was folded into its kernel — so the profile's HWHM at the
+    # peak, from the calibration width track, is added back first
+    # (Lorentzian widths add). Without a width track (a stored tag analysed
+    # against an old calibration) the core width is used as-is (optimistic
+    # bound). The pixel top-hat stays OUT of s (the separate a^2/12 term).
+    if is_kernel_fit(fs.model):
         p = calc.p
 
         def vipa_hwhm(coeffs, width_dpx, px):
@@ -304,7 +304,7 @@ def theoretical_precision(fs: FittedSpectrum,
     if four_peak is not None and photons.outer_left_peak_photons:
         a_ol = abs(calc.df_outer_left_peak(px=fs.outer_left_peak_center_px, dpx=1))
         a_or = abs(calc.df_outer_right_peak(px=fs.outer_right_peak_center_px, dpx=1))
-        if is_dho_fit(fs.model):
+        if is_kernel_fit(fs.model):
             # acoustic + measured outer profile, same rule as the inner pair
             w_ol = fs.outer_left_peak_width_px + abs(float(
                 calc.calibration_width_outer_left_peak_dpx(fs.outer_left_peak_center_px)))

@@ -18,7 +18,8 @@ from brillouin_system.spectrum_fitting.fit_util import (
 )
 
 from brillouin_system.logging_utils.logging_setup import get_logger
-from brillouin_system.spectrum_fitting.dho import DhoAxes, dho_profile
+from brillouin_system.spectrum_fitting.dho import (
+    DhoAxes, dho_profile, lorentzian_profile, pixel_box_kernel)
 from brillouin_system.spectrum_fitting.row_selection import (
     select_rows,
     captured_fraction,
@@ -31,15 +32,21 @@ log = get_logger(__name__)
 # lineshape. The NA-integrated lineshape models were removed 2026-08-20: the
 # production high-NA recipe is the POST-HOC scalar correction (fit as at low
 # NA, then divide by na_lineshape.na_mean_shift_ratio) — never in the fit.
-# 'dho_x_psf' (2026-08-28) is SAMPLE-ONLY: the eq.-S2 DHO core built in each
-# peak's own calibration frequency track, through the MEASURED instrument
-# kernel — needs dho_axes passed to fit() (see spectrum_fitting/dho.py). The
-# parametric 'lorentzian_x_psf' model and its prm* presets were removed
-# 2026-09-10 (the measured ePSF chain replaced them).
+# Four sample models (2026-09-10): a Lorentzian or a DHO core, each either
+# through the 1 px pixel box alone or through the MEASURED instrument kernel
+# ('_x_psf', the ePSF of the scan's calibration or a stored table). The
+# kernel and DHO models need dho_axes (frequency tracks, kernels) from the
+# scan's own calibration and are sample-only; the calibration lines are
+# elastic and fitted with the plain 'lorentzian' (their profile IS the
+# kernel). A '_x_psf' fit's width is the sample width.
 SUPPORTED_MODELS = (
     "lorentzian",
+    "lorentzian_x_psf",
+    "dho",
     "dho_x_psf",
 )
+# models that fit through the scan's calibration axes (dho_axes)
+AXES_MODELS = ("lorentzian_x_psf", "dho", "dho_x_psf")
 
 
 def normalize_model_name(model: str):
@@ -79,7 +86,7 @@ def config_requires_reflection_background(config) -> bool:
                                            "reflection_per_peak")
 
 
-# One-shot: a prmr fit without a loaded template degrades to per-peak flat
+# One-shot: a reflection-background fit without a loaded template degrades to per-peak flat
 # offsets. Warn once per process, not once per frame — a scan would repeat
 # it hundreds of times.
 _missing_reflection_bg_warned = False
@@ -91,7 +98,7 @@ def _warn_missing_reflection_background():
         return
     _missing_reflection_bg_warned = True
     log.warning(
-        "[SpectrumFitter] Background 'reflection' (prmr) requested but NO "
+        "[SpectrumFitter] Background 'reflection' requested but NO "
         "reflection background is loaded — fitting with per-peak flat "
         "offsets only (there is deliberately no default template: alignments "
         "differ). Load one in the analyzer ('Load Background') or record a "
@@ -101,25 +108,22 @@ def _warn_missing_reflection_background():
 
 
 def is_dho_fit(model: str | None) -> bool:
-    """True if a FittedSpectrum came from the DHO lineshape ('dho_x_psf').
+    """True if a FittedSpectrum came from a DHO lineshape ('dho' or
+    'dho_x_psf'): its centre parameter is the RESONANCE pixel."""
+    return "dho" in str(model or "")
 
-    A DHO fit's center is the acoustic RESONANCE pixel and its fitted width
-    is the ACOUSTIC HWHM — the instrument Lorentzian is folded into the
-    kernel at fit time, so downstream must NOT subtract it again (see
-    CalibrationCalculator.sample_linewidth_ghz).
-    """
-    return "dho_x_psf" in str(model or "")
+
+def is_kernel_fit(model: str | None) -> bool:
+    """True if a FittedSpectrum was fitted through the measured instrument
+    kernel ('lorentzian_x_psf' or 'dho_x_psf'): its width parameter is the
+    SAMPLE width, the instrument profile sits in the kernel."""
+    return "_x_psf" in str(model or "")
 
 
 def config_requires_dho_axes(config) -> bool:
-    """True if fits with this config need the per-peak calibration axes.
-
-    Callers then build them per scan from the scan's own calibration:
-    CalibrationCalculator.dho_axes(), passed to fit() as dho_axes. Unlike
-    the reflection background there is NO degraded fallback — a DHO without
-    its frequency tracks and instrument widths is not fittable.
-    """
-    return resolve_fit_options(config).model == "dho_x_psf"
+    """True when a fit under `config` needs dho_axes: the kernel models and
+    the DHO models ('lorentzian_x_psf', 'dho', 'dho_x_psf')."""
+    return resolve_fit_options(config).model in AXES_MODELS
 
 
 # -----------------------------
@@ -244,7 +248,7 @@ def _make_background(background: str, px_fit, centers, offset0, use_window,
     if background == "reflection":
         # Per-peak flat offset + ONE shared scale of the measured reflection
         # background (the bg19 minimal model, validated 2026-08-19). The
-        # shaped basis function replaces prm1's free slope. Two deliberate
+        # shaped basis function replaces the linear background's free slope. Two deliberate
         # restrictions, both measured 2026-08-19/20:
         #   * NO shift parameter — a fitted template shift trades against the
         #     AS centre at ~5 MHz/px; registration belongs to the calibration
@@ -480,16 +484,19 @@ class SpectrumFitter:
             # a quarter of the observed width: the fit then sat on this bound
             # (measured 2026-09-07: right peak pinned from 31 C, both peaks
             # from ~41 C, reading widths up to 10 % too large and biasing the
-            # centre). The DHO floor is therefore 5 % of the observed width.
-            frac = 0.05 if model == "dho_x_psf" else 0.25
+            # centre). The kernel/DHO floor is therefore 5 % of the observed
+            # width.
+            frac = 0.05 if model in AXES_MODELS else 0.25
             lo_w = max(1e-6, frac * float(wid[i]))
             return lo_w, max(lo_w * 2, 4.0 * float(wid[i]))
 
-        if model == "dho_x_psf":
+        if model in AXES_MODELS:
             # fit() has already guaranteed: sample mode, n_peaks peaks
-            # found, dho_axes present (with outer tracks for n_peaks=4).
-            # Peaks are ordered left-to-right: [outer_left,] left, right
-            # [, outer_right].
+            # found, dho_axes present (with outer tracks for a four-peak
+            # DHO). Peaks are ordered left-to-right: [outer_left,] left,
+            # right [, outer_right].
+            dho = is_dho_fit(model)
+            through_kernel = is_kernel_fit(model)
             if n_peaks == 4:
                 polys = [dho_axes.freq_outer_left_poly, dho_axes.freq_left_poly,
                          dho_axes.freq_right_poly, dho_axes.freq_outer_right_poly]
@@ -508,7 +515,8 @@ class SpectrumFitter:
                 # production keeps them at 0.0, analyses may set them.
                 envs = [float(self.sline_config.env_slope_left_perpx),
                         float(self.sline_config.env_slope_right_perpx)]
-            polys = [np.asarray(p, dtype=float) for p in polys]
+            if dho:
+                polys = [np.asarray(p, dtype=float) for p in polys]
             if dho_axes.env_slopes is not None:
                 # per-scan slopes measured from this scan's calibration
                 # (envelope_source = "measured"), one per peak in fit order
@@ -522,7 +530,7 @@ class SpectrumFitter:
             # evaluated only within +-15 px of its centre: beyond every
             # fit window (+-7 px), inside every mirror distance
             # (>= ~24 px), truncating only few-count neighbour wings.
-            DHO_REACH_PX = 15.0
+            REACH_PX = 15.0
 
             profiles = getattr(dho_axes, "profiles", None)
             if profiles is not None:
@@ -541,13 +549,18 @@ class SpectrumFitter:
                 if profiles.envelope is not None:
                     envs = [profiles.env_slope(j, float(cen[i]))
                             for i, j in enumerate(idx)]
-            if any(k is None for k in mk):
-                raise ValueError(
-                    "Model 'dho_x_psf' needs the measured instrument kernel "
-                    "of every fitted peak (the scan's own calibration profile, "
-                    "spectrum_fitting/epsf.py, or a stored ePSF table): build "
-                    "the axes with analysis.fit_axial_scan.dho_axes_for_fit."
-                )
+            if through_kernel:
+                if any(k is None for k in mk):
+                    raise ValueError(
+                        f"Model '{model}' needs the measured instrument kernel "
+                        "of every fitted peak (the scan's own calibration "
+                        "profile, spectrum_fitting/epsf.py, or a stored ePSF "
+                        "table): build the axes with "
+                        "analysis.fit_axial_scan.dho_axes_for_fit."
+                    )
+            else:
+                # the bare 'dho': the pixel box is the whole instrument term
+                mk = [pixel_box_kernel()] * n_peaks
             # envelope_apply = "curve" (2026-09-09 analysis knob): the
             # FOUR-PEAK fit multiplies each peak by the full measured
             # curve exp(g(x) - g(c)) over its window instead of the local
@@ -558,18 +571,23 @@ class SpectrumFitter:
                     and getattr(self.sline_config, "envelope_apply", "slope") == "curve"):
                 env_curve = profiles.envelope
 
+            def core(x, a, c, w, i):
+                if dho:
+                    return dho_profile(x, a, c, w, polys[i], mk[i])
+                return lorentzian_profile(x, a, c, w, mk[i])
+
             def peak(x, a, c, w, i):
                 if n_peaks == 2:
-                    out = dho_profile(x, a, c, w, polys[i], mk[i])
+                    out = core(x, a, c, w, i)
                     if envs[i] != 0.0:
                         # multiplicative envelope (2026-09-06); production
                         # inner slopes come from the scan's own calibration
                         out = out * np.exp(envs[i] * (x - c))
                     return out
                 out = np.zeros_like(x, dtype=float)
-                m = np.abs(x - c) <= DHO_REACH_PX
+                m = np.abs(x - c) <= REACH_PX
                 if np.any(m):
-                    out[m] = dho_profile(x[m], a, c, w, polys[i], mk[i])
+                    out[m] = core(x[m], a, c, w, i)
                     if env_curve is not None:
                         out[m] = out[m] * env_curve.factor(x[m], c)
                     elif envs[i] != 0.0:
@@ -632,7 +650,7 @@ class SpectrumFitter:
         """Fit the sline. reflection_background is the reflection background
         mapped onto this px axis (ReflectionBackgroundMapper.render(px));
         required by (and only used with) background='reflection'
-        (the 'prmr' preset). dho_axes carries the per-peak calibration
+        (background 'reflection'). dho_axes carries the per-peak calibration
         frequency tracks + instrument widths (CalibrationCalculator
         .dho_axes()); required by (and only used with) model='dho_x_psf'.
 
@@ -671,23 +689,24 @@ class SpectrumFitter:
                 f"(use_window, background), not part of the model name."
             )
 
-        if requested_model == "dho_x_psf":
+        if requested_model in AXES_MODELS:
             # SAMPLE-ONLY, by physics: an EOM sideband is elastic laser light
             # with no acoustic mode — the calibration peak IS the instrument
-            # response, and a DHO fitted to it would absorb instrument shape
-            # as fake damping.
+            # response (the kernel), and a DHO fitted to it would absorb
+            # instrument shape as fake damping.
             if is_reference_mode:
                 raise ValueError(
-                    "Model 'dho_x_psf' is sample-only: EOM sidebands are "
-                    "elastic light (no acoustic mode), so a calibration peak "
-                    "IS the instrument response. Use 'lorentzian' for the "
-                    "reference fit."
+                    f"Model '{requested_model}' is sample-only: EOM sidebands "
+                    "are elastic light, so a calibration peak IS the "
+                    "instrument response. Use 'lorentzian' for the reference "
+                    "fit."
                 )
             if dho_axes is None:
                 raise ValueError(
-                    "Model 'dho_x_psf' needs the per-peak calibration axes: "
-                    "pass dho_axes to fit() — build them from the scan's own "
-                    "calibration with CalibrationCalculator.dho_axes() (see "
+                    f"Model '{requested_model}' needs the per-peak calibration "
+                    "axes: pass dho_axes to fit() — build them from the "
+                    "scan's own calibration with "
+                    "analysis.fit_axial_scan.dho_axes_for_fit (see "
                     "spectrum_fitting/dho.py)."
                 )
 
@@ -724,14 +743,14 @@ class SpectrumFitter:
                        else int(self.sline_config.n_peaks))
         if n_requested not in (2, 4):
             raise ValueError(f"n_peaks must be 2 or 4, got {n_requested!r}.")
-        if (requested_model == "dho_x_psf" and n_requested == 4
+        if (is_dho_fit(requested_model) and n_requested == 4
                 and not (dho_axes is not None and dho_axes.has_outer)):
             # Loud, no fallback (four-peak DHO added 2026-09-05; needs a
             # four-peak calibration with outer tracks).
             raise ValueError(
-                "Model 'dho_x_psf' with n_peaks = 4 needs the outer-order "
-                "frequency tracks; this calibration carries none — refit a "
-                "four-peak calibration or set n_peaks = 2."
+                f"Model '{requested_model}' with n_peaks = 4 needs the "
+                "outer-order frequency tracks; this calibration carries none "
+                "— refit a four-peak calibration or set n_peaks = 2."
             )
 
         pk_ind, pk_info = find_peak_locations(sline, config=config)
@@ -773,7 +792,7 @@ class SpectrumFitter:
             return self._failed_fit(px, sline, self._fit_kind(
                 n_requested, requested_model, use_window, background))
 
-        if requested_model == "dho_x_psf" and n_found != n_requested:
+        if requested_model in AXES_MODELS and n_found != n_requested:
             # A DHO peak is tied to ONE elastic track; a merged blob (two
             # overlapped peaks found as one) cannot be assigned to a single
             # track, so the frame fails instead of degrading to a different

@@ -1,9 +1,10 @@
 """Widths are reported as three separate quantities, never one field whose
 meaning depends on the model: the raw fitted HWHM, the instrument HWHM from the
-calibration sidebands, and the sample linewidth. A DHO fit's width IS the
-sample linewidth (the measured instrument profile sits in its kernel); a
-plain-Lorentzian fit carries no instrument model and reports none. The
-retired parametric-PSF tags of stored fits behave like the plain one.
+calibration sidebands, and the sample linewidth. A kernel fit's width
+('_x_psf') IS the sample linewidth (the measured instrument profile sits
+in its kernel); a bare fit ('lorentzian', 'dho') carries no instrument
+model and reports none. The retired parametric-PSF tags of stored fits
+behave like the bare ones.
 """
 import numpy as np
 import pytest
@@ -65,17 +66,18 @@ def test_instrument_hwhm_is_read_at_the_sample_peak_pixel():
     assert right == pytest.approx(expected)
 
 
-def test_dho_sample_linewidth_is_the_fitted_width():
-    left, right = make_calc().sample_linewidth_ghz(make_fit("2dho_x_psf_window"))
+@pytest.mark.parametrize("model", ["2dho_x_psf_window", "2lorentzian_x_psf_window"])
+def test_kernel_fit_sample_linewidth_is_the_fitted_width(model):
+    left, right = make_calc().sample_linewidth_ghz(make_fit(model))
 
     expected = SLOPE * FIT_WIDTH_PX
     assert left == pytest.approx(expected)
     assert right == pytest.approx(expected)
 
 
-@pytest.mark.parametrize("model", [PRM_FIT, "2lorentzian_window"])
-def test_no_sample_linewidth_for_other_lineshapes(model):
-    """Only the DHO fit carries the instrument model (in its kernel)."""
+@pytest.mark.parametrize("model", [PRM_FIT, "2lorentzian_window", "2dho_window"])
+def test_no_sample_linewidth_for_the_bare_lineshapes(model):
+    """Only a kernel fit carries the instrument model (in its kernel)."""
     left, right = make_calc().sample_linewidth_ghz(make_fit(model))
 
     assert left is None and right is None
