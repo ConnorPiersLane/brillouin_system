@@ -126,6 +126,9 @@ def test_class_outputs(env):
     assert lo < 30.0 and hi > 150.0
     # the envelope normalised at its reference position, and its shape
     assert np.isclose(env(100.0, x_ref=100.0), 1.0)
+    assert np.allclose(env.transmission(np.array([40.0, 140.0]), x_ref=94.0),
+                       env(np.array([40.0, 140.0]), x_ref=94.0))
+    assert np.allclose(env.ln_transmission(80.0), env.ln_envelope(80.0))
     x = np.array([40.0, 80.0, 116.0, 140.0])
     ratio = env(x, x_ref=94.0) / np.exp(g_true(x) - g_true(94.0))
     assert np.all(np.abs(np.log(ratio)) < 0.06)

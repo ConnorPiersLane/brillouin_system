@@ -1,8 +1,14 @@
 """Per-scan VIPA envelope from the calibration sweep — model-free.
 
-The VIPA transmission varies across the detector (the envelope). It
-multiplies every line by exp(g(x)), so a line of finite width is tilted by
-the local slope g'(x). For the inner pair that slope is ~0.01-0.02 per px
+The VIPA transmission T(x) varies across the detector (the envelope) and
+multiplies every line. The code works with its logarithm g(x) = ln T(x),
+because the measurement gives area RATIOS (differences of g) and the fit
+is then linear. A line of finite width is tilted by the relative slope
+T'(x)/T(x) = g'(x), which is what `slope` returns; `transmission` (=
+`__call__`) returns T itself, normalised at a reference pixel, for
+anything that compares intensities at two positions.
+
+For the inner pair the relative slope is ~0.01-0.02 per px
 and moves the fitted DHO resonance by ~2 MHz; for the outer orders it is
 ~0.03 per px and worth ~6 MHz. It changes with alignment (the 9-2 and 9-7
 states differ by 9-12 % on every line), so it is measured per scan, from
@@ -279,24 +285,32 @@ class Envelope:
         return (self.x_min, self.x_max)
 
     def ln_envelope(self, x):
-        """g(x) = ln envelope, constant dropped (shape only)."""
+        """g(x) = ln T(x), the log transmission, constant dropped (shape only)."""
         u = _u(x)
         return sum(c * u ** (k + 1) for k, c in enumerate(self.coefficients))
 
     def slope(self, x) -> float:
-        """g'(x) [1/px] — the per-line envelope slope the fits apply."""
+        """g'(x) = T'(x)/T(x) [1/px], the relative transmission slope the
+        fits apply (a peak's amplitude absorbs T at its centre, only the
+        tilt across the line is left)."""
         u = _u(x)
         return float(sum(c * (k + 1) * u ** k / X_SCALE
                          for k, c in enumerate(self.coefficients)))
 
-    def __call__(self, x, x_ref: float = X_CENTRE):
-        """The envelope g(x) / g(x_ref), i.e. exp(ln g(x) - ln g(x_ref))."""
+    def transmission(self, x, x_ref: float = X_CENTRE):
+        """The transmission T(x) / T(x_ref) = exp(g(x) - g(x_ref)), the
+        envelope itself normalised at a reference pixel."""
         return np.exp(self.ln_envelope(x) - self.ln_envelope(x_ref))
 
+    __call__ = transmission
+
+    def ln_transmission(self, x):
+        """g(x) = ln T(x), constant dropped (same as ln_envelope)."""
+        return self.ln_envelope(x)
+
     def factor(self, x, c: float):
-        """The multiplicative envelope over a fit window relative to the
-        peak centre, exp(g(x) - g(c)) — the full-curve alternative to
-        exp(g'(c) (x - c))."""
+        """T(x) / T(c), the transmission over a fit window relative to the
+        peak centre — the full-curve alternative to exp(g'(c) (x - c))."""
         return np.exp(self.ln_envelope(x) - self.ln_envelope(c))
 
     def residuals_vs_x(self, edges):
