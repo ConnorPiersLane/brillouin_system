@@ -230,6 +230,7 @@ class HiFrontend(QWidget):
 
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
+        self.brillouin_signaller.sweep_scan_started.connect(self.on_sweep_scan_started)
         self.brillouin_signaller.sweep_scan_finished.connect(self.on_sweep_scan_finished)
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
@@ -1933,22 +1934,19 @@ class HiFrontend(QWidget):
         self.sweep_mean_label.setText("Mean sweep: —")
         log.info("[Brillouin Viewer] Longest and mean sweep records reset.")
 
-    def on_sweep_scan_finished(self, success: bool):
+    def on_sweep_scan_finished(self, success: bool, elapsed: float = 0.0):
         """Outcome of a sweep scan (any sweep, predefined or manual).
 
-        Only a genuinely completed sweep (success=True) records elapsed time
-        and advances the predefined-measurement list. A sweep that failed to
-        start or was cancelled (success=False) records nothing and leaves the
-        predefined selection where it is, so the same step can be retried."""
-        # The scan is over: cancel any pending auto end-scan-early timer.
+        elapsed is the sweep duration measured backend-side from the START of
+        the sweep scan (it excludes the Move XY / Move Z that position the eye
+        beforehand). Only a genuinely completed sweep (success=True) records
+        that time and advances the predefined-measurement list; a sweep that
+        failed to start or was cancelled (success=False) records nothing and
+        leaves the predefined selection where it is, so it can be retried."""
+        # The scan is over: cancel the hard max-time backstop if still pending.
         self._cancel_sweep_max_time_timer()
 
-        # The stopwatch was started in take_sweep_scan(); clear it either way.
-        sweep_start = getattr(self, "_sweep_start_monotonic", None)
-        self._sweep_start_monotonic = None
-
-        if success and sweep_start is not None:
-            elapsed = time.monotonic() - sweep_start
+        if success:
             log.info(f"[Brillouin Viewer] Sweep Scan finished | "
                      f"elapsed {elapsed:.1f} s "
                      f"({elapsed / 60:.2f} min)")
@@ -1969,7 +1967,7 @@ class HiFrontend(QWidget):
             mean = self._sweep_total_seconds / self._sweep_count
             self.sweep_mean_label.setText(self._format_sweep_duration(
                 f"Mean sweep (n={self._sweep_count})", mean))
-        elif not success:
+        else:
             log.info("[Brillouin Viewer] Sweep Scan did not complete "
                      "(failed to start or cancelled); elapsed time not recorded.")
 
@@ -2208,11 +2206,12 @@ class HiFrontend(QWidget):
         (elapsed time is reported when the scan finishes via
         on_sweep_scan_finished), False if it could not be initiated.
 
-        max_time_s: allotted time before the scan is auto-ended-early (and its
-        partial data saved). None -> use the current Sweep Settings value;
-        <= 0 -> no limit.
-        timed: if True, run as many cycles as fit in max_time_s instead of a
-        fixed number of cycles (requires max_time_s > 0)."""
+        The max-time budget is enforced backend-side, measured from the START
+        of the sweep scan (the Move XY / Move Z that position the eye run as
+        earlier requests and are not counted). It is read there from
+        SweepScanConfig.max_time_s; max_time_s here is only used to validate a
+        timed request up front. timed: run as many cycles as fit in the budget
+        instead of a fixed number of cycles (requires max_time_s > 0)."""
         try:
             id_str = self.axial_id_input.text().strip()
 
@@ -2235,26 +2234,26 @@ class HiFrontend(QWidget):
                 eye_tracker_results=self.lastest_eye_tracker_results,
                 timed=timed,
             )
-
-            # Start the sweep stopwatch; elapsed time is reported when the
-            # scan finishes (see on_sweep_scan_finished).
-            self._sweep_start_monotonic = time.monotonic()
-
             self.take_sweep_scan_requested.emit(request)
-
-            # Arm the auto "end scan early" timer for the allotted time.
-            self._arm_sweep_max_time_timer(max_time_s)
             return True
 
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate sweep scan: {e}")
-            self._sweep_start_monotonic = None
             return False
 
     def take_timed_sweep_scan(self, max_time_s: float | None = None) -> bool:
         """Run a timed sweep: as many cycles as fit in the max-time budget
         (from Sweep Settings unless max_time_s is given)."""
         return self.take_sweep_scan(max_time_s=max_time_s, timed=True)
+
+    def on_sweep_scan_started(self, max_time_s: float):
+        """The backend has begun a sweep scan (after any Move XY / Move Z).
+        Arm a hard max-time backstop from this moment: the backend's own
+        predictive budget should stop first, but if a cycle overruns the
+        estimate this timer guarantees the sweep is ended (and its data saved)
+        at the limit. Measured from the sweep start, so the positioning moves
+        are not counted."""
+        self._arm_sweep_max_time_timer(max_time_s)
 
     def _arm_sweep_max_time_timer(self, max_time_s: float | None):
         """Start a single-shot timer that ends the sweep early (saving data)
@@ -2267,7 +2266,8 @@ class HiFrontend(QWidget):
         timer.timeout.connect(self._on_sweep_max_time_reached)
         timer.start(int(max_time_s * 1000))
         self._sweep_max_time_timer = timer
-        log.info(f"[Brillouin Viewer] Sweep max-time armed at {max_time_s:.1f} s.")
+        log.info(f"[Brillouin Viewer] Sweep max-time backstop armed at "
+                 f"{max_time_s:.1f} s.")
 
     def _cancel_sweep_max_time_timer(self):
         timer = getattr(self, "_sweep_max_time_timer", None)
@@ -2277,8 +2277,8 @@ class HiFrontend(QWidget):
 
     def _on_sweep_max_time_reached(self):
         self._sweep_max_time_timer = None
-        log.info("[Brillouin Viewer] Sweep max time reached - ending scan "
-                 "early and saving collected data.")
+        log.info("[Brillouin Viewer] Sweep max-time backstop reached - ending "
+                 "scan early and saving collected data.")
         self.brillouin_signaller.end_scan_early()
 
     def on_end_scan_early_clicked(self):

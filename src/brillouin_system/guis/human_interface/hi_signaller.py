@@ -1,5 +1,6 @@
 from enum import Enum
 import threading
+import time
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QCoreApplication
 from PyQt5 import QtCore
@@ -47,10 +48,16 @@ class HiSignaller(QObject):
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
     send_update_stored_axial_scans = pyqtSignal(list)
-    # True only when a sweep scan actually completed and produced data; False
-    # if it failed to start / was cancelled (initial find failed, no
-    # calibration, cancelled mid-scan, no frames taken).
-    sweep_scan_finished = pyqtSignal(bool)
+    # Emitted at the START of a sweep scan (after any Move XY / Move Z), so the
+    # frontend can arm a hard max-time backstop from the right moment. Carries
+    # the max_time_s budget the backend will use (0 = no limit).
+    sweep_scan_started = pyqtSignal(float)
+    # (success, elapsed_s). success is True only when a sweep scan actually
+    # completed and produced data; False if it failed to start / was cancelled
+    # (initial find failed, no calibration, cancelled mid-scan, no frames).
+    # elapsed_s is wall-clock time measured from the START of the sweep scan
+    # (excludes the Move XY / Move Z that ran as earlier requests).
+    sweep_scan_finished = pyqtSignal(bool, float)
     axial_scan_data_ready = pyqtSignal(object)
     # Outcome of a Load/Take Ref. Bkg. request: a short status label, or
     # an "ERROR: ..." string the frontend shows in a message box.
@@ -436,7 +443,7 @@ class HiSignaller(QObject):
         """
         if self.backend.calibration_poly_fit_params is None:
             self.send_message_to_user('Warning', "No Calibration available. Run Calibration first.")
-            self.sweep_scan_finished.emit(False)
+            self.sweep_scan_finished.emit(False, 0.0)
             return
 
         old_state = self.system_state
@@ -445,13 +452,22 @@ class HiSignaller(QObject):
         QCoreApplication.processEvents()
 
         success = False
+        # Time the sweep from here - the Move XY / Move Z requests already ran
+        # in earlier slots, so this measures the sweep scan itself.
+        t_start = time.monotonic()
+        elapsed_s = 0.0
+        # Tell the frontend the sweep is starting now (after the moves) so it
+        # can arm a hard max-time backstop; pass the budget the backend uses.
+        budget_s = float(getattr(self.backend.sweep_scan_config, "max_time_s", 0.0) or 0.0)
+        self.sweep_scan_started.emit(budget_s)
         try:
             success = bool(scan_procedures.take_sweep_scan(self.backend, request))
+            elapsed_s = time.monotonic() - t_start
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)
             self.restart_live_view_when_ready()
-            self.sweep_scan_finished.emit(success)
+            self.sweep_scan_finished.emit(success, elapsed_s)
 
     @pyqtSlot()
     def calibrate_laser_camera_position_delegate(self):

@@ -196,6 +196,12 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
     #   * one measured cycle is a round trip (in-find + out-find) plus one
     #     frame acquisition (settle + camera exposure).
     # 0 (or negative) max_time_s disables the budget.
+    #
+    # The budget clock (t_start) starts here, at the start of the sweep scan.
+    # For a prescribed measurement the sequence is Move XY -> Move Z -> (this)
+    # timed sweep scan; those moves position the eye outside the cornea and run
+    # as separate requests before this, so they do not count against the sweep
+    # time - the clock begins only once the sweep itself starts.
     max_time_s = getattr(sw, "max_time_s", 0.0) or 0.0
     t_start = time.monotonic()
     _speed = abs(getattr(backend.axial_scan_config, "speed_um_s", 0.0)) or 1.0
