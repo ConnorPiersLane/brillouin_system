@@ -564,6 +564,11 @@ class HiBackend:
         if reference == "combined":
             combined = calc.combined_shift(fitting)
             return combined.combined_ghz if combined is not None else None
+        if reference == "outer_distance":
+            return calc.outer_distance_shift(fitting)
+        if reference == "weighted":
+            weighted = calc.weighted_distance(fitting)
+            return weighted.combined_ghz if weighted is not None else None
         return float(calc.freq_peak_distance(fitting.inter_peak_distance))
 
     def get_hwhm_shift(self, fitting: FittedSpectrum) -> tuple:

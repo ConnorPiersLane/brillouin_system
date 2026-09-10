@@ -289,6 +289,8 @@ def test_two_peak_calibration_carries_no_outer_tracks():
         data, polyfit_degree=1, fitter=_reference_fitter(n_peaks=2)))
     assert not calc.has_outer_tracks()
     assert calc.p.freq_outer_left_peak is None
+    assert not calc.has_outer_distance_track()
+    assert calc.p.freq_outer_peak_distance is None
 
 
 def test_four_peak_calibration_refuses_a_main_pair_only_roi():
@@ -422,5 +424,136 @@ def test_combined_shift_is_none_without_four_peaks():
     shifts = calc.analyze(fs)
     assert shifts.freq_shift_combined_ghz is None
     assert shifts.freq_shift_outer_left_peak_ghz is None
+    assert shifts.freq_shift_outer_distance_ghz is None
+    assert shifts.freq_shift_weighted_distance_ghz is None
+    assert shifts.weighted_distance_inner_weight is None
+    assert calc.weighted_distance(fs) is None
     # the inner-pair observables are untouched by the missing combination
     assert shifts.freq_shift_peak_distance_ghz is not None
+
+
+def test_four_peak_calibration_builds_the_outer_distance_track():
+    # the outer pair gets its OWN distance track from the same fitting pass
+    # (2026-09-10): outer_right - outer_left [px] vs EOM frequency
+    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    calc = CalibrationCalculator(calibrate(
+        _calibration_data(freqs), polyfit_degree=1,
+        fitter=_reference_fitter()))
+    assert calc.has_outer_distance_track()
+    # both orders move 8 px/GHz in opposite directions: the outer distance
+    # opens at 16 px/GHz, so the track slope is 1/16 GHz/px (the inner
+    # distance track has the same slope by construction)
+    assert abs(calc.dfreq_dpx_outer_peak_distance(110.0) - 1.0 / 16.0) < 0.003
+    assert abs(calc.dfreq_dpx_peak_distance(35.0) - 1.0 / 16.0) < 0.003
+    # the measured points travel with the parameters, sorted by px
+    assert len(calc.p.outer_dist_px_points) == len(freqs)
+    assert np.all(np.diff(calc.p.outer_dist_px_points) > 0)
+    # the calibration printout names the outer tracks
+    assert "Outer-Pair Distance" in calc.get_str_all_models()
+
+
+def test_weighted_distance_averages_the_two_pair_distances():
+    from brillouin_system.analysis.pixel_counts_and_photons import (
+        PixelCountsAndPhotons)
+    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    fitter = _reference_fitter()
+    calc = CalibrationCalculator(calibrate(
+        _calibration_data(freqs), polyfit_degree=1, fitter=fitter))
+
+    # a "sample" at 5.0 GHz: inner and outer distances agree by construction
+    shift = 8.0 * (5.0 - freqs[0])
+    centers = (CENTERS[0] - shift, CENTERS[1] - shift,
+               CENTERS[2] + shift, CENTERS[3] + shift)
+    px, sline = make_spectrum(seed=99, centers=centers)
+    fs = fitter.fit(px, sline, is_reference_mode=False, n_peaks=4)
+    assert fs.is_success
+    assert fs.outer_inter_peak_distance == pytest.approx(
+        fs.outer_right_peak_center_px - fs.outer_left_peak_center_px)
+
+    outer = calc.outer_distance_shift(fs)
+    assert abs(outer - 5.0) < 0.02
+    wd = calc.weighted_distance(fs)
+    assert abs(wd.inner_ghz - 5.0) < 0.02
+    assert wd.outer_ghz == pytest.approx(outer)
+    assert abs(wd.combined_ghz - 5.0) < 0.02
+    assert wd.inner_weight + wd.outer_weight == pytest.approx(1.0)
+    # the weights ARE the photon numbers of each pair (PixelCountsAndPhotons
+    # areas); the outer orders are 60 % as bright, so the inner pair
+    # carries 1 / 1.6 of the weight
+    ph = PixelCountsAndPhotons.from_fit(fs, preamp_gain=1.0, emccd_gain=0)
+    inner = ph.left_peak_counts + ph.right_peak_counts
+    outer_n = ph.outer_left_peak_counts + ph.outer_right_peak_counts
+    assert wd.inner_weight == pytest.approx(inner / (inner + outer_n))
+    assert abs(wd.inner_weight - 1.0 / 1.6) < 0.03
+
+    # analyze() carries all three
+    shifts = calc.analyze(fs)
+    assert shifts.freq_shift_outer_distance_ghz == pytest.approx(wd.outer_ghz)
+    assert shifts.freq_shift_weighted_distance_ghz == pytest.approx(wd.combined_ghz)
+    assert shifts.weighted_distance_inner_weight == pytest.approx(wd.inner_weight)
+
+
+def test_weighted_distance_uses_photon_weights_not_inverse_variance():
+    # pinned rule (user 2026-09-10): weight = photon number of the pair,
+    # nothing else — a fit whose inner pair holds 75 % of the photons reads
+    # 0.75 * inner + 0.25 * outer even when the outer track disagrees
+    from brillouin_system.calibration.calibration import (
+        CalibrationPolyfitParameters)
+    from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
+    calc = CalibrationCalculator(CalibrationPolyfitParameters(
+        degree=1,
+        freq_left_peak=np.array([-0.1, 10.0]),
+        freq_right_peak=np.array([0.1, -5.0]),
+        freq_peak_distance=np.array([0.1, 0.0]),          # 50 px -> 5.0 GHz
+        freq_outer_left_peak=np.array([-0.1, 6.0]),
+        freq_outer_right_peak=np.array([0.1, -6.0]),
+        freq_outer_peak_distance=np.array([0.05, 0.0]),   # 104 px -> 5.2 GHz
+    ))
+    fs = FittedSpectrum(
+        is_success=True, x_pixels=np.arange(120), sline=np.zeros(120),
+        left_peak_center_px=35.0, left_peak_width_px=1.0, left_peak_amplitude=300.0,
+        right_peak_center_px=85.0, right_peak_width_px=1.0, right_peak_amplitude=300.0,
+        inter_peak_distance=50.0,
+        outer_left_peak_center_px=8.0, outer_left_peak_width_px=1.0,
+        outer_left_peak_amplitude=100.0,
+        outer_right_peak_center_px=112.0, outer_right_peak_width_px=1.0,
+        outer_right_peak_amplitude=100.0,
+    )
+    wd = calc.weighted_distance(fs)
+    assert wd.inner_ghz == pytest.approx(5.0)
+    assert wd.outer_ghz == pytest.approx(5.2)
+    assert wd.inner_weight == pytest.approx(0.75)
+    assert wd.combined_ghz == pytest.approx(0.75 * 5.0 + 0.25 * 5.2)
+    # same photons, wider outer peaks: the width enters through the area
+    fs2 = replace(fs, outer_left_peak_width_px=3.0, outer_right_peak_width_px=3.0)
+    assert calc.weighted_distance(fs2).inner_weight == pytest.approx(0.5)
+
+
+def test_outer_tracks_use_the_outer_degree():
+    # 2026-09-10: the outer-order FREQUENCY tracks get their own polynomial
+    # degree (outer_degree, live config default 3); the inner tracks and
+    # every width track keep polyfit_degree
+    freqs = [4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
+    data = _calibration_data(freqs)
+    calc = CalibrationCalculator(calibrate(
+        data, polyfit_degree=1, fitter=_reference_fitter(), outer_degree=3))
+    assert calc.p.outer_degree == 3
+    assert len(calc.p.freq_left_peak) == 2
+    assert len(calc.p.freq_peak_distance) == 2
+    assert len(calc.p.freq_outer_left_peak) == 4
+    assert len(calc.p.freq_outer_right_peak) == 4
+    assert len(calc.p.freq_outer_peak_distance) == 4
+    assert len(calc.p.calibration_width_outer_left_peak) == 2
+    # the synthetic tracks are linear, so the cubic still reads them right
+    assert abs(calc.dfreq_dpx_outer_peak_distance(110.0) - 1.0 / 16.0) < 0.003
+    # the explicit argument wins over the live config, in both directions
+    calc2 = CalibrationCalculator(calibrate(
+        data, polyfit_degree=1, fitter=_reference_fitter(), outer_degree=1))
+    assert len(calc2.p.freq_outer_left_peak) == 2
+    assert calc2.p.outer_degree == 1
+    # None = the live calibration config's outer_degree
+    from brillouin_system.calibration.config.calibration_config import calibration_config
+    calc3 = CalibrationCalculator(calibrate(
+        data, polyfit_degree=1, fitter=_reference_fitter()))
+    assert calc3.p.outer_degree == calibration_config.get().outer_degree
+    assert "outer degree" in calc3.get_str_all_models()

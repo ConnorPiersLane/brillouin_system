@@ -58,22 +58,34 @@ class AxialScanSummary:
     shift_outer_left_ghz: float | None = None
     shift_outer_right_ghz: float | None = None
     shift_combined_ghz: float | None = None
+    # 2026-09-10: the outer pair's own distance and the photon-weighted
+    # average of the inner and outer distances (user rule); the mean inner
+    # weight says how much of the weighted value the inner pair carries.
+    shift_outer_distance_ghz: float | None = None
+    shift_weighted_distance_ghz: float | None = None
+    weighted_inner_weight: float | None = None
     sd_left_mhz: float | None = None
     sd_right_mhz: float | None = None
     sd_distance_mhz: float | None = None
     sd_outer_left_mhz: float | None = None
     sd_outer_right_mhz: float | None = None
     sd_combined_mhz: float | None = None
+    sd_outer_distance_mhz: float | None = None
+    sd_weighted_distance_mhz: float | None = None
     diff_sd_left_mhz: float | None = None
     diff_sd_right_mhz: float | None = None
     diff_sd_distance_mhz: float | None = None
     diff_sd_outer_left_mhz: float | None = None
     diff_sd_outer_right_mhz: float | None = None
     diff_sd_combined_mhz: float | None = None
+    diff_sd_outer_distance_mhz: float | None = None
+    diff_sd_weighted_distance_mhz: float | None = None
     thompson_left_mhz: float | None = None
     thompson_right_mhz: float | None = None
     thompson_distance_mhz: float | None = None
     thompson_combined_mhz: float | None = None
+    thompson_outer_distance_mhz: float | None = None
+    thompson_weighted_distance_mhz: float | None = None
 
     # Widths, mean over frames (GHz, HWHM as everywhere in the chain).
     # The outer_* width rows are None unless the scan was fitted AND
@@ -95,6 +107,8 @@ class AxialScanSummary:
     photons_left: float | None = None
     photons_right: float | None = None
     photons_total: float | None = None
+    photons_outer_left: float | None = None
+    photons_outer_right: float | None = None
 
     # Post-hoc NA cone factor under the current sample config (divide the
     # measured shift by it); None when na_weighting is "none"/unconfigured.
@@ -152,7 +166,11 @@ def summarize_axial_scan(
              lambda a: a.analyzed_shifts.freq_shift_outer_left_peak_ghz),
             ("outer_right",
              lambda a: a.analyzed_shifts.freq_shift_outer_right_peak_ghz),
-            ("combined", lambda a: a.analyzed_shifts.freq_shift_combined_ghz)):
+            ("combined", lambda a: a.analyzed_shifts.freq_shift_combined_ghz),
+            ("outer_distance",
+             lambda a: a.analyzed_shifts.freq_shift_outer_distance_ghz),
+            ("weighted_distance",
+             lambda a: a.analyzed_shifts.freq_shift_weighted_distance_ghz)):
         mean, sd, dsd = _stats(_series(analyzed, get))
         setattr(out, f"shift_{name}_ghz", mean)
         setattr(out, f"sd_{name}_mhz", sd)
@@ -184,7 +202,11 @@ def summarize_axial_scan(
              lambda a: a.analyzed_shifts.linewidth_outer_right_peak_ghz),
             ("photons_left", lambda a: a.photons.left_peak_photons),
             ("photons_right", lambda a: a.photons.right_peak_photons),
-            ("photons_total", lambda a: a.photons.total_photons)):
+            ("photons_total", lambda a: a.photons.total_photons),
+            ("photons_outer_left", lambda a: a.photons.outer_left_peak_photons),
+            ("photons_outer_right", lambda a: a.photons.outer_right_peak_photons),
+            ("weighted_inner_weight",
+             lambda a: a.analyzed_shifts.weighted_distance_inner_weight)):
         setattr(out, name, _mean_or_none(_series(analyzed, get)))
 
     # --- ONE Thompson bound at the scan-mean fit parameters ---
@@ -227,6 +249,8 @@ def summarize_axial_scan(
         out.thompson_right_mhz = theo.right_peak_total_mhz
         out.thompson_distance_mhz = theo.distance_total_mhz
         out.thompson_combined_mhz = theo.combined_total_mhz
+        out.thompson_outer_distance_mhz = theo.outer_distance_total_mhz
+        out.thompson_weighted_distance_mhz = theo.weighted_distance_total_mhz
 
     # --- NA cone factor (post-hoc; never inside the fit) ---
     try:

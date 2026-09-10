@@ -33,11 +33,14 @@ def build_template_calibration(calibration_data, fitter, n_lines: int):
 
 
 def calibration_parameters_from_template(calibration_data, fitter, n_lines,
-                                         degree):
+                                         degree, outer_degree=None):
     """CalibrationPolyfitParameters with every track from TEMPLATE centres,
-    plus the Epsf for the sample kernels."""
+    plus the Epsf for the sample kernels. outer_degree = degree of the
+    outer-order frequency tracks (None = the live calibration config)."""
     from brillouin_system.calibration.calibration import (
-        CalibrationPolyfitParameters, sort_xy)
+        CalibrationPolyfitParameters, sort_xy, resolve_outer_degree)
+
+    outer_deg = resolve_outer_degree(outer_degree)
 
     frames, tp = build_template_calibration(calibration_data, fitter, n_lines)
     fq = tp.freqs
@@ -45,10 +48,10 @@ def calibration_parameters_from_template(calibration_data, fitter, n_lines,
     names = LINE_NAMES[n_lines]
     iL, iR = names.index("left"), names.index("right")
 
-    def fit(x, y):
-        if len(x) <= degree:
-            return np.full(degree + 1, np.nan)
-        return np.polyfit(x, y, degree)
+    def fit(x, y, deg=degree):
+        if len(x) <= deg:
+            return np.full(deg + 1, np.nan)
+        return np.polyfit(x, y, deg)
 
     def width_poly(line):
         # the template HWHM along the track (the Thompson chain and the
@@ -63,7 +66,7 @@ def calibration_parameters_from_template(calibration_data, fitter, n_lines,
     rp, rf = sort_xy(right, fq)
     dp, df = sort_xy(dist, fq)
     params = CalibrationPolyfitParameters(
-        degree=degree,
+        degree=degree, outer_degree=outer_deg,
         freq_left_peak=fit(left, fq), freq_right_peak=fit(right, fq),
         freq_peak_distance=fit(dist, fq),
         calibration_width_left_peak=width_poly(iL),
@@ -75,12 +78,15 @@ def calibration_parameters_from_template(calibration_data, fitter, n_lines,
     if n_lines == 4:
         iOL, iOR = names.index("outer_left"), names.index("outer_right")
         ol, orr = cen[:, iOL], cen[:, iOR]
-        params.freq_outer_left_peak = fit(ol, fq)
-        params.freq_outer_right_peak = fit(orr, fq)
+        params.freq_outer_left_peak = fit(ol, fq, outer_deg)
+        params.freq_outer_right_peak = fit(orr, fq, outer_deg)
         params.calibration_width_outer_left_peak = width_poly(iOL)
         params.calibration_width_outer_right_peak = width_poly(iOR)
         params.outer_left_px_points, params.outer_left_freq_points = sort_xy(ol, fq)
         params.outer_right_px_points, params.outer_right_freq_points = sort_xy(orr, fq)
+        od = orr - ol                       # the outer pair's own distance track
+        params.freq_outer_peak_distance = fit(od, fq, outer_deg)
+        params.outer_dist_px_points, params.outer_dist_freq_points = sort_xy(od, fq)
     return params, tp
 
 

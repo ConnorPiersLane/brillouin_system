@@ -51,3 +51,13 @@ class FittedSpectrum:
     # fitter could not determine the band.
     sline_rows: list = None
 
+    @property
+    def outer_inter_peak_distance(self) -> float | None:
+        """Outer-pair distance [px] = outer_right - outer_left, the outer
+        counterpart of inter_peak_distance. None on two-peak fits."""
+        if (self.outer_left_peak_center_px is None
+                or self.outer_right_peak_center_px is None):
+            return None
+        return float(self.outer_right_peak_center_px
+                     - self.outer_left_peak_center_px)
+

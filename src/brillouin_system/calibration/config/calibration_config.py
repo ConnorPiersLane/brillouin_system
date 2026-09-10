@@ -50,10 +50,19 @@ class CalibrationConfig:
     stop: float
     step: float
     # Which observable the live display / analyzer reports: "left", "right",
-    # "distance" (inner pair — the absolute anchor), or "combined" (the
-    # inverse-variance combination of all four orders; needs n_peaks = 4 in
-    # BOTH fitting sections, shows N/A otherwise).
+    # "distance" (inner pair — the absolute anchor), "combined" (the
+    # inverse-variance combination of all four orders), "outer_distance"
+    # (the outer pair through its own distance track) or "weighted" (inner
+    # and outer distances averaged with photon-number weights, 2026-09-10).
+    # The last three need n_peaks = 4 in BOTH fitting sections and show
+    # N/A otherwise.
     reference: str
+    # Degree of the OUTER-order frequency tracks (outer_left / outer_right /
+    # outer distance). 2026-09-10: the outer tracks are more curved than a
+    # parabola; degree 3 removes a 2-3 MHz systematic in the water band while
+    # the inner pair keeps `degree` (its parabola already fits to 0.5 MHz).
+    # The outer width tracks stay at `degree` (too noisy for a cubic).
+    outer_degree: int = 3
     # NOTE: a save_calibration_frames toggle existed until 2026-08-24 and was
     # REMOVED (user decision): the raw calibration frames ALWAYS travel with
     # each scan. They are the only way to re-fit a scan against its OWN
@@ -87,6 +96,7 @@ def load_calibration_config(path: Path = CALIBRATION_TOML_PATH) -> CalibrationCo
         stop=raw["stop"],
         step=raw["step"],
         reference=raw["reference"],
+        outer_degree=int(raw.get("outer_degree", 3)),
     )
 
 
@@ -104,6 +114,7 @@ def save_calibration_config(path: Path, config: ThreadSafeConfig):
             "stop",
             "step",
             "reference",
+            "outer_degree",
         ]
     }
 

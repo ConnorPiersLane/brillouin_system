@@ -14,7 +14,9 @@ class BrillouinExport:
     olp = outer-left peak (outer VIPA order; four-peak fits only)
     orp = outer-right peak
     combined = inverse-variance combination of all four orders
-    distance = distance btw. peaks
+    distance = distance btw. peaks (inner pair)
+    outer_distance = distance btw. the outer pair, through its own track
+    weighted_distance = inner/outer distances averaged with photon weights
     theo = theoretical value
     bg = background
     ts = timestamp
@@ -70,9 +72,16 @@ class BrillouinExport:
     orp_hwhm_ghz: Optional[float] = None
     orp_instrument_hwhm_ghz: Optional[float] = None
     orp_linewidth_ghz: Optional[float] = None
+    olp_photons: Optional[float] = None
+    orp_photons: Optional[float] = None
     combined_ghz: Optional[float] = None
     distance_ghz: Optional[float] = None
     distance_theo_std_total_mhz: Optional[float] = None
+    outer_distance_ghz: Optional[float] = None
+    outer_distance_theo_std_total_mhz: Optional[float] = None
+    weighted_distance_ghz: Optional[float] = None
+    weighted_distance_inner_weight: Optional[float] = None
+    weighted_distance_theo_std_total_mhz: Optional[float] = None
     # distance_ghz_interp: Optional[float] = None
     distance_theo_std_mhz: Optional[float] = None
     ts_frame: Optional[float] = None
@@ -185,11 +194,18 @@ def get_excel_row_data(axial_scan: AxialScan, analyzed_spectrum: AnalyzedSpectru
         orp_instrument_hwhm_ghz=shifts.instrument_hwhm_outer_right_peak_ghz,
         olp_linewidth_ghz=shifts.linewidth_outer_left_peak_ghz,
         orp_linewidth_ghz=shifts.linewidth_outer_right_peak_ghz,
+        olp_photons=photons.outer_left_peak_photons,
+        orp_photons=photons.outer_right_peak_photons,
         combined_ghz=shifts.freq_shift_combined_ghz,
 
         # Distance between peaks
         distance_ghz=shifts.freq_shift_peak_distance_ghz,
         distance_theo_std_total_mhz=theo.distance_total_mhz,
+        outer_distance_ghz=shifts.freq_shift_outer_distance_ghz,
+        outer_distance_theo_std_total_mhz=theo.outer_distance_total_mhz,
+        weighted_distance_ghz=shifts.freq_shift_weighted_distance_ghz,
+        weighted_distance_inner_weight=shifts.weighted_distance_inner_weight,
+        weighted_distance_theo_std_total_mhz=theo.weighted_distance_total_mhz,
         # distance_ghz_interp=shifts.freq_shift_peak_distance_ghz_interp,
         ts_frame = axial_scan.measurements[idx].time_stamp,
         ts_pf = ts_pf,

@@ -1593,8 +1593,9 @@ class HiFrontend(QWidget):
             try:
                 # The calibration plot shows one px->GHz track; "combined"
                 # has no single track, so its plot shows the distance one.
-                plot_reference = ("distance" if config.reference == "combined"
-                                  else config.reference)
+                plot_reference = {"combined": "distance",
+                                  "weighted": "distance"}.get(
+                    config.reference, config.reference)
                 pixmap = render_calibration_to_pixmap(
                     cali_calculator, reference=plot_reference
                 )

@@ -1,5 +1,7 @@
 import math
 
+import math
+
 import numpy as np
 import pytest
 
@@ -148,6 +150,7 @@ def _four_peak_calculator():
         calc.p,
         freq_outer_left_peak=np.array([0.30, -2.0]),
         freq_outer_right_peak=np.array([-0.32, 55.0]),
+        freq_outer_peak_distance=np.array([-0.155, 21.0]),
     )
     return calc
 
@@ -183,6 +186,14 @@ def test_four_peak_bound_covers_the_outer_orders_and_the_combination():
     assert t.combined_total_mhz < t.outer_left_total_mhz
     # the dim outer orders are individually worse than the bright inner pair
     assert t.outer_left_total_mhz > t.left_peak_total_mhz
+    # the outer pair's distance and the photon-weighted distance (2026-09-10)
+    assert t.outer_distance_total_mhz is not None
+    assert t.outer_distance_total_mhz > t.distance_total_mhz
+    wd = calc.weighted_distance(fs)
+    expected = math.sqrt((wd.inner_weight * t.distance_total_mhz) ** 2
+                         + (wd.outer_weight * t.outer_distance_total_mhz) ** 2)
+    assert t.weighted_distance_total_mhz == pytest.approx(expected)
+    assert t.weighted_distance_total_mhz < t.outer_distance_total_mhz
 
 
 def test_uncalibrated_camera_mode_degrades_photons_not_shifts():
@@ -228,6 +239,8 @@ def test_two_peak_fit_has_no_combined_bound():
     t = _bound(fs, photons, calc)
     assert t.combined_total_mhz is None
     assert t.outer_left_total_mhz is None
+    assert t.outer_distance_total_mhz is None
+    assert t.weighted_distance_total_mhz is None
     assert photons.outer_left_peak_photons is None
 
 

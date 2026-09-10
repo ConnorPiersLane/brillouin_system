@@ -155,6 +155,12 @@ class TheoreticalPeakStdError:
     outer_left_total_mhz: float | None = None
     outer_right_total_mhz: float | None = None
     combined_total_mhz: float | None = None
+    # Outer-pair distance and the photon-weighted distance (2026-09-10):
+    # the outer distance through its own track, and the variance of the
+    # ACTUAL weighted average (inner and outer distances taken as
+    # independent). None unless the fit and the calibration are four-peak.
+    outer_distance_total_mhz: float | None = None
+    weighted_distance_total_mhz: float | None = None
 
 
 def _n_summed_rows(fs: FittedSpectrum) -> int:
@@ -318,7 +324,7 @@ def theoretical_precision(fs: FittedSpectrum,
     # weighted average with combined_shift's photon-term weights:
     # var = sum(w_i^2 sigma_i^2) with sum(w_i) = 1.
     outer_left = outer_right = None
-    combined_total = None
+    combined_total = dx_od_total = weighted_total = None
     four_peak = calc.combined_shift(fs)
     if four_peak is not None and photons.outer_left_peak_photons:
         a_ol = abs(calc.df_outer_left_peak(px=fs.outer_left_peak_center_px, dpx=1))
@@ -353,6 +359,19 @@ def theoretical_precision(fs: FittedSpectrum,
         sigmas = (outer_left.total, left.total, right.total, outer_right.total)
         combined_total = math.sqrt(sum(
             w * w * s * s for w, s in zip(four_peak.weights, sigmas)))
+        # the outer pair's distance through its own track, and the
+        # photon-weighted average of the two distances
+        if calc.has_outer_distance_track():
+            a_od = abs(calc.df_outer_peak_distance(
+                px=fs.outer_inter_peak_distance, dpx=1))
+            dx_od_total = a_od * distance_precision(
+                outer_left.total / a_ol, outer_right.total / a_or,
+                correlation=corr_left_right)
+            weighted = calc.weighted_distance(fs)
+            if weighted is not None:
+                weighted_total = math.sqrt(
+                    (weighted.inner_weight * dx_d_total) ** 2
+                    + (weighted.outer_weight * dx_od_total) ** 2)
 
     return TheoreticalPeakStdError(
         left_peak_photons_mhz=left.photons * 1000,
@@ -370,4 +389,8 @@ def theoretical_precision(fs: FittedSpectrum,
                                if outer_right is not None else None),
         combined_total_mhz=(combined_total * 1000
                             if combined_total is not None else None),
+        outer_distance_total_mhz=(dx_od_total * 1000
+                                  if dx_od_total is not None else None),
+        weighted_distance_total_mhz=(weighted_total * 1000
+                                     if weighted_total is not None else None),
     )

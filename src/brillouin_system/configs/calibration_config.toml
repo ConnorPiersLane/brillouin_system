@@ -1,6 +1,12 @@
 [calibration]
 n_per_freq = 1
 degree = 2
+# Polynomial degree of the OUTER-order frequency tracks (outer_left,
+# outer_right, outer distance). 2026-09-10: the outer tracks bend more than a
+# parabola (their degree-2 fits miss their own calibration points by 2-3 MHz
+# in the water band, the inner ones by <0.5); a cubic follows them and
+# halves the outer-vs-inner split. The inner tracks keep `degree`.
+outer_degree = 3
 start = 4.0
 stop = 8.0
 step = 0.1

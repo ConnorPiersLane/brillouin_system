@@ -25,6 +25,14 @@ class CalibrationConfigDialog(QDialog):
 
         self.degree_input = QLineEdit()
         self.degree_input.setValidator(QIntValidator(1, 99))
+        self.outer_degree_input = QLineEdit()
+        self.outer_degree_input.setValidator(QIntValidator(1, 99))
+        self.outer_degree_input.setToolTip(
+            "Polynomial degree of the outer-order frequency tracks (outer "
+            "left / right / outer distance). 3 since 2026-09-10: the outer "
+            "tracks bend more than a parabola. Inner tracks use the degree "
+            "above."
+        )
 
         self.start_input = QLineEdit()
         self.start_input.setValidator(QDoubleValidator(0.0, 1e6, 6))
@@ -48,21 +56,38 @@ class CalibrationConfigDialog(QDialog):
             "stays the absolute anchor."
         )
 
+        self.outer_dist_radio = QRadioButton("Outer-Pair Distance (4 peaks)")
+        self.outer_dist_radio.setToolTip(
+            "The outer VIPA orders' distance through their own calibration "
+            "track — needs n_peaks = 4; shows N/A otherwise."
+        )
+        self.weighted_radio = QRadioButton("Photon-Weighted Distance (4 peaks)")
+        self.weighted_radio.setToolTip(
+            "Inner and outer pair distances averaged with the photon "
+            "numbers of each pair as weights — needs n_peaks = 4; shows "
+            "N/A otherwise."
+        )
+
         self.ref_group.addButton(self.left_radio)
         self.ref_group.addButton(self.right_radio)
         self.ref_group.addButton(self.dist_radio)
         self.ref_group.addButton(self.combined_radio)
+        self.ref_group.addButton(self.outer_dist_radio)
+        self.ref_group.addButton(self.weighted_radio)
 
         ref_layout = QVBoxLayout()
         ref_layout.addWidget(self.left_radio)
         ref_layout.addWidget(self.right_radio)
         ref_layout.addWidget(self.dist_radio)
         ref_layout.addWidget(self.combined_radio)
+        ref_layout.addWidget(self.outer_dist_radio)
+        ref_layout.addWidget(self.weighted_radio)
 
         # Form layout. (No storage toggle: calibration frames ALWAYS travel
         # with each scan — user decision 2026-08-24, see CalibrationConfig.)
         form.addRow("n_per_freq:", self.n_per_freq_input)
         form.addRow("Polynomial Degree:", self.degree_input)
+        form.addRow("Outer-order Degree:", self.outer_degree_input)
         form.addRow("Start Frequency (GHz):", self.start_input)
         form.addRow("Stop Frequency (GHz):", self.stop_input)
         form.addRow("Step (GHz):", self.step_input)
@@ -81,6 +106,7 @@ class CalibrationConfigDialog(QDialog):
 
         self.n_per_freq_input.setText(str(cfg.n_per_freq))
         self.degree_input.setText(str(cfg.degree))
+        self.outer_degree_input.setText(str(cfg.outer_degree))
         self.start_input.setText(str(cfg.start))
         self.stop_input.setText(str(cfg.stop))
         self.step_input.setText(str(cfg.step))
@@ -91,6 +117,10 @@ class CalibrationConfigDialog(QDialog):
             self.right_radio.setChecked(True)
         elif cfg.reference == "combined":
             self.combined_radio.setChecked(True)
+        elif cfg.reference == "outer_distance":
+            self.outer_dist_radio.setChecked(True)
+        elif cfg.reference == "weighted":
+            self.weighted_radio.setChecked(True)
         else:
             self.dist_radio.setChecked(True)
 
@@ -119,12 +149,15 @@ class CalibrationConfigDialog(QDialog):
                 "left" if self.left_radio.isChecked() else
                 "right" if self.right_radio.isChecked() else
                 "combined" if self.combined_radio.isChecked() else
+                "outer_distance" if self.outer_dist_radio.isChecked() else
+                "weighted" if self.weighted_radio.isChecked() else
                 "distance"
             )
 
             calibration_config.update(
                 n_per_freq=int(self.n_per_freq_input.text()),
                 degree=int(self.degree_input.text()),
+                outer_degree=int(self.outer_degree_input.text()),
                 start=float(self.start_input.text()),
                 stop=float(self.stop_input.text()),
                 step=float(self.step_input.text()),

@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel
 from brillouin_system.calibration.calibration import CalibrationCalculator
 
 
-_VALID_REFERENCES = {"left", "right", "distance"}
+_VALID_REFERENCES = {"left", "right", "distance", "outer_distance"}
 
 
 def _validate_reference(reference: str) -> None:
@@ -29,6 +29,7 @@ def _get_reference_label(reference: str) -> str:
         "left": "Left Peak Position (px)",
         "right": "Right Peak Position (px)",
         "distance": "Inter-Peak Distance (px)",
+        "outer_distance": "Outer-Pair Distance (px)",
     }[reference]
 
 
@@ -40,6 +41,7 @@ def _calibration_points(calculator: CalibrationCalculator, reference: str):
         "left": (p.left_px_points, p.left_freq_points),
         "right": (p.right_px_points, p.right_freq_points),
         "distance": (p.dist_px_points, p.dist_freq_points),
+        "outer_distance": (p.outer_dist_px_points, p.outer_dist_freq_points),
     }[reference]
     if px is None or freqs is None or len(np.atleast_1d(px)) == 0:
         raise ValueError("Calibration carries no measured points to display.")
@@ -62,6 +64,7 @@ def get_calibration_fig(
         "left": calculator.freq_left_peak,
         "right": calculator.freq_right_peak,
         "distance": calculator.freq_peak_distance,
+        "outer_distance": calculator.freq_outer_peak_distance,
     }[reference]
     y_label = _get_reference_label(reference)
 

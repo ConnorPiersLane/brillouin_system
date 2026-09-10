@@ -51,6 +51,11 @@ class CalibrationData:
 class CalibrationPolyfitParameters:
 
     degree: int = 1
+    # Degree of the outer-order FREQUENCY tracks (2026-09-10; None on data
+    # saved before the field existed = same as `degree`). The outer tracks
+    # bend more than a parabola: degree 3 removes a 2-3 MHz systematic in
+    # the water band. Width tracks always use `degree`.
+    outer_degree: Optional[int] = field(default=None)
     freq_left_peak: Optional[np.ndarray] = field(default=None)
     freq_right_peak: Optional[np.ndarray] = field(default=None)
     freq_peak_distance: Optional[np.ndarray] = field(default=None)
@@ -72,6 +77,11 @@ class CalibrationPolyfitParameters:
     # 2026-08-20), so outer widths inherit that systematic.
     calibration_width_outer_left_peak: Optional[np.ndarray] = field(default=None)
     calibration_width_outer_right_peak: Optional[np.ndarray] = field(default=None)
+    # Outer-pair DISTANCE track (2026-09-10): outer_right - outer_left [px]
+    # vs EOM frequency, the outer counterpart of freq_peak_distance. It makes
+    # the outer pair a second distance observable (immune to the common-mode
+    # chip walk like the inner one). Four-peak calibrations only.
+    freq_outer_peak_distance: Optional[np.ndarray] = field(default=None)
 
     # The measured sideband points behind the polynomials (one entry per
     # fitted calibration frame, sorted by px) — kept for calibration plots
@@ -87,6 +97,8 @@ class CalibrationPolyfitParameters:
     outer_left_freq_points: Optional[np.ndarray] = field(default=None)
     outer_right_px_points: Optional[np.ndarray] = field(default=None)
     outer_right_freq_points: Optional[np.ndarray] = field(default=None)
+    outer_dist_px_points: Optional[np.ndarray] = field(default=None)
+    outer_dist_freq_points: Optional[np.ndarray] = field(default=None)
 
 
 @dataclass
@@ -96,6 +108,19 @@ class FourPeakShift:
     right on the detector: outer_left, left, right, outer_right."""
     freqs_ghz: tuple[float, float, float, float]
     weights: tuple[float, float, float, float]
+    combined_ghz: float
+
+
+@dataclass
+class WeightedDistance:
+    """The inner-pair and outer-pair distance readings of one fit and their
+    PHOTON-WEIGHTED average (2026-09-10, user rule): each pair is weighted
+    by the photon number of its two peaks (peak areas in counts; the camera
+    gain cancels). GHz throughout, weights normalised to one."""
+    inner_ghz: float
+    outer_ghz: float
+    inner_weight: float
+    outer_weight: float
     combined_ghz: float
 
 
@@ -130,6 +155,15 @@ class AnalyzedFreqShifts:
     freq_shift_outer_left_peak_ghz: float | None = None
     freq_shift_outer_right_peak_ghz: float | None = None
     freq_shift_combined_ghz: float | None = None
+    # Outer-pair distance + photon-weighted distance (2026-09-10): the
+    # outer pair read through its OWN distance track, and the average of the
+    # inner and outer distances weighted by each pair's photon numbers (user
+    # rule - the candidate for the reported shift, under test; the inner
+    # distance stays the reported value until it validates). None unless
+    # BOTH the fit and the calibration are four-peak.
+    freq_shift_outer_distance_ghz: float | None = None
+    freq_shift_weighted_distance_ghz: float | None = None
+    weighted_distance_inner_weight: float | None = None
     # Outer-order widths (2026-09-02): same three-layer story as the inner
     # pair — raw fitted HWHM, the instrument HWHM at that peak's own pixel
     # (from the outer width tracks), and the sample linewidth left after
@@ -189,6 +223,62 @@ class CalibrationCalculator:
                 and self.p.freq_outer_right_peak is not None
                 and np.all(np.isfinite(np.asarray(self.p.freq_outer_left_peak, dtype=float)))
                 and np.all(np.isfinite(np.asarray(self.p.freq_outer_right_peak, dtype=float))))
+
+    def has_outer_distance_track(self) -> bool:
+        """True when this calibration carries the outer-pair distance track."""
+        c = self.p.freq_outer_peak_distance
+        return c is not None and bool(np.all(np.isfinite(np.asarray(c, dtype=float))))
+
+    def freq_outer_peak_distance(self, px):
+        """Brillouin shift [GHz] read from the OUTER pair distance px."""
+        return np.polyval(self.p.freq_outer_peak_distance, px)
+
+    def dfreq_dpx_outer_peak_distance(self, px):
+        """Slope d(freq)/d(px) of the outer-pair distance track [GHz/pixel]."""
+        return np.polyval(np.polyder(self.p.freq_outer_peak_distance, m=1), px)
+
+    def df_outer_peak_distance(self, px, dpx):
+        """Convert an outer-distance dpx to GHz using the local slope."""
+        return self.dfreq_dpx_outer_peak_distance(px) * dpx
+
+    def outer_distance_shift(self, fitting: FittedSpectrum) -> float | None:
+        """The shift from the OUTER pair distance through its own track, or
+        None when the fit or the calibration is not four-peak."""
+        if (not fitting.is_success
+                or fitting.outer_inter_peak_distance is None
+                or not self.has_outer_distance_track()):
+            return None
+        return float(self.freq_outer_peak_distance(fitting.outer_inter_peak_distance))
+
+    def weighted_distance(self, fitting: FittedSpectrum) -> WeightedDistance | None:
+        """Inner and outer pair distances averaged with PHOTON-NUMBER weights
+        (user rule 2026-09-10): w_inner = N_L + N_R, w_outer = N_OL + N_OR,
+        with N = pi * amp * width (the exact peak area in counts, the same
+        number PixelCountsAndPhotons reports; gain and pi cancel in the
+        ratio). This is deliberately NOT the inverse-variance rule of
+        combined_shift - the user asked for the plain photon weights. None
+        when the fit or the calibration is not four-peak."""
+        outer = self.outer_distance_shift(fitting)
+        if outer is None:
+            return None
+        inner = float(self.freq_peak_distance(fitting.inter_peak_distance))
+
+        def area(amp, wid):
+            return abs(float(amp) * float(wid))
+
+        w_in = (area(fitting.left_peak_amplitude, fitting.left_peak_width_px)
+                + area(fitting.right_peak_amplitude, fitting.right_peak_width_px))
+        w_out = (area(fitting.outer_left_peak_amplitude, fitting.outer_left_peak_width_px)
+                 + area(fitting.outer_right_peak_amplitude, fitting.outer_right_peak_width_px))
+        total = w_in + w_out
+        if not np.isfinite(total) or total <= 0.0:
+            return None
+        w_in, w_out = w_in / total, w_out / total
+        return WeightedDistance(
+            inner_ghz=inner, outer_ghz=outer,
+            inner_weight=float(w_in), outer_weight=float(w_out),
+            combined_ghz=float(w_in * inner + w_out * outer),
+        )
 
     def freq_outer_left_peak(self, px):
         """Frequency of the outer-left VIPA order [GHz] at pixel position px."""
@@ -563,6 +653,7 @@ class CalibrationCalculator:
             if fitting.outer_left_peak_center_px is not None
             else (None, None))
         width_ol, width_or = self.sample_linewidth_outer_ghz(fitting)
+        weighted = self.weighted_distance(fitting)
 
         return AnalyzedFreqShifts(
             freq_shift_left_peak_ghz=self.freq_left_peak(fitting.left_peak_center_px),
@@ -580,6 +671,12 @@ class CalibrationCalculator:
                                              if combined is not None else None),
             freq_shift_combined_ghz=(combined.combined_ghz
                                      if combined is not None else None),
+            freq_shift_outer_distance_ghz=(weighted.outer_ghz
+                                           if weighted is not None else None),
+            freq_shift_weighted_distance_ghz=(weighted.combined_ghz
+                                              if weighted is not None else None),
+            weighted_distance_inner_weight=(weighted.inner_weight
+                                            if weighted is not None else None),
             hwhm_outer_left_peak_ghz=hwhm_ol,
             hwhm_outer_right_peak_ghz=hwhm_or,
             instrument_hwhm_outer_left_peak_ghz=inst_ol,
@@ -599,6 +696,12 @@ class CalibrationCalculator:
         lines.append(self._poly_to_line("Left Peak", self.p.freq_left_peak))
         lines.append(self._poly_to_line("Right Peak", self.p.freq_right_peak))
         lines.append(self._poly_to_line("Inter-Peak Distance", self.p.freq_peak_distance))
+        if self.p.freq_outer_left_peak is not None:
+            lines.append(f"(inner degree {self.p.degree}, outer degree "
+                         f"{self.p.outer_degree if self.p.outer_degree is not None else self.p.degree})")
+            lines.append(self._poly_to_line("Outer-Left Peak", self.p.freq_outer_left_peak))
+            lines.append(self._poly_to_line("Outer-Right Peak", self.p.freq_outer_right_peak))
+            lines.append(self._poly_to_line("Outer-Pair Distance", self.p.freq_outer_peak_distance))
         lines.append("================================")
         return "\n".join(lines)
 
@@ -682,8 +785,17 @@ def sort_xy(x, y):
     return np.asarray(x)[idx], np.asarray(y)[idx]
 
 
+def resolve_outer_degree(outer_degree: int | None) -> int:
+    """The degree of the outer-order frequency tracks: the argument, else
+    the live calibration config (outer_degree, 3 since 2026-09-10)."""
+    if outer_degree is not None:
+        return int(outer_degree)
+    return int(getattr(calibration_config.get(), "outer_degree", 3))
+
+
 def calibrate(data: CalibrationData, polyfit_degree,
-              fitter: SpectrumFitter | None = None) -> CalibrationPolyfitParameters:
+              fitter: SpectrumFitter | None = None,
+              outer_degree: int | None = None) -> CalibrationPolyfitParameters:
     """Fit a calibration from its raw frames.
 
     Pass the same fitter used for the samples when re-fitting a scan's own
@@ -691,8 +803,13 @@ def calibrate(data: CalibrationData, polyfit_degree,
     between a calibration and its samples (~3-4 MHz per row). A fitter built
     here reads the configs as they are NOW, which is what a re-analysis wants —
     the model can only be changed by re-fitting.
+
+    outer_degree: degree of the outer-order frequency tracks (outer_left,
+    outer_right, outer distance); None = the live calibration config. The
+    inner tracks and every width track use polyfit_degree.
     """
     degree = polyfit_degree
+    outer_deg = resolve_outer_degree(outer_degree)
     sf = fitter if fitter is not None else SpectrumFitter()
 
     if getattr(sf.reference_config, "centre_method", "parametric") == "template":
@@ -702,7 +819,8 @@ def calibrate(data: CalibrationData, polyfit_degree,
         from brillouin_system.spectrum_fitting.template_calibration import (
             calibration_parameters_from_template)
         params, profiles = calibration_parameters_from_template(
-            data, sf, int(sf.sline_config.n_peaks), degree)
+            data, sf, int(sf.sline_config.n_peaks), degree,
+            outer_degree=outer_deg)
         params.template_profiles = profiles
         return params
 
@@ -746,6 +864,7 @@ def calibrate(data: CalibrationData, polyfit_degree,
 
     params = CalibrationPolyfitParameters(
         degree=degree,
+        outer_degree=outer_deg,
         freq_left_peak=safe_polyfit(left_px, freqs_all, degree),
         freq_right_peak=safe_polyfit(right_px, freqs_all, degree),
         freq_peak_distance=safe_polyfit(inter_px, freqs_all, degree),
@@ -771,8 +890,8 @@ def calibrate(data: CalibrationData, polyfit_degree,
             [fs.outer_left_peak_width_px for fs in all_fits], dtype=float)
         outer_right_width = np.asarray(
             [fs.outer_right_peak_width_px for fs in all_fits], dtype=float)
-        params.freq_outer_left_peak = safe_polyfit(outer_left_px, freqs_all, degree)
-        params.freq_outer_right_peak = safe_polyfit(outer_right_px, freqs_all, degree)
+        params.freq_outer_left_peak = safe_polyfit(outer_left_px, freqs_all, outer_deg)
+        params.freq_outer_right_peak = safe_polyfit(outer_right_px, freqs_all, outer_deg)
         params.calibration_width_outer_left_peak = safe_polyfit(
             outer_left_px, outer_left_width, degree)
         params.calibration_width_outer_right_peak = safe_polyfit(
@@ -781,5 +900,10 @@ def calibrate(data: CalibrationData, polyfit_degree,
          params.outer_left_freq_points) = sort_xy(outer_left_px, freqs_all)
         (params.outer_right_px_points,
          params.outer_right_freq_points) = sort_xy(outer_right_px, freqs_all)
+        # the outer pair's own distance track (2026-09-10)
+        outer_dist_px = outer_right_px - outer_left_px
+        params.freq_outer_peak_distance = safe_polyfit(outer_dist_px, freqs_all, outer_deg)
+        (params.outer_dist_px_points,
+         params.outer_dist_freq_points) = sort_xy(outer_dist_px, freqs_all)
 
     return params
