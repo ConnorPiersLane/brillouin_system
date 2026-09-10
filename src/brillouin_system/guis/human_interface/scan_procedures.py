@@ -390,6 +390,15 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
     log.info(f"[Sweep Scan] Done: {frames_taken} frames taken, "
              f"{n_pairs} with a full in/out pair.")
 
+    # No frames (e.g. every cycle skipped for want of an in-crossing): there is
+    # nothing to save. Registering an empty scan produces a 0-measurement file
+    # that crashes on open (index out of bounds), so treat this like any other
+    # failed/cancelled scan - don't save, report failure.
+    if n_frames == 0:
+        log.info("[Sweep Scan] No frames acquired - not saving; treating as a "
+                 "failed scan.")
+        return False
+
     axial_scan = AxialScan(
         i=backend.next_axial_scan_index(),
         id=request.id,
