@@ -421,9 +421,17 @@ class Epsf:
         a, b, t = self._bracket(line, float(cen))
         sa, sb = self._splines[line][a], self._splines[line][b]
         u = px - float(cen)
-        prof = (1.0 - t) * np.nan_to_num(sa(u), nan=0.0)
+        # Beyond the stored grid (+-KERNEL_HALF_PX) the profile is HELD at
+        # its edge value (0.2-2 % of the peak, the Lorentzian wing), not
+        # cut to zero: the cut made the model discontinuous in `cen` (a
+        # pixel crossing the edge jumped by the wing value), which stalled
+        # curve_fit whenever a pixel sat exactly on the edge, e.g. for any
+        # whole-pixel start centre (found 2026-09-10). Measured effect on
+        # the chain: built axis <= 2e-5 px, held-out centres <= 6e-5 px.
+        ug = np.clip(u, self.grid[0], self.grid[-1])
+        prof = (1.0 - t) * sa(ug)
         if t != 0.0:
-            prof = prof + t * np.nan_to_num(sb(u), nan=0.0)
+            prof = prof + t * sb(ug)
         peak = ((1.0 - t) * self.profiles[line][a].max()
                 + t * self.profiles[line][b].max())
         prof = prof / peak

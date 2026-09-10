@@ -97,10 +97,33 @@ def test_call_matches_kernel_and_applies_the_envelope_once():
     prof = e(0, CEN_LEFT + 0.3, x, amp=2.0, offset=1.0)
     k = e.kernel(0, CEN_LEFT + 0.3)
     u = x - (CEN_LEFT + 0.3)
-    # zero beyond the +-6 px grid, as the kernel is
-    expect = 1.0 + 2.0 * np.interp(u, k.u, k.k, left=0.0, right=0.0) / k.k.max() * np.exp(0.02 * u)
+    # beyond the +-6 px grid the profile is HELD at its edge value (as
+    # np.interp does) so the model stays continuous in the centre; the
+    # envelope factor uses the clamped offset too
+    uc = np.clip(u, k.u[0], k.u[-1])
+    expect = 1.0 + 2.0 * np.interp(u, k.u, k.k) / k.k.max() * np.exp(0.02 * uc)
     assert np.allclose(prof, expect, atol=0.01)
     assert abs(prof.max() - 3.0) < 0.1
+
+
+def test_fit_line_converges_from_an_integer_start():
+    """Regression (2026-09-10): the template is cut to zero beyond the grid,
+    so a pixel exactly KERNEL_HALF_PX from an INTEGER start centre makes the
+    model discontinuous there and curve_fit left the centre where it
+    started. The template holds its edge value beyond the grid, so the model
+    is continuous and the fit must land on the same centre from an integer
+    or a non-integer start."""
+    freqs, pxs, slines = synthetic_sweep(np.random.default_rng(11), n_points=61)
+    e = Epsf(freqs, pxs, slines, 2, env_slope=[0.02, -0.03])
+    s = elastic_sline(CEN_LEFT + 0.3, CEN_RIGHT - 0.4)              # noise-free
+    for line, c_true in ((0, CEN_LEFT + 0.3), (1, CEN_RIGHT - 0.4)):
+        c_int = float(round(c_true))
+        # continuity of the model in the centre at a whole pixel
+        assert np.abs(e(line, c_int + 1e-6, PX) - e(line, c_int, PX)).max() < 1e-4
+        _, c_from_int, _ = e.fit_line(line, PX, s, c_int)
+        _, c_from_frac, _ = e.fit_line(line, PX, s, c_true + 0.15)
+        assert abs(c_from_int - c_int) > 0.05                       # it moved
+        assert abs(c_from_int - c_from_frac) < 1e-3, (line, c_from_int, c_from_frac)
 
 
 def test_save_load_roundtrip(tmp_path):
