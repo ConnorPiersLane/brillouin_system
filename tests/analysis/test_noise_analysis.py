@@ -159,7 +159,7 @@ def _fitted_four_peaks():
     from dataclasses import replace as dc_replace
     return dc_replace(
         _fitted_two_peaks(),
-        model="4lorentzian_x_psf_window",
+        model="4lorentzian_window",
         outer_left_peak_center_px=8.0,
         outer_left_peak_width_px=1.3,
         outer_left_peak_amplitude=300.0,
@@ -337,41 +337,11 @@ def test_fit_row_band_scales_the_read_noise():
     assert t16.left_peak_bg_mhz == pytest.approx(2.0 * t4.left_peak_bg_mhz)
 
 
-def test_detected_width_reduces_to_gamma_without_psf():
-    from brillouin_system.spectrum_fitting.psf import detected_hwhm_px
-    assert detected_hwhm_px(1.5, 0.0, 0.0) == pytest.approx(1.5)
-
-
-def test_detected_width_grows_with_the_psf():
-    from brillouin_system.spectrum_fitting.psf import detected_hwhm_px
-    plain = detected_hwhm_px(1.2, 0.0, 0.0)
-    blurred = detected_hwhm_px(1.2, 0.25, 0.4)
-    # Production kernel widens a 1.2 px core by a few-to-ten percent.
-    assert 1.02 * plain < blurred < 1.25 * plain
-
-
-def test_psf_fit_bound_uses_the_detected_width():
-    """Same fitted widths: a PSF-tagged fit must report a wider (more
-    honest) bound than a plain-Lorentzian one, because its photons are
-    spread by the camera PSF on top of the fitted core."""
-    from dataclasses import replace
-    calc = _linear_calculator()
-    fs_plain = _fitted_two_peaks()                       # model='' -> plain
-    fs_psf = replace(fs_plain, model="2lorentzian_x_psf_window")
-    photons = PixelCountsAndPhotons.from_fit(fs_plain, preamp_gain=1.0,
-                                             emccd_gain=0)
-    t_plain = _bound(fs_plain, photons, calc)
-    t_psf = _bound(fs_psf, photons, calc)
-    assert t_psf.left_peak_photons_mhz > t_plain.left_peak_photons_mhz
-    assert t_psf.distance_total_mhz > t_plain.distance_total_mhz
-
-
 def test_dho_fit_bound_adds_back_the_vipa_width():
     """A DHO fit's width is the ACOUSTIC core only (its kernel holds the
-    VIPA Lorentzian), so the bound must add the calibration width back
-    before the camera spread — landing exactly where a PSF-tagged fit with
-    the combined core width lands, and wider than the acoustic width alone
-    would suggest."""
+    measured instrument profile), so the bound must add the calibration
+    width back — landing exactly where a plain fit with the combined width
+    lands, and wider than the acoustic width alone would suggest."""
     from dataclasses import replace
     g_vipa = 0.4
     calc = _linear_calculator()
@@ -385,15 +355,15 @@ def test_dho_fit_bound_adds_back_the_vipa_width():
                                              emccd_gain=0)
 
     fs_dho = replace(fs_base, model="2dho_x_psf_window")
-    fs_psf_combined = replace(
-        fs_base, model="2lorentzian_x_psf_window",
+    fs_combined = replace(
+        fs_base, model="2lorentzian_window",
         left_peak_width_px=fs_base.left_peak_width_px + g_vipa,
         right_peak_width_px=fs_base.right_peak_width_px + g_vipa)
-    fs_psf_acoustic = replace(fs_base, model="2lorentzian_x_psf_window")
+    fs_acoustic = replace(fs_base, model="2lorentzian_window")
 
     t_dho = _bound(fs_dho, photons, calc)
-    t_combined = _bound(fs_psf_combined, photons, calc)
-    t_acoustic = _bound(fs_psf_acoustic, photons, calc)
+    t_combined = _bound(fs_combined, photons, calc)
+    t_acoustic = _bound(fs_acoustic, photons, calc)
 
     assert t_dho.left_peak_photons_mhz == pytest.approx(
         t_combined.left_peak_photons_mhz)

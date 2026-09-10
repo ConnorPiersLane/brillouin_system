@@ -6,16 +6,12 @@ from PyQt5.QtWidgets import (
     QFileDialog,
 )
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
-from brillouin_system.spectrum_fitting.peak_fitting_config.psf_measurement import (
-    PSF_MEASURED,
-)
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     find_peaks_sample_config, find_peaks_reference_config, sline_from_frame_config,
     save_config_section, FIND_PEAKS_TOML_PATH,
     FITTING_MODELS_SAMPLE, FITTING_MODELS_REFERENCE, BACKGROUNDS,
     NA_WEIGHTINGS, ROW_SELECTIONS, FittingConfigs,
-    DHO_KERNELS, CENTRE_METHODS, ENVELOPE_SOURCES, KERNEL_SOURCES,
-    KERNEL_FILE_LINES,
+    ENVELOPE_SOURCES, KERNEL_SOURCES, KERNEL_FILE_LINES,
 )
 
 
@@ -38,15 +34,6 @@ class FindPeaksConfigDialog(QDialog):
 
         self.load_values()
 
-        # The parametric camera-PSF constants are read only by the legacy
-        # paths; grey them out whenever the self-calibrating chain is on.
-        for combo in (self.sample_inputs["fitting_model"],
-                      self.sample_inputs["dho_kernel"],
-                      self.reference_inputs["centre_method"]):
-            combo.currentTextChanged.connect(
-                lambda _text: self._update_psf_fields_enabled())
-        self._update_psf_fields_enabled()
-
     def field_names(self):
         # beta is not here: it renders indented under the use_window checkbox
         # (it is a parameter of the windowing).
@@ -54,20 +41,6 @@ class FindPeaksConfigDialog(QDialog):
             "prominence_fraction", "min_peak_width", "min_peak_height",
             "rel_height", "wlen_pixels",
         ]
-
-    def pr_field_names(self):
-        # 'lorentzian_x_psf' model: camera PSF working values — Gaussian
-        # charge diffusion and the one-sided readout tail, both per peak
-        # (position properties on the sensor). Part of the [global] fitting
-        # config (one camera, one kernel, shared by sample and reference
-        # fits). Not fitted per frame; the MEASURED record is
-        # psf_measurement.PSF_MEASURED (shown in brackets).
-        return ["psf_sigma_left_px", "psf_sigma_right_px",
-                "psf_tau_left_px", "psf_tau_right_px",
-                "psf_sigma_outer_left_px", "psf_sigma_outer_right_px",
-                "psf_tau_outer_left_px", "psf_tau_outer_right_px",
-                "psf_box_outer_left_px", "psf_box_outer_right_px",
-                "psf_sat_ratio_outer_right", "psf_sat_delta_outer_right_px"]
 
     def na_field_names(self):
         # NA collection model (post-hoc scalar correction only, never in the
@@ -109,47 +82,6 @@ class FindPeaksConfigDialog(QDialog):
         inputs["fitting_model"] = combo
         row.addWidget(combo)
         vlayout.addLayout(row)
-
-        if label == "Sample":
-            # instrument kernel of the DHO model
-            row = QHBoxLayout()
-            row.addSpacing(24)
-            row.addWidget(QLabel("DHO kernel"))
-            k_combo = QComboBox()
-            k_combo.addItems(DHO_KERNELS)
-            k_combo.setToolTip(
-                "Instrument kernel the 'dho_x_psf' model convolves the DHO "
-                "core with:\n"
-                "measured: the profile stacked from THIS scan's calibration "
-                "frames at each peak's position (per frame, no constants) — "
-                "needs Centre method = template on the reference side.\n"
-                "parametric: Lorentzian x Gauss x tail x pixel from the "
-                "calibration width polynomial and the camera PSF constants "
-                "below (legacy)."
-            )
-            inputs["dho_kernel"] = k_combo
-            row.addWidget(k_combo)
-            vlayout.addLayout(row)
-        else:
-            # how the calibration line centres are measured
-            row = QHBoxLayout()
-            row.addSpacing(24)
-            row.addWidget(QLabel("Centre method"))
-            c_combo = QComboBox()
-            c_combo.addItems(CENTRE_METHODS)
-            c_combo.setToolTip(
-                "How the calibration lines are located (the frequency axis):\n"
-                "template: plain-Lorentzian first guess, centres smoothed in "
-                "drive frequency, measured profile stacked per position and "
-                "refitted as a template (no instrument model; also supplies "
-                "the DHO kernels and the envelope) — production.\n"
-                "parametric: every calibration frame fitted with the "
-                "Lorentzian x Gauss x tail x pixel model using the camera "
-                "PSF constants below (legacy)."
-            )
-            inputs["centre_method"] = c_combo
-            row.addWidget(c_combo)
-            vlayout.addLayout(row)
 
         # NA correction (sample group only): the weighting selects the model,
         # the indented fields below are its parameters.
@@ -206,8 +138,8 @@ class FindPeaksConfigDialog(QDialog):
         beta_edit = QLineEdit()
         beta_edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
         beta_edit.setToolTip(
-            "Window half-width in units of the found peak width. The prm "
-            "presets pin beta = 3.0 (the width recipe is only valid there)."
+            "Window half-width in units of the found peak width (production "
+            "beta = 3.0, the width recipe is only valid there)."
         )
         inputs["beta"] = beta_edit
         row.addWidget(beta_edit)
@@ -310,8 +242,7 @@ class FindPeaksConfigDialog(QDialog):
         k_src = QComboBox()
         k_src.addItems(KERNEL_SOURCES)
         k_src.setToolTip(
-            "Where the measured DHO sample kernels come from (dho_kernel = "
-            "measured, centre_method = template). "
+            "Where the measured DHO sample kernels come from. "
             "scan: this scan's own 41-point calibration node table. "
             "file: the stored node table below (built on a 401-point fine "
             "sweep with Epsf.save) for the lines chosen; the frequency axis "
@@ -372,36 +303,6 @@ class FindPeaksConfigDialog(QDialog):
         layout.addWidget(self._kernel_info)
         k_src.currentTextChanged.connect(lambda _t: self._update_kernel_file_enabled())
 
-        # Camera PSF working values — part of the [global] fitting config,
-        # shared by the sample and reference fits. The label shows the
-        # MEASURED value from psf_measurement.PSF_MEASURED in brackets: that
-        # record is never touched by the GUI, so the measurement cannot be
-        # lost by experimentation here. Read ONLY by the legacy parametric
-        # paths (greyed out while the self-calibrating chain is selected).
-        self._psf_label = QLabel("Camera PSF constants (legacy parametric kernel only)")
-        layout.addWidget(self._psf_label)
-        measured = PSF_MEASURED
-        for key in self.pr_field_names():
-            row = QHBoxLayout()
-            ref = getattr(measured, key, None)
-            label = key.replace("_", " ").capitalize()
-            if ref is not None:
-                label += f"  (measured: {ref:g})"
-            row.addWidget(QLabel(label))
-            edit = QLineEdit()
-            edit.setValidator(QDoubleValidator(0.0, 100.0, 5))
-            edit.setToolTip(
-                "Camera constants for the 'lorentzian_x_psf' model — "
-                "Gaussian charge-diffusion blur and the one-sided readout "
-                "tails. Not fitted per frame; saved with the [global] "
-                "fitting config. The bracketed value is the MEASURED record "
-                "(psf_measurement.py, fine EOM sweeps; see "
-                "measure_psf_kernel.py) — the GUI never writes it."
-            )
-            self.global_inputs[key] = edit
-            row.addWidget(edit)
-            layout.addLayout(row)
-
         return layout
 
     def load_values(self):
@@ -417,17 +318,12 @@ class FindPeaksConfigDialog(QDialog):
             self.sample_inputs[field].setText(str(getattr(sample, field)))
         self.sample_inputs["na_weighting"].setCurrentText(sample.na_weighting)
 
-        for field in self.pr_field_names():
-            self.global_inputs[field].setText(str(getattr(global_cfg, field)))
-
         for inputs, cfg in ((self.sample_inputs, sample),
                             (self.reference_inputs, reference)):
             inputs["fitting_model"].setCurrentText(cfg.fitting_model)
             inputs["background"].setCurrentText(cfg.background)
             inputs["use_window"].setChecked(bool(cfg.use_window))
             inputs["beta"].setText(str(cfg.beta))
-        self.sample_inputs["dho_kernel"].setCurrentText(sample.dho_kernel)
-        self.reference_inputs["centre_method"].setCurrentText(reference.centre_method)
         self.global_inputs["envelope_source"].setCurrentText(global_cfg.envelope_source)
         self.global_inputs["kernel_source"].setCurrentText(global_cfg.kernel_source)
         self.global_inputs["kernel_file_lines"].setCurrentText(global_cfg.kernel_file_lines)
@@ -475,22 +371,17 @@ class FindPeaksConfigDialog(QDialog):
             }
             global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
                                   for f in self.kernel_match_field_names()})
-            # Camera PSF working values ride in the same [global] config.
-            global_kwargs.update({f: self._parse(self.global_inputs[f].text(), f)
-                                  for f in self.pr_field_names()})
 
             # Sample
             sample_kwargs = {f: self._parse(self.sample_inputs[f].text(), f)
                              for f in (list(self.field_names()) + ["beta"]
                                        + list(self.na_field_names()))}
             sample_kwargs["na_weighting"] = self.sample_inputs["na_weighting"].currentText()
-            sample_kwargs["dho_kernel"] = self.sample_inputs["dho_kernel"].currentText()
             sample_kwargs.update(self._model_kwargs(self.sample_inputs))
 
             # Reference
             reference_kwargs = {f: self._parse(self.reference_inputs[f].text(), f)
                                 for f in list(self.field_names()) + ["beta"]}
-            reference_kwargs["centre_method"] = self.reference_inputs["centre_method"].currentText()
             reference_kwargs.update(self._model_kwargs(self.reference_inputs))
 
             # Update all configs
@@ -595,22 +486,6 @@ class FindPeaksConfigDialog(QDialog):
             return
         QMessageBox.information(self, "Compile PSF", f"Stored {out} and selected it as the kernel file.")
 
-    def psf_constants_in_use(self) -> bool:
-        """True when some selected path still reads the parametric camera
-        PSF constants: a parametric calibration, a parametric DHO kernel, or
-        the 'lorentzian_x_psf' sample model."""
-        return (self.reference_inputs["centre_method"].currentText() == "parametric"
-                or self.sample_inputs["dho_kernel"].currentText() == "parametric"
-                or self.sample_inputs["fitting_model"].currentText() == "lorentzian_x_psf")
-
-    def _update_psf_fields_enabled(self):
-        on = self.psf_constants_in_use()
-        for key in self.pr_field_names():
-            self.global_inputs[key].setEnabled(on)
-        self._psf_label.setText(
-            "Camera PSF constants (legacy parametric kernel"
-            + (")" if on else " — not used by the selected chain)"))
-
     @staticmethod
     def _model_kwargs(inputs):
         """Lineshape + the options that apply to any lineshape."""
@@ -625,7 +500,7 @@ class FindPeaksConfigDialog(QDialog):
         return (
             "fraction" in field or "rel" in field
             or field == "beta" or field.startswith("na_")
-            or field.startswith("psf_") or field.startswith("kernel_match_")
+            or field.startswith("kernel_match_")
         )
 
     def _parse(self, value, field):

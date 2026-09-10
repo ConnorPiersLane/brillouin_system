@@ -26,7 +26,7 @@ from brillouin_system.spectrum_fitting.measured_kernel import MeasuredKernel
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     SlineFromFrameConfig)
 
-from test_measured_kernel import CEN_LEFT, CEN_RIGHT, make_fitter
+from synthetic_lines import CEN_LEFT, CEN_RIGHT, make_fitter
 from test_template_nodes import (
     GRID, _fit, _profiles, _spectrum, _true_kernel, _wrong_kernel)
 
@@ -110,13 +110,11 @@ def test_dho_fit_reads_the_file_kernels_per_frame(tmp_path):
     """The fitter's per-frame kernel lookup goes through the FileKernels:
     with the file (TRUE profile) the acoustic width is recovered, with the
     scan's own table (WRONG profile) it is not."""
-    from brillouin_system.spectrum_fitting.psf import DX
-    from test_measured_kernel import G_INST, POLY_LEFT, POLY_RIGHT
+    from brillouin_system.spectrum_fitting.measured_kernel import DX
+    from synthetic_lines import G_INST, POLY_LEFT, POLY_RIGHT
     scan, path = _tables(tmp_path)
     fitter = make_fitter()
-    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT,
-                   instrument_width_left_poly=np.array([G_INST]),
-                   instrument_width_right_poly=np.array([G_INST]))
+    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT)
     snap = MeasuredKernel(u=GRID, k=_wrong_kernel(0), position_px=CEN_LEFT,
                           n_frames=14, g_median_px=2 * G_INST)
     frame, gam = _spectrum(0.7)
@@ -134,35 +132,15 @@ def test_dho_fit_reads_the_file_kernels_per_frame(tmp_path):
     assert abs(fk.kernel_at(0, CEN_LEFT).k.sum() * DX - 1.0) < 1e-9
 
 
-def test_dho_axes_refuse_file_kernels_on_a_parametric_axis(tmp_path):
-    from brillouin_system.analysis.fit_axial_scan import _dho_axes_if_required
-    from test_measured_kernel import G_INST, POLY_LEFT, POLY_RIGHT
-    _, path = _tables(tmp_path)
-    fitter = make_fitter()
-    fitter.update_sample_config(replace(fitter.sample_config, dho_kernel="measured"))
-    fitter.update_sline_config(replace(fitter.sline_config, kernel_source="file",
-                                       kernel_file=str(path), kernel_file_lines="all"))
-    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT,
-                   instrument_width_left_poly=np.array([G_INST]),
-                   instrument_width_right_poly=np.array([G_INST]))
-    calc = SimpleNamespace(p=SimpleNamespace(), dho_axes=lambda: base)   # no template_profiles
-    with pytest.raises(ValueError, match="centre_method = 'template'"):
-        _dho_axes_if_required(fitter, calc, SimpleNamespace(is_reference_mode=False),
-                              calibration_data=object(), first_frame=np.zeros((27, 200)))
-
-
 def test_dho_axes_carry_file_kernels_for_the_named_lines(tmp_path, monkeypatch):
     import importlib
     fas = importlib.import_module("brillouin_system.analysis.fit_axial_scan")
-    from test_measured_kernel import G_INST, POLY_LEFT, POLY_RIGHT
+    from synthetic_lines import G_INST, POLY_LEFT, POLY_RIGHT
     scan, path = _tables(tmp_path)
     fitter = make_fitter()
-    fitter.update_sample_config(replace(fitter.sample_config, dho_kernel="measured"))
     fitter.update_sline_config(replace(fitter.sline_config, kernel_source="file",
                                        kernel_file=str(path), kernel_file_lines="all"))
-    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT,
-                   instrument_width_left_poly=np.array([G_INST]),
-                   instrument_width_right_poly=np.array([G_INST]))
+    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT)
     calc = SimpleNamespace(p=SimpleNamespace(template_profiles=scan), dho_axes=lambda: base)
     monkeypatch.setattr("brillouin_system.spectrum_fitting.measured_kernel.sample_peak_positions",
                         lambda fitter, frame, n_peaks=2: (CEN_LEFT, CEN_RIGHT))
@@ -226,10 +204,8 @@ def test_save_load_carries_provenance(tmp_path):
 
 
 def _axes_with(fitter, scan, path, monkeypatch, fas):
-    from test_measured_kernel import G_INST, POLY_LEFT, POLY_RIGHT
-    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT,
-                   instrument_width_left_poly=np.array([G_INST]),
-                   instrument_width_right_poly=np.array([G_INST]))
+    from synthetic_lines import G_INST, POLY_LEFT, POLY_RIGHT
+    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT)
     calc = SimpleNamespace(p=SimpleNamespace(template_profiles=scan), dho_axes=lambda: base)
     monkeypatch.setattr("brillouin_system.spectrum_fitting.measured_kernel.sample_peak_positions",
                         lambda fitter, frame, n_peaks=2: (CEN_LEFT, CEN_RIGHT))
@@ -253,7 +229,6 @@ def test_mismatched_file_lines_fall_back_to_the_scan_kernel(tmp_path, monkeypatc
     path = tmp_path / "fine.csv"
     file.save(path, source="fine.h5")
     fitter = make_fitter()
-    fitter.update_sample_config(replace(fitter.sample_config, dho_kernel="measured"))
     fitter.update_sline_config(replace(fitter.sline_config, kernel_source="file",
                                        kernel_file=str(path), kernel_file_lines="all"))
     records = []

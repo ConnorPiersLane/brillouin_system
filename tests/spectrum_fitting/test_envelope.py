@@ -24,8 +24,10 @@ from brillouin_system.spectrum_fitting.envelope import (
 from brillouin_system.spectrum_fitting.measured_kernel import MeasuredKernel
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig, SlineFromFrameConfig)
-from brillouin_system.spectrum_fitting.psf import DX, psf_profile
+from brillouin_system.spectrum_fitting.measured_kernel import DX
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+
+from synthetic_lines import asym_line, unit_kernel
 
 PX = np.arange(200, dtype=float)
 FLOOR = 2600.0
@@ -77,7 +79,7 @@ def synthetic_calibration(rng, drive_rolloff=True):
         s = np.full(PX.size, FLOOR)
         for x0, amp in ((x_outer_left(f), a_minus), (x_left(f), a_plus),
                         (x_right(f), a_minus), (x_outer_right(f), a_plus)):
-            s = s + amp * np.exp(g_true(x0)) * psf_profile(PX, 1.0, x0, 0.43, 0.26, 0.3)
+            s = s + amp * np.exp(g_true(x0)) * asym_line(PX, 1.0, x0, 0.43, 0.26, 0.3)
         s = s + rng.normal(0.0, np.sqrt(s / 3.89 + 1.37))
         blocks.append(_Block(f, [_Point(frame_from_sline(s), f)]))
     return _Calibration(blocks)
@@ -238,8 +240,7 @@ def g_fit(x): return -0.0008 * (x - 75.0) ** 2
 
 
 def _unit_kernel():
-    k = psf_profile(GRID, 1.0, 0.0, G_INST_PX, SIGMA, TAU)
-    return k / (k.sum() * DX)
+    return unit_kernel(G_INST_PX, SIGMA, TAU)
 
 
 class _Profiles:
@@ -262,13 +263,9 @@ def _four_peak_fitter(envelope_apply):
                rel_height=0.5, wlen_pixels=20)
     f = SpectrumFitter()
     f.update_sample_config(FindPeaksConfig(fitting_model="dho_x_psf", **cfg))
-    f.update_reference_config(FindPeaksConfig(fitting_model="lorentzian_x_psf", **cfg))
+    f.update_reference_config(FindPeaksConfig(fitting_model="lorentzian", **cfg))
     f.update_sline_config(replace(
-        f.sline_config, n_peaks=4, row_selection="manual", envelope_apply=envelope_apply,
-        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
-        psf_tau_left_px=TAU, psf_tau_right_px=TAU,
-        psf_box_outer_left_px=0.0, psf_box_outer_right_px=0.0,
-        psf_sat_ratio_outer_right=0.0))
+        f.sline_config, n_peaks=4, row_selection="manual", envelope_apply=envelope_apply))
     return f
 
 
@@ -276,9 +273,9 @@ def _four_peak_truth():
     s = np.full(FPX.size, 100.0)
     for c, p, sl in zip(CENTRES, POLYS, SLOPES):
         m = np.abs(FPX - c) <= 15.0
-        line = dho_profile(FPX[m], 3000.0, c, GAMMA_GHZ / abs(sl), p, G_INST_PX, SIGMA, TAU,
-                           kernel=MeasuredKernel(u=GRID, k=_unit_kernel(), position_px=c,
-                                                 n_frames=14, g_median_px=G_INST_PX))
+        line = dho_profile(FPX[m], 3000.0, c, GAMMA_GHZ / abs(sl), p,
+                           MeasuredKernel(u=GRID, k=_unit_kernel(), position_px=c,
+                                          n_frames=14, g_median_px=G_INST_PX))
         s[m] += line * np.exp(g_fit(FPX[m]) - g_fit(c))
     return s
 
@@ -288,10 +285,6 @@ def _fit_four(envelope_apply, truth):
     kern = _Profiles(truth).kernel_at(0, 0.0)
     axes = DhoAxes(freq_left_poly=POLYS[1], freq_right_poly=POLYS[2],
                    freq_outer_left_poly=POLYS[0], freq_outer_right_poly=POLYS[3],
-                   instrument_width_left_poly=np.array([G_INST_PX]),
-                   instrument_width_right_poly=np.array([G_INST_PX]),
-                   instrument_width_outer_left_poly=np.array([G_INST_PX]),
-                   instrument_width_outer_right_poly=np.array([G_INST_PX]),
                    kernel_left=kern, kernel_right=kern,
                    kernel_outer_left=kern, kernel_outer_right=kern,
                    profiles=_Profiles(truth))

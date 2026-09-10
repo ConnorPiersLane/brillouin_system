@@ -1,11 +1,14 @@
-"""A scan's calibration is re-fitted from its own raw frames, so the calibration
-and the samples share a peak-centre convention. The stored polynomial was fitted
-at acquisition time with an unrecorded model, so it cannot back a pixel-response
-re-analysis. calibration_calculator_for_scan takes only the scan's calibration
+"""A scan's calibration is re-fitted from its own raw frames (the template
+chain), so the calibration and the samples share a peak-centre convention.
+calibration_calculator_for_scan takes only the scan's calibration
 information (calibration_data, calibration_params) plus the fitter.
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "spectrum_fitting"))
+
 import numpy as np
-import pytest
 
 from brillouin_system.calibration.calibration import (
     CalibrationData,
@@ -18,11 +21,13 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     FindPeaksConfig,
     SlineFromFrameConfig,
 )
-from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
+
+from synthetic_lines import asym_line
 
 SIGMA, TAU_L, TAU_R = 0.25, 0.4, 0.2
 N_ROWS = 8
+N_FRAMES = 41
 STORED = np.array([0.1, 0.0])
 
 
@@ -40,13 +45,11 @@ def make_config(model: str) -> FindPeaksConfig:
 def make_fitter(model: str) -> SpectrumFitter:
     fitter = SpectrumFitter()
     fitter.update_sample_config(make_config(model))
-    fitter.update_reference_config(make_config(model))
-    # kernel working values ride in the [global] sline config
+    fitter.update_reference_config(make_config("lorentzian"))
     fitter.update_sline_config(SlineFromFrameConfig(
         pixel_offset_left=0, pixel_offset_right=0,
         selected_rows=list(range(N_ROWS)), row_selection="manual",
-        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
-        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
+        envelope_source="config", kernel_source="scan",
     ))
     return fitter
 
@@ -56,17 +59,20 @@ def make_frame(separation_px: float) -> np.ndarray:
     px = np.arange(0, 86, dtype=float)
     mid = 43.0
     line = (
-        psf_profile(px, 3000.0, mid - separation_px / 2, 1.0, SIGMA, TAU_L)
-        + psf_profile(px, 3000.0, mid + separation_px / 2, 1.0, SIGMA, TAU_R)
+        asym_line(px, 3000.0, mid - separation_px / 2, 1.0, SIGMA, TAU_L)
+        + asym_line(px, 3000.0, mid + separation_px / 2, 1.0, SIGMA, TAU_R)
         + 100.0
     )
     return np.tile(line / N_ROWS, (N_ROWS, 1))
 
 
 def make_calibration_data() -> CalibrationData:
-    """A sweep: the sidebands walk apart as the microwave frequency rises."""
+    """A sweep: the sidebands walk apart as the microwave frequency rises
+    (0.25 px per frame per line, dense enough for the template chain)."""
     blocks = []
-    for freq, sep in [(4.0, 20.0), (6.0, 30.0), (8.0, 40.0)]:
+    for k in range(N_FRAMES):
+        freq = 4.0 + 0.1 * k
+        sep = 20.0 + 5.0 * (freq - 4.0)
         point = CalibrationMeasurementPoint(
             frame=make_frame(sep), microwave_freq=freq)
         blocks.append(MeasurementsPerFreq(
@@ -84,31 +90,31 @@ def make_stored_params() -> CalibrationPolyfitParameters:
 
 def test_stored_frames_are_refitted_not_reused():
     calc = calibration_calculator_for_scan(
-        make_calibration_data(), make_stored_params(), make_fitter("prm1"))
+        make_calibration_data(), make_stored_params(), make_fitter("dho_x_psf"))
 
     assert not np.allclose(calc.p.freq_left_peak, STORED)
-    # A real fit fills in what the stored stub never had.
+    # the re-fit fills in what the stored stub never had: the width tracks
+    # and the measured profile the DHO kernels come from
     assert calc.p.calibration_width_left_peak is not None
-    assert calc.p.left_px_points is not None and len(calc.p.left_px_points) == 3
+    assert calc.p.template_profiles is not None
+    assert calc.p.left_px_points is not None and len(calc.p.left_px_points) == N_FRAMES
+    # the tracks reproduce the synthetic geometry: 2.5 px/GHz per line
+    assert abs(calc.dfreq_dpx_left_peak(30.0) - (-1.0 / 2.5)) < 0.02
+    assert abs(calc.dfreq_dpx_right_peak(56.0) - (1.0 / 2.5)) < 0.02
 
 
 def test_refit_uses_the_scans_row_band():
     """The band must not move between a calibration and its samples."""
-    fitter = make_fitter("prm1")
+    fitter = make_fitter("dho_x_psf")
     calibration_calculator_for_scan(
         make_calibration_data(), make_stored_params(), fitter)
 
     assert fitter.get_selected_rows() == list(range(N_ROWS))
 
 
-def test_pixel_response_without_raw_frames_is_refused():
-    with pytest.raises(ValueError, match="no raw calibration frames"):
-        calibration_calculator_for_scan(
-            None, make_stored_params(), make_fitter("prm1"))
-
-
-def test_lorentzian_without_raw_frames_falls_back_to_the_stored_polynomial():
-    calc = calibration_calculator_for_scan(
-        None, make_stored_params(), make_fitter("lorentzian"))
-
-    assert np.allclose(calc.p.freq_left_peak, STORED)
+def test_without_raw_frames_the_stored_polynomial_is_used():
+    for model in ("lorentzian", "dho_x_psf"):
+        calc = calibration_calculator_for_scan(
+            None, make_stored_params(), make_fitter(model))
+        assert np.allclose(calc.p.freq_left_peak, STORED)
+        assert getattr(calc.p, "template_profiles", None) is None

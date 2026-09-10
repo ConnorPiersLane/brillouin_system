@@ -143,7 +143,7 @@ class PixelCountsAndPhotons:
         Peak area in counts is exactly pi * amp * width: summing the
         pixel-integrated Lorentzian amp*w*[arctan((x+.5-c)/w) - arctan((x-.5-c)/w)]
         over all pixels telescopes to amp*w*[arctan(inf) - arctan(-inf)] = amp*w*pi.
-        Exact for any width — and exact for 'lorentzian_x_psf' too, because
+        Exact for any width — and was exact for the retired PSF model too, because
         the PSF kernel is normalised to unit area (psf.py), and convolution
         with a unit-area kernel conserves the integral. A window sum would be
         WORSE: a +-beta*width window holds only (2/pi)*arctan(beta) of a

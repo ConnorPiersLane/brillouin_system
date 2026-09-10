@@ -165,55 +165,39 @@ def _dho_axes_if_required(fitter: SpectrumFitter,
     """The per-peak calibration axes for 'dho_x_psf' sample fits, or None.
 
     Unlike the reflection background there is NO degraded fallback: a DHO
-    without its frequency tracks and instrument widths is not fittable, so
-    a calibration that cannot supply them raises (loudly, before the scan
+    without its frequency tracks and measured kernels is not fittable, so a
+    calibration that cannot supply them raises (loudly, before the scan
     loop starts) instead of silently fitting a different model.
 
-    With sample_config.dho_kernel == "measured" the axes also carry the
-    instrument kernels stacked from the scan's raw calibration frames at
-    the sample peaks' positions (located on first_frame); both inputs are
-    then required and their absence raises for the same reason. On the
-    template chain the axes carry the whole node table as well, and the
-    fitter picks each frame's kernel from it at the found peak position.
-    With sline_config.kernel_source == "file" the node table of the lines
-    named by kernel_file_lines is the stored one (kernel_file, e.g. a
-    401-point fine sweep); the axis, the other kernels and the envelope
-    slopes stay the scan's own (epsf.FileKernels).
+    The axes carry the scan's frequency tracks, the measured instrument
+    kernels at the sample peaks' positions (located on first_frame), the
+    envelope slopes and the whole node table (the fitter picks each frame's
+    kernel from it at the found peak position). With sline_config.
+    kernel_source == "file" the node table of the lines named by
+    kernel_file_lines is the stored one (kernel_file, e.g. a 401-point fine
+    sweep); the axis, the other kernels and the envelope slopes stay the
+    scan's own (epsf.FileKernels).
     """
     if system_state.is_reference_mode:
         return None
     if not config_requires_dho_axes(fitter.sample_config):
         return None
     axes = calibration_calculator.dho_axes()
-    if getattr(fitter.sample_config, "dho_kernel", "parametric") != "measured":
-        return axes
     if calibration_data is None or first_frame is None:
         raise ValueError(
-            "dho_kernel = 'measured' needs the scan's raw calibration "
-            "frames and a sample frame to build the instrument kernels."
+            "Model 'dho_x_psf' needs the scan's raw calibration frames (the "
+            "measured instrument kernels come from them) and a sample frame "
+            "to locate the peaks."
         )
-    from brillouin_system.spectrum_fitting.measured_kernel import (
-        measured_kernels_for_frame, sample_peak_positions)
+    from brillouin_system.spectrum_fitting.measured_kernel import sample_peak_positions
     profiles = getattr(calibration_calculator.p, "template_profiles", None)
-    n_peaks = int(fitter.sline_config.n_peaks)
-    measured_env = getattr(fitter.sline_config, "envelope_source", "config") == "measured"
     if profiles is None:
-        if getattr(fitter.sline_config, "kernel_source", "scan") == "file":
-            raise ValueError(
-                "kernel_source = 'file' needs centre_method = 'template': "
-                "a stored node table carries the template centre "
-                "convention, and a parametric axis with a template kernel "
-                "is the ~55 MHz convention-mixing trap.")
-        # parametric centres, measured shape (inner pair)
-        k_left, k_right = measured_kernels_for_frame(
-            calibration_data, fitter, first_frame)
-        axes = replace(axes, kernel_left=k_left, kernel_right=k_right)
-        if measured_env:
-            from brillouin_system.spectrum_fitting.envelope import envelope_from_calibration
-            env = envelope_from_calibration(calibration_data, fitter)
-            positions = sample_peak_positions(fitter, first_frame, n_peaks=n_peaks)
-            axes = replace(axes, env_slopes=tuple(env.slope(x) for x in positions))
-        return axes
+        raise ValueError(
+            "This calibration carries no measured profile (template_profiles): "
+            "re-fit it from its raw frames (calibration_calculator_for_scan / "
+            "calibrate) before a 'dho_x_psf' fit."
+        )
+    n_peaks = int(fitter.sline_config.n_peaks)
     # template chain: centres, kernels AND envelope from the same calibration
     # (kernel_source = "file": the named lines' kernels from the stored table)
     from brillouin_system.spectrum_fitting.epsf import kernels_for_fit

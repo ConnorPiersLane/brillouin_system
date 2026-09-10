@@ -9,7 +9,6 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config imp
     SlineFromFrameConfig,
     sline_from_frame_config,
     FittingConfigs,
-    MODEL_PRESETS,
     resolve_fit_options,
 )
 from brillouin_system.spectrum_fitting.fit_util import (
@@ -20,7 +19,6 @@ from brillouin_system.spectrum_fitting.fit_util import (
 
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.spectrum_fitting.dho import DhoAxes, dho_profile
-from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.row_selection import (
     select_rows,
     captured_fraction,
@@ -34,17 +32,18 @@ log = get_logger(__name__)
 # production high-NA recipe is the POST-HOC scalar correction (fit as at low
 # NA, then divide by na_lineshape.na_mean_shift_ratio) — never in the fit.
 # 'dho_x_psf' (2026-08-28) is SAMPLE-ONLY: the eq.-S2 DHO core built in each
-# peak's own calibration frequency track, through the instrument Lorentzian
-# + camera kernel — needs dho_axes passed to fit() (see spectrum_fitting/dho.py).
+# peak's own calibration frequency track, through the MEASURED instrument
+# kernel — needs dho_axes passed to fit() (see spectrum_fitting/dho.py). The
+# parametric 'lorentzian_x_psf' model and its prm* presets were removed
+# 2026-09-10 (the measured ePSF chain replaced them).
 SUPPORTED_MODELS = (
     "lorentzian",
-    "lorentzian_x_psf",
     "dho_x_psf",
 )
 
 
 def normalize_model_name(model: str):
-    """Accept the retired '<model>_window' names and the prm* presets.
+    """Accept the retired '<model>_window' names.
 
     FindPeaksConfig normalises these on construction, but callers that assign
     config.fitting_model directly bypass __post_init__, so the fitter tolerates
@@ -53,8 +52,6 @@ def normalize_model_name(model: str):
     model = str(model)
     if model.endswith("_window"):
         return model[: -len("_window")], True
-    if model in MODEL_PRESETS:
-        return MODEL_PRESETS[model]["fitting_model"], True
     return model, False
 
 
@@ -101,18 +98,6 @@ def _warn_missing_reflection_background():
         "'reflection_background' scan at the reflection plane and build it "
         "from that. Reported once."
     )
-
-
-def is_psf_fit(model: str | None) -> bool:
-    """True if a FittedSpectrum came from the PSF-convolved lineshape.
-
-    Takes the `model` string a fit carries (the fit_kind tag, e.g.
-    '2lorentzian_x_psf_window_linear'), not a config model name. Scans saved
-    before the 2026-08-20 rename carry 'pixel_response' tags — those strings
-    live in stored data and are recognised too.
-    """
-    tag = str(model or "")
-    return "lorentzian_x_psf" in tag or "pixel_response" in tag
 
 
 def is_dho_fit(model: str | None) -> bool:
@@ -446,7 +431,7 @@ class SpectrumFitter:
     @staticmethod
     def _fit_kind(n_peaks: int, model: str, use_window: bool,
                   background: str) -> str:
-        """The recipe tag a fit result carries (e.g. '2lorentzian_x_psf_window_linear')."""
+        """The recipe tag a fit result carries (e.g. '2dho_x_psf_window_flat')."""
         kind = f"{n_peaks}{model}"
         if use_window:
             kind += "_window"
@@ -503,45 +488,31 @@ class SpectrumFitter:
         if model == "dho_x_psf":
             # fit() has already guaranteed: sample mode, n_peaks peaks
             # found, dho_axes present (with outer tracks for n_peaks=4).
-            # Per-peak inputs frozen from the FOUND peak positions (the
-            # widths vary slowly with px; the center moves << 1 px during
-            # the fit), so the kernel is built once per peak. Peaks are
-            # ordered left-to-right: [outer_left,] left, right
+            # Peaks are ordered left-to-right: [outer_left,] left, right
             # [, outer_right].
             if n_peaks == 4:
-                sigmas = [float(self.sline_config.psf_sigma_outer_left_px),
-                          float(self.sline_config.psf_sigma_left_px),
-                          float(self.sline_config.psf_sigma_right_px),
-                          float(self.sline_config.psf_sigma_outer_right_px)]
-                taus = [float(self.sline_config.psf_tau_outer_left_px),
-                        float(self.sline_config.psf_tau_left_px),
-                        float(self.sline_config.psf_tau_right_px),
-                        float(self.sline_config.psf_tau_outer_right_px)]
-                boxes = [float(self.sline_config.psf_box_outer_left_px),
-                         0.0, 0.0,
-                         float(self.sline_config.psf_box_outer_right_px)]
-                poly_srcs = [dho_axes.freq_outer_left_poly,
-                             dho_axes.freq_left_poly,
-                             dho_axes.freq_right_poly,
-                             dho_axes.freq_outer_right_poly]
-                width_srcs = [dho_axes.instrument_width_outer_left_poly,
-                              dho_axes.instrument_width_left_poly,
-                              dho_axes.instrument_width_right_poly,
-                              dho_axes.instrument_width_outer_right_poly]
+                polys = [dho_axes.freq_outer_left_poly, dho_axes.freq_left_poly,
+                         dho_axes.freq_right_poly, dho_axes.freq_outer_right_poly]
+                mk = [dho_axes.kernel_outer_left, dho_axes.kernel_left,
+                      dho_axes.kernel_right, dho_axes.kernel_outer_right]
+                # measured VIPA envelope gradients (2026-09-06, four-peak
+                # fits only — see the config comment)
+                envs = [float(self.sline_config.env_slope_outer_left_perpx),
+                        float(self.sline_config.env_slope_left_perpx),
+                        float(self.sline_config.env_slope_right_perpx),
+                        float(self.sline_config.env_slope_outer_right_perpx)]
             else:
-                sigmas = [float(self.sline_config.psf_sigma_left_px),
-                          float(self.sline_config.psf_sigma_right_px)]
-                taus = [float(self.sline_config.psf_tau_left_px),
-                        float(self.sline_config.psf_tau_right_px)]
-                boxes = [0.0, 0.0]
-                poly_srcs = [dho_axes.freq_left_poly,
-                             dho_axes.freq_right_poly]
-                width_srcs = [dho_axes.instrument_width_left_poly,
-                              dho_axes.instrument_width_right_poly]
-            polys = [np.asarray(p, dtype=float) for p in poly_srcs]
-            g_inst = [abs(float(np.polyval(np.asarray(w, dtype=float),
-                                           float(cen[i]))))
-                      for i, w in enumerate(width_srcs)]
+                polys = [dho_axes.freq_left_poly, dho_axes.freq_right_poly]
+                mk = [dho_axes.kernel_left, dho_axes.kernel_right]
+                # two-peak fits read the inner slopes too (2026-09-06):
+                # production keeps them at 0.0, analyses may set them.
+                envs = [float(self.sline_config.env_slope_left_perpx),
+                        float(self.sline_config.env_slope_right_perpx)]
+            polys = [np.asarray(p, dtype=float) for p in polys]
+            if dho_axes.env_slopes is not None:
+                # per-scan slopes measured from this scan's calibration
+                # (envelope_source = "measured"), one per peak in fit order
+                envs = [float(e) for e in dho_axes.env_slopes]
 
             # The DHO core is EVEN in nu, and each track's polynomial,
             # extrapolated across the whole frame, crosses -nu_B again
@@ -552,51 +523,16 @@ class SpectrumFitter:
             # fit window (+-7 px), inside every mirror distance
             # (>= ~24 px), truncating only few-count neighbour wings.
             DHO_REACH_PX = 15.0
-            # outer_right intrinsic satellite (restored 2026-09-05): a
-            # scaled displaced copy of that order's own line, same
-            # kernel — frozen constants, no extra free parameters.
-            sat_r = (float(self.sline_config.psf_sat_ratio_outer_right)
-                     if n_peaks == 4 else 0.0)
-            sat_d = float(self.sline_config.psf_sat_delta_outer_right_px)
-            # measured VIPA envelope gradients (2026-09-06, four-peak
-            # fits only — see the lorentzian branch / config comment)
-            if n_peaks == 4:
-                envs = [float(self.sline_config.env_slope_outer_left_perpx),
-                        float(self.sline_config.env_slope_left_perpx),
-                        float(self.sline_config.env_slope_right_perpx),
-                        float(self.sline_config.env_slope_outer_right_perpx)]
-            else:
-                # two-peak fits read the inner slopes too (2026-09-06):
-                # production keeps them at 0.0, analyses may set them.
-                envs = [float(self.sline_config.env_slope_left_perpx),
-                        float(self.sline_config.env_slope_right_perpx)]
-            if dho_axes.env_slopes is not None:
-                # per-scan slopes measured from this scan's calibration
-                # (envelope_source = "measured"), one per peak in fit order
-                envs = [float(e) for e in dho_axes.env_slopes]
 
-            # measured instrument kernels (dho_kernel = "measured"): the
-            # scan's own calibration stacked at each inner peak's position
-            # replaces the parametric kernel for the INNER pair; the outer
-            # orders (four-peak fits) keep the parametric chain.
-            if n_peaks == 2:
-                mk = ([dho_axes.kernel_left, dho_axes.kernel_right]
-                      if dho_axes.has_measured_kernels else [None, None])
-            else:
-                mk = ([dho_axes.kernel_outer_left, dho_axes.kernel_left,
-                       dho_axes.kernel_right, dho_axes.kernel_outer_right]
-                      if (dho_axes.has_measured_kernels
-                          and dho_axes.has_measured_outer_kernels)
-                      else [None] * 4)
             profiles = getattr(dho_axes, "profiles", None)
-            if profiles is not None and mk[0] is not None:
-                # template chain: kernel (and envelope slope) looked up
-                # PER FRAME at each peak's found position from the node
-                # table, so peaks that move along a scan (cornea depth)
-                # always get the profile measured where they are. With
-                # kernel_source = "file" `profiles` is an epsf.FileKernels:
-                # the named lines answer from the stored table, the
-                # envelope slope always from the scan.
+            if profiles is not None:
+                # the node table: kernel (and envelope slope) looked up PER
+                # FRAME at each peak's found position, so peaks that move
+                # along a scan (cornea depth) always get the profile
+                # measured where they are. With kernel_source = "file"
+                # `profiles` is an epsf.FileKernels: the named lines answer
+                # from the stored table, the envelope slope always from the
+                # scan.
                 fit_names = (("left", "right") if n_peaks == 2
                              else ("outer_left", "left", "right", "outer_right"))
                 idx = [profiles.names.index(nm) for nm in fit_names]
@@ -605,36 +541,35 @@ class SpectrumFitter:
                 if profiles.envelope is not None:
                     envs = [profiles.env_slope(j, float(cen[i]))
                             for i, j in enumerate(idx)]
+            if any(k is None for k in mk):
+                raise ValueError(
+                    "Model 'dho_x_psf' needs the measured instrument kernel "
+                    "of every fitted peak (the scan's own calibration profile, "
+                    "spectrum_fitting/epsf.py, or a stored ePSF table): build "
+                    "the axes with analysis.fit_axial_scan.dho_axes_for_fit."
+                )
             # envelope_apply = "curve" (2026-09-09 analysis knob): the
             # FOUR-PEAK fit multiplies each peak by the full measured
             # curve exp(g(x) - g(c)) over its window instead of the local
             # slope; the two-peak path keeps the slope (untouched).
             env_curve = None
-            if (n_peaks == 4 and profiles is not None and mk[0] is not None
+            if (n_peaks == 4 and profiles is not None
                     and getattr(profiles, "envelope", None) is not None
                     and getattr(self.sline_config, "envelope_apply", "slope") == "curve"):
                 env_curve = profiles.envelope
 
             def peak(x, a, c, w, i):
                 if n_peaks == 2:
-                    out = dho_profile(x, a, c, w, polys[i], g_inst[i],
-                                      sigmas[i], taus[i], kernel=mk[i])
+                    out = dho_profile(x, a, c, w, polys[i], mk[i])
                     if envs[i] != 0.0:
-                        # same multiplicative envelope as the lorentzian
-                        # branch (2026-09-06); production slopes are 0.0
+                        # multiplicative envelope (2026-09-06); production
+                        # inner slopes come from the scan's own calibration
                         out = out * np.exp(envs[i] * (x - c))
                     return out
                 out = np.zeros_like(x, dtype=float)
                 m = np.abs(x - c) <= DHO_REACH_PX
                 if np.any(m):
-                    out[m] = dho_profile(x[m], a, c, w, polys[i],
-                                         g_inst[i], sigmas[i], taus[i],
-                                         box=boxes[i], kernel=mk[i])
-                    if i == 3 and sat_r > 0.0 and mk[i] is None:
-                        out[m] = out[m] + dho_profile(
-                            x[m], a * sat_r, c + sat_d, w, polys[i],
-                            g_inst[i], sigmas[i], taus[i],
-                            box=boxes[i])
+                    out[m] = dho_profile(x[m], a, c, w, polys[i], mk[i])
                     if env_curve is not None:
                         out[m] = out[m] * env_curve.factor(x[m], c)
                     elif envs[i] != 0.0:
@@ -656,83 +591,9 @@ class SpectrumFitter:
                 hi += [np.inf, center_ranges[i][1], hi_w]
             return func, p0, lo, hi, 3
 
-        if model in ("lorentzian", "lorentzian_x_psf"):
-            if model == "lorentzian_x_psf":
-                sigma_l = float(self.sline_config.psf_sigma_left_px)
-                sigma_r = float(self.sline_config.psf_sigma_right_px)
-                tau_l = float(self.sline_config.psf_tau_left_px)
-                tau_r = float(self.sline_config.psf_tau_right_px)
-                if (sigma_l <= 0.0 and sigma_r <= 0.0
-                        and tau_l <= 0.0 and tau_r <= 0.0):
-                    raise ValueError(
-                        "Model 'lorentzian_x_psf' requires the frozen camera "
-                        "constants: set psf_sigma_left_px / psf_sigma_right_px "
-                        "and/or psf_tau_left_px / psf_tau_right_px in the "
-                        "[global] section of the find-peaks config. Measured: "
-                        "sigmas 0.25 / 0.28, taus 0.40 / 0.18 px (record in "
-                        "peak_fitting_config/psf_measurement.py). With all "
-                        "of them at 0 this model is just 'lorentzian'."
-                    )
-                # Per-peak kernels by left-to-right POSITION (blur and tail
-                # are position properties of the sensor/readout; the tail
-                # falls toward higher px — measured 2026-08-20 on the outer
-                # cal lines; every peak carries its own sigma and tau):
-                #   2 peaks: [left, right] (the main pair)
-                #   4 peaks: [outer_left, left, right, outer_right]
-                # ONE model family for every peak (user convention,
-                # re-affirmed 2026-09-04): Lorentzian x Gauss(sigma) x
-                # Tail(tau) x Pixel, per-peak frozen constants. The
-                # outer_right peak additionally carries its intrinsic
-                # near-core satellite (restored 2026-09-05); the
-                # row-tilt boxcar stays out (psf.extras).
-                if n_peaks == 4:
-                    sigmas = [float(self.sline_config.psf_sigma_outer_left_px),
-                              sigma_l, sigma_r,
-                              float(self.sline_config.psf_sigma_outer_right_px)]
-                    taus = [float(self.sline_config.psf_tau_outer_left_px),
-                            tau_l, tau_r,
-                            float(self.sline_config.psf_tau_outer_right_px)]
-                    boxes = [float(self.sline_config.psf_box_outer_left_px),
-                             0.0, 0.0,
-                             float(self.sline_config.psf_box_outer_right_px)]
-                    sat_r = float(
-                        self.sline_config.psf_sat_ratio_outer_right)
-                    sat_d = float(
-                        self.sline_config.psf_sat_delta_outer_right_px)
-                    # measured VIPA envelope gradients (2026-09-06):
-                    # the envelope multiplies the spectrum; unmodeled,
-                    # its gradient pulls broad peaks toward the
-                    # envelope top (the outer shift systematic).
-                    # FOUR-PEAK fits only — see the config comment.
-                    envs = [
-                        float(self.sline_config.env_slope_outer_left_perpx),
-                        float(self.sline_config.env_slope_left_perpx),
-                        float(self.sline_config.env_slope_right_perpx),
-                        float(self.sline_config.env_slope_outer_right_perpx)]
-                else:
-                    sigmas = [sigma_l, sigma_r]
-                    taus = [tau_l, tau_r]
-                    boxes = [0.0, 0.0]
-                    sat_r = 0.0
-                    sat_d = 0.0
-                    # inner envelope slopes apply to two-peak fits as well
-                    # (2026-09-06); production config keeps them at 0.0.
-                    envs = [float(self.sline_config.env_slope_left_perpx),
-                            float(self.sline_config.env_slope_right_perpx)]
-
-                def peak(x, a, c, w, i):
-                    base = psf_profile(x, a, c, w, sigmas[i], taus[i],
-                                       box=boxes[i])
-                    if i == 3 and sat_r > 0.0:
-                        base = base + psf_profile(x, a * sat_r, c + sat_d,
-                                                  w, sigmas[i], taus[i],
-                                                  box=boxes[i])
-                    if envs[i] != 0.0:
-                        base = base * np.exp(envs[i] * (x - c))
-                    return base
-            else:
-                def peak(x, a, c, w, i):
-                    return _lorentzian_pixel_integrated(x, a, c, w)
+        if model == "lorentzian":
+            def peak(x, a, c, w, i):
+                return _lorentzian_pixel_integrated(x, a, c, w)
 
             if n_peaks == 1:
                 def func(x, a, c, w):
@@ -819,8 +680,8 @@ class SpectrumFitter:
                 raise ValueError(
                     "Model 'dho_x_psf' is sample-only: EOM sidebands are "
                     "elastic light (no acoustic mode), so a calibration peak "
-                    "IS the instrument response. Use 'lorentzian_x_psf' for "
-                    "the reference fit."
+                    "IS the instrument response. Use 'lorentzian' for the "
+                    "reference fit."
                 )
             if dho_axes is None:
                 raise ValueError(
@@ -829,33 +690,6 @@ class SpectrumFitter:
                     "calibration with CalibrationCalculator.dho_axes() (see "
                     "spectrum_fitting/dho.py)."
                 )
-
-        # The model-mixing trap: the PSF-kernel models define the peak centre
-        # as the core BEFORE the asymmetric readout tail, ~0.27 px away from
-        # a plain Lorentzian's apparent centre. Fitting samples with one
-        # convention against a calibration fitted with the other injects a
-        # -168 MHz left-right split (measured 2026-08). Calibration and
-        # samples must therefore use the same KERNEL family: 'dho_x_psf'
-        # shares 'lorentzian_x_psf's kernel (and reads its px->GHz tracks),
-        # so it pairs with a 'lorentzian_x_psf' calibration — never with a
-        # plain 'lorentzian' one.
-        if not is_reference_mode:
-            reference_model = resolve_fit_options(self.reference_config).model
-            kernel_family = ("lorentzian_x_psf", "dho_x_psf")
-            if ((requested_model in kernel_family)
-                    != (reference_model in kernel_family)):
-                raise ValueError(
-                    f"Model mixing: sample model '{requested_model}' with "
-                    f"reference model '{reference_model}'. The PSF-convolved "
-                    f"centre convention differs from a plain Lorentzian's by "
-                    f"~0.27 px (-168 MHz split when mixed), so a "
-                    f"'lorentzian_x_psf' or 'dho_x_psf' sample fit needs a "
-                    f"'lorentzian_x_psf' calibration (e.g. prm0/prm1), and a "
-                    f"plain 'lorentzian' sample fit a plain calibration."
-                )
-            # No camera-constant mismatch check needed: the pr_* constants are
-            # global (sline_config.psf_*), so sample and reference fits share one
-            # kernel by construction.
 
         px = np.asarray(px, dtype=np.float64)
         sline = np.asarray(sline, dtype=np.float64)
@@ -892,16 +726,12 @@ class SpectrumFitter:
             raise ValueError(f"n_peaks must be 2 or 4, got {n_requested!r}.")
         if (requested_model == "dho_x_psf" and n_requested == 4
                 and not (dho_axes is not None and dho_axes.has_outer)):
-            # The DHO center correction scales as Gamma^2, so a guessed
-            # outer instrument width would land directly in the
-            # resonance. Loud, no fallback (four-peak DHO added
-            # 2026-09-05; needs a four-peak calibration with outer
-            # width tracks, stored since 2026-09-02).
+            # Loud, no fallback (four-peak DHO added 2026-09-05; needs a
+            # four-peak calibration with outer tracks).
             raise ValueError(
                 "Model 'dho_x_psf' with n_peaks = 4 needs the outer-order "
-                "calibration axes (frequency AND instrument-width tracks); "
-                "this calibration carries none — refit a four-peak "
-                "calibration or set n_peaks = 2."
+                "frequency tracks; this calibration carries none — refit a "
+                "four-peak calibration or set n_peaks = 2."
             )
 
         pk_ind, pk_info = find_peak_locations(sline, config=config)

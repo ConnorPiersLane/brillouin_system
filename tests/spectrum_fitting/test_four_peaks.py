@@ -1,9 +1,14 @@
 """Tests for the 4-peak fit (config n_peaks, or the fit(n_peaks=...)
-override): selection by amplitude ranking, per-position tails
-(psf_tau_outer_* for the outer orders), reported left/right = the inner
+override): selection by amplitude ranking, reported left/right = the inner
 main pair, the outer_* result fields, the per-order calibration tracks
-built by calibrate() in one pass, and the combined estimator.
+built by calibrate() (the template chain) in one pass, and the combined
+estimator.
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
 import numpy as np
 import pytest
 
@@ -18,22 +23,25 @@ from dataclasses import replace
 
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
-    SlineFromFrameConfig,
 )
-from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.spectrum_fitter import SpectrumFitter
 
-SIGMA, TAU_L, TAU_R = 0.25, 0.4, 0.2
-TAU_OL, TAU_OR = 0.5, 0.0
+from synthetic_lines import asym_line
+
+# symmetric synthetic lines (Lorentzian through the pixel box, no blur, no
+# readout tail), so the plain pixel-integrated Lorentzian is the exact model
+SIGMA = 0.0
 # the real 4-peak ROI geometry: S_outer / AS / S / AS_outer
 CENTERS = (39.0, 83.0, 118.0, 146.0)
-TAUS = (TAU_OL, TAU_L, TAU_R, TAU_OR)
 AMPS = (1800.0, 3000.0, 3000.0, 1800.0)   # outer ~60% of the main pair
 GAMMA = 1.0
 OFFSET = 80.0
+# a calibration sweep dense enough for the template chain (0.4 px per
+# frame at 8 px/GHz, 12 frames within each node's +-2.5 px window)
+SWEEP = [round(4.0 + 0.05 * k, 3) for k in range(41)]
 
 
-def make_config(model="prm0") -> FindPeaksConfig:
+def make_config(model="lorentzian") -> FindPeaksConfig:
     return FindPeaksConfig(
         prominence_fraction=0.05,
         min_peak_width=1,
@@ -44,86 +52,25 @@ def make_config(model="prm0") -> FindPeaksConfig:
     )
 
 
-def make_fitter(model="prm0", n_peaks=2) -> SpectrumFitter:
+def make_fitter(model="lorentzian", n_peaks=2) -> SpectrumFitter:
     fitter = SpectrumFitter()
-    # kernel working values AND n_peaks live in the [global] sline config
+    # n_peaks lives in the [global] sline config
     fitter.update_sline_config(replace(
-        fitter.sline_config, n_peaks=n_peaks,
-        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
-        psf_sigma_outer_left_px=SIGMA, psf_sigma_outer_right_px=SIGMA,
-        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
-        psf_tau_outer_left_px=TAU_OL, psf_tau_outer_right_px=TAU_OR,
-        psf_sat_ratio_outer_right=0.0, psf_sat_delta_outer_right_px=0.0,
-        psf_box_outer_left_px=0.0, psf_box_outer_right_px=0.0,
+        fitter.sline_config, n_peaks=n_peaks, kernel_source="scan",
         env_slope_outer_left_perpx=0.0, env_slope_left_perpx=0.0,
         env_slope_right_perpx=0.0, env_slope_outer_right_perpx=0.0))
     fitter.update_sample_config(make_config(model))
-    fitter.update_reference_config(make_config("lorentzian_x_psf"))
+    fitter.update_reference_config(make_config("lorentzian"))
     return fitter
 
 
 def make_spectrum(seed=0, centers=CENTERS):
     px = np.arange(0.0, 200.0)
     true = np.full_like(px, OFFSET)
-    for a, c, tau in zip(AMPS, centers, TAUS):
-        true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
+    for a, c in zip(AMPS, centers):
+        true = true + asym_line(px, a, c, GAMMA, SIGMA, 0.0)
     rng = np.random.default_rng(seed)
     return px, true + rng.normal(0.0, 2.0, size=true.shape)
-
-
-def test_boxcar_outer_only():
-    # the row-tilt boxcar is production for the OUTER orders only
-    # (2026-09-05): outer box fields exist, inner box names are refused
-    # BY MEASUREMENT (bell row profile — a top-hat is the wrong shape
-    # for the inner smear), and the box must widen the profile without
-    # changing its area.
-    fitter = make_fitter(n_peaks=4)
-    assert fitter.sline_config.psf_box_outer_left_px == 0.0  # test pin
-    with pytest.raises(AttributeError, match="MEASUREMENT"):
-        fitter.sline_config.psf_box_left_px
-
-    px = np.arange(0.0, 200.0)
-    boxed = psf_profile(px, AMPS[0], CENTERS[0], GAMMA, SIGMA, TAUS[0],
-                        box=1.95)
-    plain0 = psf_profile(px, AMPS[0], CENTERS[0], GAMMA, SIGMA, TAUS[0])
-    assert boxed.max() < 0.95 * plain0.max()
-    np.testing.assert_allclose(boxed.sum(), plain0.sum(), rtol=2e-3)
-
-
-def test_outer_right_satellite_removes_center_bias():
-    # the outer_right order carries an intrinsic near-core satellite
-    # (2026-09-02 determination, restored to production 2026-09-05):
-    # a spectrum synthesized WITH the satellite must fit without centre
-    # bias when the config carries the constants, and with a visible
-    # pull when the ratio is 0.
-    sat_r, sat_d = 0.08, -1.23      # exaggerated ratio for a crisp test
-    px = np.arange(0.0, 200.0)
-    true = np.full_like(px, OFFSET)
-    for a, c, tau in zip(AMPS, CENTERS, TAUS):
-        true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
-    true = true + psf_profile(px, AMPS[3] * sat_r, CENTERS[3] + sat_d,
-                              GAMMA, SIGMA, TAUS[3])
-    rng = np.random.default_rng(7)
-    sline = true + rng.normal(0.0, 2.0, size=true.shape)
-
-    def fit_with(ratio, delta):
-        fitter = make_fitter(n_peaks=4)
-        fitter.update_sline_config(replace(
-            fitter.sline_config,
-            psf_sat_ratio_outer_right=ratio,
-            psf_sat_delta_outer_right_px=delta))
-        r = fitter.fit(px, sline, is_reference_mode=True, n_peaks=4)
-        assert r.is_success
-        return r
-
-    with_sat = fit_with(sat_r, sat_d)
-    without = fit_with(0.0, 0.0)
-    err_with = abs(with_sat.outer_right_peak_center_px - CENTERS[3])
-    err_without = abs(without.outer_right_peak_center_px - CENTERS[3])
-    assert err_with < 0.03
-    assert err_without > 2.0 * err_with
-    assert abs(with_sat.left_peak_center_px - CENTERS[1]) < 0.03
-    assert abs(with_sat.right_peak_center_px - CENTERS[2]) < 0.03
 
 
 def test_n_peaks_validation():
@@ -186,27 +133,12 @@ def test_four_peaks_on_main_pair_only_roi_fails_loudly():
     # no silent fallback to a different layout
     px = np.arange(0.0, 200.0)
     true = np.full_like(px, OFFSET)
-    for a, c, tau in ((3000.0, 83.0, TAU_L), (3000.0, 118.0, TAU_R)):
-        true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
+    for a, c in ((3000.0, 83.0), (3000.0, 118.0)):
+        true = true + asym_line(px, a, c, GAMMA, SIGMA, 0.0)
     rng = np.random.default_rng(1)
     sline = true + rng.normal(0.0, 2.0, size=true.shape)
     result = make_fitter().fit(px, sline, is_reference_mode=False, n_peaks=4)
     assert not result.is_success
-
-
-def test_four_peak_wrong_outer_tau_biases_outer_centre():
-    # sanity that the per-position tails matter: fitting with the outer
-    # tails swapped moves the outer centres by the tail convention
-    fitter = make_fitter()
-    fitter.update_sline_config(replace(
-        fitter.sline_config,
-        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
-        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R,
-        psf_tau_outer_left_px=TAU_OR, psf_tau_outer_right_px=TAU_OL))
-    px, sline = make_spectrum()
-    result = fitter.fit(px, sline, is_reference_mode=False, n_peaks=4)
-    assert result.is_success
-    assert abs(result.outer_left_peak_center_px - CENTERS[0]) > 0.15
 
 
 def test_global_config_drives_n_peaks():
@@ -266,7 +198,7 @@ def _calibration_data(freqs_ghz, px_per_ghz=8.0):
 
 
 def test_four_peak_calibration_builds_a_track_per_order():
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     data = _calibration_data(freqs)
     calc = CalibrationCalculator(calibrate(
         data, polyfit_degree=1, fitter=_reference_fitter()))
@@ -283,7 +215,7 @@ def test_four_peak_calibration_builds_a_track_per_order():
 
 
 def test_two_peak_calibration_carries_no_outer_tracks():
-    freqs = [4.0, 5.0, 6.0]
+    freqs = SWEEP
     data = _calibration_data(freqs)
     calc = CalibrationCalculator(calibrate(
         data, polyfit_degree=1, fitter=_reference_fitter(n_peaks=2)))
@@ -296,13 +228,13 @@ def test_two_peak_calibration_carries_no_outer_tracks():
 def test_four_peak_calibration_refuses_a_main_pair_only_roi():
     # frames holding only the main pair: every 4-peak fit fails, and the
     # raise names the n_peaks=4 requirement instead of fitting junk
-    freqs = [4.0, 5.0, 6.0]
+    freqs = SWEEP
     blocks = []
     px = np.arange(0.0, 200.0)
     for i, f in enumerate(freqs):
         true = np.full_like(px, OFFSET)
-        for a, c, tau in ((3000.0, 83.0, TAU_L), (3000.0, 118.0, TAU_R)):
-            true = true + psf_profile(px, a, c, GAMMA, SIGMA, tau)
+        for a, c in ((3000.0, 83.0), (3000.0, 118.0)):
+            true = true + asym_line(px, a, c, GAMMA, SIGMA, 0.0)
         rng = np.random.default_rng(20 + i)
         sline = true + rng.normal(0.0, 2.0, size=true.shape)
         frame = np.tile(sline / 3.0, (3, 1))
@@ -310,13 +242,13 @@ def test_four_peak_calibration_refuses_a_main_pair_only_roi():
             set_freq_ghz=f,
             cali_meas_points=[CalibrationMeasurementPoint(
                 frame=frame, microwave_freq=f)]))
-    with pytest.raises(ValueError, match="n_peaks=4"):
+    with pytest.raises(ValueError, match="n_peaks"):
         calibrate(CalibrationData(measured_freqs=blocks),
                   polyfit_degree=1, fitter=_reference_fitter())
 
 
 def test_combined_shift_combines_the_orders():
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     data = _calibration_data(freqs)
     fitter = _reference_fitter()
     # ONE calibration pass yields the inner AND outer tracks
@@ -351,21 +283,22 @@ def test_combined_shift_combines_the_orders():
 def test_four_peak_calibration_builds_outer_width_tracks():
     # the outer orders get their own instrument-width polynomials from the
     # same fitting pass, so they carry the full width chain (2026-09-02)
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     calc = CalibrationCalculator(calibrate(
         _calibration_data(freqs), polyfit_degree=1,
         fitter=_reference_fitter()))
     assert calc.p.calibration_width_outer_left_peak is not None
     assert calc.p.calibration_width_outer_right_peak is not None
-    # the sidebands are GAMMA wide in px, so the instrument width at any
-    # outer pixel is GAMMA * |local dispersion| = 1.0 * (1/8) GHz
+    # the sidebands are GAMMA wide in px (plus the pixel box the measured
+    # profile carries), so the instrument width at any outer pixel is
+    # about GAMMA * |local dispersion| = 1.0 * (1/8) GHz
     inst_l, inst_r = calc.instrument_hwhm_outer_ghz(30.0, 150.0)
-    assert abs(inst_l - 1.0 / 8.0) < 0.01
-    assert abs(inst_r - 1.0 / 8.0) < 0.01
+    assert abs(inst_l - 1.0 / 8.0) < 0.02
+    assert abs(inst_r - 1.0 / 8.0) < 0.02
 
 
 def test_outer_widths_and_linewidth_through_analyze():
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     fitter = _reference_fitter()
     calc = CalibrationCalculator(calibrate(
         _calibration_data(freqs), polyfit_degree=1, fitter=fitter))
@@ -388,17 +321,21 @@ def test_outer_widths_and_linewidth_through_analyze():
              shifts.instrument_hwhm_outer_right_peak_ghz,
              shifts.linewidth_outer_right_peak_ghz)):
         assert abs(raw - 1.0 / 8.0) < 0.01     # GAMMA px * (1/8) GHz/px
-        assert abs(inst - 1.0 / 8.0) < 0.01
-        assert abs(lw) < 0.01                  # same width -> ~0 sample HWHM
-    # the inner-pair width observables are untouched
+        assert abs(inst - 1.0 / 8.0) < 0.02
+        # a plain-Lorentzian fit carries no instrument model: no linewidth
+        assert lw is None
     assert shifts.hwhm_left_peak_ghz is not None
-    assert shifts.linewidth_left_peak_ghz is not None
+    assert shifts.linewidth_left_peak_ghz is None
+    # a DHO fit's width IS the acoustic width: the linewidth is the raw one
+    dho = calc.analyze(replace(fs, model="4dho_x_psf_window"))
+    assert dho.linewidth_outer_left_peak_ghz == pytest.approx(dho.hwhm_outer_left_peak_ghz)
+    assert dho.linewidth_left_peak_ghz == pytest.approx(dho.hwhm_left_peak_ghz)
 
 
 def test_outer_widths_none_without_outer_width_model():
     # a two-peak calibration has neither outer tracks nor outer widths:
     # every outer width observable degrades to None, loudly nothing
-    freqs = [4.0, 5.0, 6.0]
+    freqs = SWEEP
     calc = CalibrationCalculator(calibrate(
         _calibration_data(freqs), polyfit_degree=1,
         fitter=_reference_fitter(n_peaks=2)))
@@ -414,7 +351,7 @@ def test_outer_widths_none_without_outer_width_model():
 
 
 def test_combined_shift_is_none_without_four_peaks():
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     calc = CalibrationCalculator(calibrate(
         _calibration_data(freqs), polyfit_degree=1,
         fitter=_reference_fitter()))
@@ -435,7 +372,7 @@ def test_combined_shift_is_none_without_four_peaks():
 def test_four_peak_calibration_builds_the_outer_distance_track():
     # the outer pair gets its OWN distance track from the same fitting pass
     # (2026-09-10): outer_right - outer_left [px] vs EOM frequency
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     calc = CalibrationCalculator(calibrate(
         _calibration_data(freqs), polyfit_degree=1,
         fitter=_reference_fitter()))
@@ -455,7 +392,7 @@ def test_four_peak_calibration_builds_the_outer_distance_track():
 def test_weighted_distance_averages_the_two_pair_distances():
     from brillouin_system.analysis.pixel_counts_and_photons import (
         PixelCountsAndPhotons)
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0]
+    freqs = SWEEP
     fitter = _reference_fitter()
     calc = CalibrationCalculator(calibrate(
         _calibration_data(freqs), polyfit_degree=1, fitter=fitter))
@@ -533,7 +470,7 @@ def test_outer_tracks_use_the_outer_degree():
     # 2026-09-10: the outer-order FREQUENCY tracks get their own polynomial
     # degree (outer_degree, live config default 3); the inner tracks and
     # every width track keep polyfit_degree
-    freqs = [4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
+    freqs = [round(4.0 + 0.05 * k, 3) for k in range(61)]
     data = _calibration_data(freqs)
     calc = CalibrationCalculator(calibrate(
         data, polyfit_degree=1, fitter=_reference_fitter(), outer_degree=3))

@@ -8,9 +8,9 @@ the Brillouin peaks — the structure prm1's linear slope used to absorb.
 
 The production correction fits the measured pattern with ONE shared scale:
 
-    lorentzian_x_psf pair + per-peak flat offset + s * R
+    Lorentzian pair + per-peak flat offset + s * R
 
-(the 'prmr' preset / 'reflection' background in SpectrumFitter). A per-peak
+(the 'reflection' background in SpectrumFitter). A per-peak
 scale was tested 2026-08-20 and rejected: freeing s on each side removes the
 S-side constraint on the scale and re-opens the amplitude<->centre trade
 (splits +3..+4 MHz on wide glycerol). An envelope change after realignment is
@@ -206,7 +206,7 @@ _current_background: ReflectionBackground | None = None
 
 
 def set_current_background(bg: ReflectionBackground | None):
-    """Select the background used by subsequent prmr fits in this process
+    """Select the background used by subsequent reflection-background fits in this process
     (None clears it — fits then warn and drop the reflection term)."""
     global _current_background
     _current_background = bg
@@ -252,7 +252,7 @@ class ReflectionBackgroundMapper:
     sample frames are summed over — see ReflectionBackground.sline).
     render(px) then returns the background on that pixel axis, ready to pass
     to SpectrumFitter.fit as reflection_background
-    (background='reflection' / the 'prmr' preset).
+    (background='reflection').
 
     Each order is rendered through its own track and confined to its own side
     of the axis. The split pixel is where the two tracks report the same

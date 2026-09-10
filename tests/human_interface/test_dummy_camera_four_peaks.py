@@ -28,8 +28,9 @@ def _fitter(n_peaks: int) -> SpectrumFitter:
     # flat sample background: this test pins the dummy's peak layout, not
     # the reflection-template plumbing; reference threshold scales with the
     # shortened exposure (the live 800 assumes 0.3 s)
+    # a plain Lorentzian: this test has no calibration axes for the DHO
     fitter.update_sample_config(replace(
-        fitter.sample_config, background="flat"))
+        fitter.sample_config, fitting_model="lorentzian", background="flat"))
     fitter.update_reference_config(replace(
         fitter.reference_config, min_peak_height=100))
     return fitter

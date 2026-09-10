@@ -23,9 +23,9 @@ import pytest
 
 from brillouin_system.spectrum_fitting.epsf import Epsf
 from brillouin_system.spectrum_fitting.measured_kernel import MeasuredKernel
-from brillouin_system.spectrum_fitting.psf import DX
+from brillouin_system.spectrum_fitting.measured_kernel import DX
 
-from test_measured_kernel import (
+from synthetic_lines import (
     CEN_LEFT, CEN_RIGHT, PX, SLOPE_LEFT, SLOPE_RIGHT, elastic_sline,
     parametric_kernel)
 

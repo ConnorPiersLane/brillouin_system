@@ -78,7 +78,7 @@ OUT: build on one set of frames, fit another (held_out_sine).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -87,8 +87,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 
 from brillouin_system.spectrum_fitting.measured_kernel import (
-    KERNEL_HALF_PX, MeasuredKernel, SMOOTH_H_PX, WINDOW_PX, _local_quadratic)
-from brillouin_system.spectrum_fitting.psf import DX
+    DX, KERNEL_HALF_PX, MeasuredKernel, SMOOTH_H_PX, WINDOW_PX, _local_quadratic)
 
 SEED_WINDOW_PX = 6.0        # plain-Lorentzian first guess and template fits
 FLOOR_FRACTION = 0.1        # frame floor from the peak-free axis ends
@@ -214,7 +213,11 @@ class Epsf:
         self.path = None
         self.frames = read_frames(freqs, pxs, slines, self.n_lines)
         if len(self.frames) < SMOOTH_DEGREE + 3:
-            raise ValueError(f"Only {len(self.frames)} usable calibration frames.")
+            raise ValueError(
+                f"Only {len(self.frames)} usable calibration frames with "
+                f"{self.n_lines} lines (need {SMOOTH_DEGREE + 3}). With "
+                f"n_peaks=4 the frames must hold the four-order ROI; on "
+                f"two-line data set n_peaks = 2.")
         self.nodes: list[np.ndarray] = []
         self.profiles: list[np.ndarray] = []
         self.node_frames: list[np.ndarray] = []

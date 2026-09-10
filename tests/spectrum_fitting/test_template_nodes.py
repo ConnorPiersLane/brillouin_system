@@ -17,28 +17,23 @@ import pytest
 
 from brillouin_system.spectrum_fitting.dho import DhoAxes, dho_profile
 from brillouin_system.spectrum_fitting.measured_kernel import MeasuredKernel
-from brillouin_system.spectrum_fitting.psf import DX, psf_profile
+from brillouin_system.spectrum_fitting.measured_kernel import DX
 from brillouin_system.spectrum_fitting.epsf import Epsf
 
-from test_measured_kernel import (
-    CEN_LEFT, CEN_RIGHT, FLOOR, G_INST, POLY_LEFT, POLY_RIGHT, PX, SIGMA,
-    SLOPE_LEFT, SLOPE_RIGHT, TAU, frame_from_sline, make_fitter)
-
-GRID = np.arange(-6.0, 6.0 + DX / 2, DX)
-
-
-def _unit(k):
-    return k / (k.sum() * DX)
+from synthetic_lines import (
+    CEN_LEFT, CEN_RIGHT, FLOOR, G_INST, GRID, POLY_LEFT, POLY_RIGHT, PX, SIGMA,
+    SLOPE_LEFT, SLOPE_RIGHT, TAU, frame_from_sline, make_fitter, measured_kernel,
+    unit_kernel)
 
 
 def _true_kernel(idx):
-    return _unit(psf_profile(GRID, 1.0, 0.0, G_INST, SIGMA[idx], TAU[idx]))
+    return unit_kernel(G_INST, SIGMA[idx], TAU[idx])
 
 
 def _wrong_kernel(idx):
     # twice the instrument width: a fit with this kernel returns a visibly
     # wrong acoustic width, so a test can tell which node was used
-    return _unit(psf_profile(GRID, 1.0, 0.0, 2.0 * G_INST, SIGMA[idx], TAU[idx]))
+    return unit_kernel(2.0 * G_INST, SIGMA[idx], TAU[idx])
 
 
 def _profiles(good_offsets):
@@ -80,8 +75,10 @@ def _spectrum(dc):
     cl, cr = CEN_LEFT + dc, CEN_RIGHT + dc
     reach = lambda c: np.abs(PX - c) <= 15.0
     sline = (FLOOR
-             + dho_profile(PX, 3400.0, cl, gam_px[0], POLY_LEFT, G_INST, SIGMA[0], TAU[0]) * reach(cl)
-             + dho_profile(PX, 3400.0, cr, gam_px[1], POLY_RIGHT, G_INST, SIGMA[1], TAU[1]) * reach(cr))
+             + dho_profile(PX, 3400.0, cl, gam_px[0], POLY_LEFT,
+                           measured_kernel(G_INST, SIGMA[0], TAU[0])) * reach(cl)
+             + dho_profile(PX, 3400.0, cr, gam_px[1], POLY_RIGHT,
+                           measured_kernel(G_INST, SIGMA[1], TAU[1])) * reach(cr))
     return frame_from_sline(sline), gam_px
 
 
@@ -93,9 +90,7 @@ def _fit(fitter, frame, axes):
 
 def test_fit_picks_the_node_at_each_frame_peak_position():
     fitter = make_fitter()
-    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT,
-                   instrument_width_left_poly=np.array([G_INST]),
-                   instrument_width_right_poly=np.array([G_INST]))
+    base = DhoAxes(freq_left_poly=POLY_LEFT, freq_right_poly=POLY_RIGHT)
     # the TRUE profile sits at nodes +1..+3 px only (the blend around +2
     # then stays true whatever the finder's sub-pixel error); the
     # first-frame snapshot kernels (kernel_left/right) are the WRONG ones

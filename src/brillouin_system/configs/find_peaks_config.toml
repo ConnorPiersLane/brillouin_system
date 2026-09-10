@@ -19,18 +19,6 @@ selected_rows = [
 row_selection = "manual"
 n_rows = 13
 n_peaks = 4
-psf_sigma_left_px = 0.26
-psf_sigma_right_px = 0.27
-psf_tau_left_px = 0.39
-psf_tau_right_px = 0.17
-psf_sigma_outer_left_px = 0.14
-psf_sigma_outer_right_px = 0.15
-psf_tau_outer_left_px = 0.13
-psf_tau_outer_right_px = 0.08
-psf_box_outer_left_px = 1.95
-psf_box_outer_right_px = 0.85
-psf_sat_ratio_outer_right = 0.037
-psf_sat_delta_outer_right_px = -1.23
 env_slope_outer_left_perpx = 0.0302
 env_slope_left_perpx = 0.0
 env_slope_right_perpx = 0.0
@@ -76,10 +64,6 @@ na_beam_diameter_mm = 5.5
 na_focal_length_mm = 10.0
 na_n_sample = 1.33
 reflection_margin_ghz = 0.7
-# instrument kernel of the DHO sample model: "measured" = stacked from the
-# scan's own calibration frames at each peak's position (2026-09-07);
-# "parametric" = Lorentzian x Gauss x tail x pixel from the width polynomials
-dho_kernel = "measured"
 
 [reference]
 prominence_fraction = 0.05
@@ -87,11 +71,7 @@ min_peak_width = 1
 min_peak_height = 800
 rel_height = 0.5
 wlen_pixels = 40
-fitting_model = "lorentzian_x_psf"
+fitting_model = "lorentzian"
 use_window = true
 background = "flat"
 beta = 3.0
-# calibration-line centres: "parametric" (Lor x Gauss x tail x pixel fit per
-# frame) or "template" (no instrument model: measured-profile template chain,
-# spectrum_fitting/template_calibration.py; also supplies the DHO kernels)
-centre_method = "template"

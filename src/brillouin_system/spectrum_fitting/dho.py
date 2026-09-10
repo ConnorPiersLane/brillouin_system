@@ -19,17 +19,16 @@ the polys' opposite slopes place it (design validated 2026-08-05/10,
 Data/2026-8-5/analysis/dho_vs_lorentzian.py — synthetic closure returns an
 injected resonance to 0.00 MHz on both peaks).
 
-The measured line is the core through the full instrument chain:
+The measured line is the core through the MEASURED instrument response:
 
-    DHO(nu(x)) (x) Lorentzian(g_inst) (x) Gauss(sigma) (x) ExpTail(tau) (x) pixel
+    DHO(nu(x)) (x) kernel
 
-g_inst is the VIPA instrument Lorentzian HWHM [px] from the calibration
-width polynomial, evaluated at the peak's position and FIXED in the fit.
-Folding it into the kernel is essential, not cosmetic: the DHO's center
-offset scales with the square of the width that drives the asymmetry, and
-leaving the instrument width inside the free parameter makes that offset
-~4x too large (measured 2026-08-05). With it in the kernel the free width
-IS the acoustic width — no downstream instrument subtraction.
+with kernel the profile of the elastic calibration line stacked at this
+peak's detector position (spectrum_fitting/epsf.py, per scan or from a
+stored fine-sweep table). It already carries the VIPA instrument
+Lorentzian, the camera blur, the readout tail and the pixel box, so the
+free width IS the acoustic width — no downstream instrument subtraction,
+and no camera constants (the parametric kernel was removed 2026-09-10).
 
 Because the fitted center parameter is the RESONANCE pixel, the standard
 freq_shift_*_ghz chain downstream reports the damping-corrected resonance
@@ -41,69 +40,48 @@ a calibration peak IS the instrument response, so the fitter refuses this
 model in reference mode.
 """
 from dataclasses import dataclass
-from functools import lru_cache
 
 import numpy as np
 
-from brillouin_system.spectrum_fitting.psf import DX, detection_kernel
+from brillouin_system.spectrum_fitting.measured_kernel import DX, KERNEL_HALF_PX
 
-# Half-width [px] of the instrument-Lorentzian kernel. Lorentzian tails are
-# long; 12 px truncates ~2% of the area for the typical g_inst ~0.4 px, flat
-# enough to be absorbed by the fitted offset. Same value as the validated
-# 2026-08 analysis harness.
-KERNEL_HALF_PX = 12.0
-# Grid padding beyond the evaluated pixels: kernel reach (Lorentzian half
-# width + Gauss/tail extent) plus margin, so edge pixels keep full support.
+# Grid padding beyond the evaluated pixels: kernel reach plus margin, so
+# edge pixels keep full support.
 PAD_PX = KERNEL_HALF_PX + 4.0
 
 
 @dataclass(frozen=True)
 class DhoAxes:
-    """Per-peak calibration inputs a 'dho_x_psf' fit needs.
+    """What a 'dho_x_psf' sample fit needs from the scan's own calibration.
 
-    Built from the scan's own calibration (CalibrationCalculator.dho_axes())
-    and passed to SpectrumFitter.fit(dho_axes=...) — the same pattern as the
-    reflection background.
+    freq_*_poly    px -> GHz shift from the peak's own elastic line
+                   (np.polyval coefficients), inner pair always, outer
+                   orders on four-peak calibrations (None otherwise).
+    kernel_*       the measured instrument kernel at each sample peak's
+                   position (the first-frame snapshot / capability flag).
+    env_slopes     per-scan envelope slopes [1/px] at the sample peaks, in
+                   fit order (left, right) or (outer_left, left, right,
+                   outer_right); None = the config constants.
+    profiles       the scan's Epsf (or epsf.FileKernels): the node table
+                   the fitter reads PER FRAME at each peak's found position,
+                   so a scan whose shift changes along the way (cornea
+                   depth) always uses the profile measured where the peak
+                   actually is.
 
-    The outer-order fields are None on a two-peak calibration. They were
-    added 2026-09-05 (the original inner-only restriction dated from
-    before the outer width tracks existed, 2026-08-20; the tracks are
-    stored since 2026-09-02): a FOUR-peak DHO fit reports every order's
-    RESONANCE, the convention-free quantity, which removes the
-    lineshape-lean systematic that makes symmetric-model outer shifts
-    read low by ~Gamma^2/nu_B across tracks of different dispersion
-    (measured -12..-4 MHz on water 22-49 C, kernel-independent).
+    A FOUR-peak DHO fit (2026-09-05) reports every order's RESONANCE, the
+    convention-free quantity, which removes the lineshape-lean systematic
+    that makes symmetric-model outer shifts read low by ~Gamma^2/nu_B
+    across tracks of different dispersion.
     """
-    # px -> GHz shift from the peak's own elastic line (np.polyval coeffs).
     freq_left_poly: np.ndarray
     freq_right_poly: np.ndarray
-    # px -> instrument Lorentzian HWHM [px] (the calibration width polys).
-    instrument_width_left_poly: np.ndarray
-    instrument_width_right_poly: np.ndarray
-    # outer orders (four-peak calibrations only; None otherwise)
     freq_outer_left_poly: np.ndarray | None = None
     freq_outer_right_poly: np.ndarray | None = None
-    instrument_width_outer_left_poly: np.ndarray | None = None
-    instrument_width_outer_right_poly: np.ndarray | None = None
-    # Measured instrument kernels for the inner pair (dho_kernel =
-    # "measured"): built from the scan's own calibration at the sample
-    # peaks' positions (measured_kernel.measured_kernels_for_frame). None
-    # = the parametric kernel from the width polynomials above.
     kernel_left: object | None = None
     kernel_right: object | None = None
     kernel_outer_left: object | None = None
     kernel_outer_right: object | None = None
-    # Per-scan envelope slopes [1/px] at the sample peaks, in fit order
-    # (left, right) or (outer_left, left, right, outer_right); None = the
-    # config constants (envelope_source = "config").
     env_slopes: tuple | None = None
-    # The scan's TemplateProfiles (centre_method = "template"): the node
-    # profiles (every 1 px along each line's track) and the per-scan
-    # envelope. When present the fitter picks each peak's kernel and
-    # envelope slope PER FRAME from the found peak position, so a scan
-    # whose shift changes along the way (cornea depth) always uses the
-    # profile measured where the peak actually is. The kernel_* fields
-    # above then only serve as the first-frame snapshot / capability flag.
     profiles: object | None = None
 
     @property
@@ -118,54 +96,20 @@ class DhoAxes:
     @property
     def has_outer(self) -> bool:
         return (self.freq_outer_left_poly is not None
-                and self.freq_outer_right_poly is not None
-                and self.instrument_width_outer_left_poly is not None
-                and self.instrument_width_outer_right_poly is not None)
+                and self.freq_outer_right_poly is not None)
 
 
-@lru_cache(maxsize=64)
-def _dho_kernel(g_inst_millipx: int, sigma: float, tau: float,
-                box: float = 0.0):
-    """Lorentzian(g_inst) (x) Gauss(sigma) (x) ExpTail(tau) (x) [Boxcar]
-    (x) pixel.
+def dho_profile(px, amp, cen, gamma_px, freq_poly, kernel):
+    """Eq.-S2 DHO through the measured instrument kernel, evaluated at px.
 
-    Returns (x0, k) with k normalised to unit area (k.sum()*DX == 1) and x0
-    the coordinate of k[0] relative to the kernel centre. g_inst is keyed in
-    milli-px: it is frozen per peak per scan (evaluated at the found peak
-    position before the fit), so within a scan every call is a cache hit.
-    box is the measured row-tilt smear (outer orders only; 0 = off).
-    """
-    g = max(g_inst_millipx / 1000.0, 1e-6)
-    n = int(round(KERNEL_HALF_PX / DX))
-    xk = DX * (np.arange(2 * n + 1) - n)
-    lor = 1.0 / (1.0 + (xk / g) ** 2)
-    lor /= lor.sum()
-
-    cam_x0, cam = detection_kernel(float(sigma), float(tau), DX,
-                                   float(box))  # unit area
-    k = np.convolve(lor, cam)
-    return -KERNEL_HALF_PX + cam_x0, k
-
-
-def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau,
-                box=0.0, kernel=None):
-    """Eq.-S2 DHO through the instrument chain, evaluated at pixels px.
-
-    amp       peak height of the underlying DHO core (before the kernel),
-              matching the other models' amplitude convention.
-    cen       RESONANCE position [px]: nuB = polyval(freq_poly, cen).
-    gamma_px  acoustic HWHM [px]; converted to GHz with the local dispersion
-              at cen (Gamma = gamma_px * |d nu/d px|).
-    box       measured row-tilt smear width [px] (outer orders; 0 off).
-    kernel    a MeasuredKernel (spectrum_fitting/measured_kernel.py): the
-              instrument response measured at this peak's position from the
-              scan's own calibration. When given it REPLACES the parametric
-              Lorentzian(g_inst) (x) Gauss (x) tail (x) pixel kernel
-              (g_inst_px, sigma, tau, box are then unused); it already
-              carries the instrument Lorentzian, so gamma_px stays the
-              acoustic width. Adopted 2026-09-07: the parametric Stokes
-              kernel has ~30 % too much wing, which read the acoustic width
-              3-4 % low.
+    amp        peak height of the underlying DHO core (before the kernel),
+               matching the other models' amplitude convention.
+    cen        RESONANCE position [px]: nuB = polyval(freq_poly, cen).
+    gamma_px   acoustic HWHM [px]; converted to GHz with the local
+               dispersion at cen (Gamma = gamma_px * |d nu/d px|).
+    kernel     a MeasuredKernel (unit area on the DX grid) measured at this
+               peak's position; it carries the instrument Lorentzian, so
+               gamma_px stays the acoustic width.
     """
     px = np.asarray(px, dtype=float)
     gamma_px = max(float(gamma_px), 1e-9)
@@ -192,12 +136,7 @@ def dho_profile(px, amp, cen, gamma_px, freq_poly, g_inst_px, sigma, tau,
         core_max = float(np.max(core))
     core = core / max(core_max, 1e-300)
 
-    if kernel is not None:
-        k_x0, k = kernel.x0, kernel.k
-    else:
-        k_x0, k = _dho_kernel(int(round(float(g_inst_px) * 1000.0)),
-                              float(sigma), float(tau), float(box))
-    conv = np.convolve(core, k) * DX
-    conv_x = (xf[0] + k_x0) + DX * np.arange(conv.size)
+    conv = np.convolve(core, kernel.k) * DX
+    conv_x = (xf[0] + kernel.x0) + DX * np.arange(conv.size)
 
     return float(amp) * np.interp(px, conv_x, conv)

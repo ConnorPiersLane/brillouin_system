@@ -1,6 +1,6 @@
-"""The fitting-parameters dialog exposes the self-calibrating chain's three
-switches (centre_method, dho_kernel, envelope_source) and greys out the
-legacy camera-PSF constants whenever no selected path reads them."""
+"""The fitting-parameters dialog exposes the self-calibrating chain's
+switches (envelope_source, kernel_source + file + limits) and round-trips
+them through Apply."""
 import os
 
 import pytest
@@ -23,28 +23,11 @@ def app():
 
 def test_switches_load_from_the_live_config(app):
     dlg = FindPeaksConfigDialog()
-    assert dlg.sample_inputs["dho_kernel"].currentText() == find_peaks_sample_config.get().dho_kernel
-    assert dlg.reference_inputs["centre_method"].currentText() == find_peaks_reference_config.get().centre_method
+    assert dlg.sample_inputs["fitting_model"].currentText() == find_peaks_sample_config.get().fitting_model
+    assert dlg.reference_inputs["fitting_model"].currentText() == find_peaks_reference_config.get().fitting_model
     assert dlg.global_inputs["envelope_source"].currentText() == sline_from_frame_config.get().envelope_source
-
-
-def test_psf_constants_greyed_out_on_the_self_calibrating_chain(app):
-    dlg = FindPeaksConfigDialog()
-    dlg.reference_inputs["centre_method"].setCurrentText("template")
-    dlg.sample_inputs["dho_kernel"].setCurrentText("measured")
-    dlg.sample_inputs["fitting_model"].setCurrentText("dho_x_psf")
-    assert not dlg.psf_constants_in_use()
-    assert all(not dlg.global_inputs[k].isEnabled() for k in dlg.pr_field_names())
-    # any legacy path switches them back on
-    dlg.sample_inputs["dho_kernel"].setCurrentText("parametric")
-    assert dlg.psf_constants_in_use()
-    assert all(dlg.global_inputs[k].isEnabled() for k in dlg.pr_field_names())
-    dlg.sample_inputs["dho_kernel"].setCurrentText("measured")
-    dlg.reference_inputs["centre_method"].setCurrentText("parametric")
-    assert dlg.psf_constants_in_use()
-    dlg.reference_inputs["centre_method"].setCurrentText("template")
-    dlg.sample_inputs["fitting_model"].setCurrentText("lorentzian_x_psf")
-    assert dlg.psf_constants_in_use()
+    assert [dlg.reference_inputs["fitting_model"].itemText(i)
+            for i in range(dlg.reference_inputs["fitting_model"].count())] == ["lorentzian"]
 
 
 def test_apply_round_trips_the_switches(app, monkeypatch):
@@ -55,16 +38,14 @@ def test_apply_round_trips_the_switches(app, monkeypatch):
     glob0 = sline_from_frame_config.get()
     dlg = FindPeaksConfigDialog()
     try:
-        dlg.sample_inputs["dho_kernel"].setCurrentText("parametric")
-        dlg.reference_inputs["centre_method"].setCurrentText("parametric")
+        dlg.sample_inputs["fitting_model"].setCurrentText("lorentzian")
         dlg.global_inputs["envelope_source"].setCurrentText("config")
         dlg.apply_config()
-        assert find_peaks_sample_config.get().dho_kernel == "parametric"
-        assert find_peaks_reference_config.get().centre_method == "parametric"
+        assert find_peaks_sample_config.get().fitting_model == "lorentzian"
         assert sline_from_frame_config.get().envelope_source == "config"
     finally:
-        find_peaks_sample_config.update(dho_kernel=sample0.dho_kernel)
-        find_peaks_reference_config.update(centre_method=ref0.centre_method)
+        find_peaks_sample_config.update(fitting_model=sample0.fitting_model)
+        find_peaks_reference_config.update(fitting_model=ref0.fitting_model)
         sline_from_frame_config.update(envelope_source=glob0.envelope_source)
 
 

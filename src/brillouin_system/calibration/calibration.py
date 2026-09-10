@@ -6,14 +6,10 @@ import numpy as np
 from brillouin_system.calibration.config.calibration_config import calibration_config
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.fitted_spectrum import FittedSpectrum
-from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
-    resolve_fit_options,
-)
 from brillouin_system.spectrum_fitting.dho import DhoAxes
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
     is_dho_fit,
-    is_psf_fit,
 )
 
 log = get_logger(__name__)
@@ -376,16 +372,8 @@ class CalibrationCalculator:
             return None, None
         if is_dho_fit(fitting.model):
             return raw_l, raw_r
-        if not is_psf_fit(fitting.model):
-            return None, None
-
-        inst_l, inst_r = self.instrument_hwhm_outer_ghz(
-            fitting.outer_left_peak_center_px,
-            fitting.outer_right_peak_center_px)
-        if inst_l is None or inst_r is None:
-            return None, None
-
-        return raw_l - inst_l, raw_r - inst_r
+        # a plain-Lorentzian fit carries no instrument model: no linewidth
+        return None, None
 
     def combined_shift(self, fitting: FittedSpectrum) -> FourPeakShift | None:
         """ONE frequency measurement from the position estimates of all four
@@ -531,16 +519,10 @@ class CalibrationCalculator:
         )
 
     def dho_axes(self) -> DhoAxes:
-        """The per-peak inputs a 'dho_x_psf' sample fit needs from THIS
-        calibration: the inner pair's px->GHz frequency tracks and the
-        instrument-width polynomials (Lorentzian HWHM [px], folded into the
-        DHO kernel at each peak's own position).
-
-        Raises when the calibration carries no width model (data saved
-        before it was stored, or a degenerate width fit) — a DHO without
-        the instrument width is not fittable, and its center correction
-        scales as Gamma^2, so guessing would land directly in the resonance.
-        """
+        """The frequency tracks a 'dho_x_psf' sample fit needs from THIS
+        calibration: the inner pair's px->GHz polynomials, plus the outer
+        orders' on a four-peak calibration. The measured kernels and the
+        envelope are added by analysis.fit_axial_scan.dho_axes_for_fit."""
         p = self.p
 
         def checked(coeffs, name):
@@ -549,8 +531,8 @@ class CalibrationCalculator:
                 raise ValueError(
                     f"This calibration cannot drive a 'dho_x_psf' fit: "
                     f"'{name}' is missing or non-finite. The DHO needs the "
-                    f"inner pair's frequency tracks and instrument-width "
-                    f"polynomials from the scan's own calibration."
+                    f"inner pair's frequency tracks from the scan's own "
+                    f"calibration."
                 )
             return np.asarray(coeffs, dtype=float)
 
@@ -566,16 +548,8 @@ class CalibrationCalculator:
         return DhoAxes(
             freq_left_poly=checked(p.freq_left_peak, "freq_left_peak"),
             freq_right_poly=checked(p.freq_right_peak, "freq_right_peak"),
-            instrument_width_left_poly=checked(
-                p.calibration_width_left_peak, "calibration_width_left_peak"),
-            instrument_width_right_poly=checked(
-                p.calibration_width_right_peak, "calibration_width_right_peak"),
             freq_outer_left_poly=optional(p.freq_outer_left_peak),
             freq_outer_right_poly=optional(p.freq_outer_right_peak),
-            instrument_width_outer_left_poly=optional(
-                p.calibration_width_outer_left_peak),
-            instrument_width_outer_right_poly=optional(
-                p.calibration_width_outer_right_peak),
         )
 
     def hwhm_ghz(self, fitting: FittedSpectrum) -> tuple[float | None, float | None]:
@@ -619,16 +593,8 @@ class CalibrationCalculator:
             return None, None
         if is_dho_fit(fitting.model):
             return self.hwhm_ghz(fitting)
-        if not is_psf_fit(fitting.model):
-            return None, None
-
-        raw_l, raw_r = self.hwhm_ghz(fitting)
-        inst_l, inst_r = self.instrument_hwhm_ghz(
-            fitting.left_peak_center_px, fitting.right_peak_center_px)
-        if inst_l is None or inst_r is None:
-            return None, None
-
-        return raw_l - inst_l, raw_r - inst_r
+        # a plain-Lorentzian fit carries no instrument model: no linewidth
+        return None, None
 
     def analyze(self, fitting: FittedSpectrum) -> AnalyzedFreqShifts:
         """Convert one fit's pixel-domain results to GHz."""
@@ -759,21 +725,9 @@ def calibration_calculator_for_scan(
         params = calibrate(data=calibration_data, polyfit_degree=degree,
                            fitter=fitter)
         log.info(f"[calibration] Re-fitted the scan's calibration from its raw "
-                 f"frames (model={fitter.reference_config.fitting_model}, "
-                 f"degree={degree}) — shifts may differ from the stored analysis.")
+                 f"frames (template chain, degree={degree}) — shifts may "
+                 f"differ from the stored analysis.")
         return CalibrationCalculator(parameters=params)
-
-    if resolve_fit_options(fitter.sample_config).model == "lorentzian_x_psf":
-        raise ValueError(
-            "The scan carries no raw calibration frames (calibration_data is "
-            "None: recorded before they were stored, or with the old "
-            "save_calibration_frames toggle off — removed 2026-08-24, frames "
-            "always travel now), so its calibration cannot be "
-            "re-fitted and there is no record of the model it was fitted "
-            "with. A PSF-convolved sample fit against a calibration that is "
-            "most likely lorentzian is the -168 MHz mixing trap. Analyse "
-            "this scan with 'lorentzian' instead."
-        )
 
     log.info("[calibration] No raw calibration frames stored — using the "
              "calibration polynomial as fitted at acquisition time.")
@@ -812,98 +766,13 @@ def calibrate(data: CalibrationData, polyfit_degree,
     outer_deg = resolve_outer_degree(outer_degree)
     sf = fitter if fitter is not None else SpectrumFitter()
 
-    if getattr(sf.reference_config, "centre_method", "parametric") == "template":
-        # non-parametric chain: centres from the measured profile itself
-        # (template_calibration.py); the profiles ride along on the
-        # parameters object for the sample kernels (not persisted).
-        from brillouin_system.spectrum_fitting.template_calibration import (
-            calibration_parameters_from_template)
-        params, profiles = calibration_parameters_from_template(
-            data, sf, int(sf.sline_config.n_peaks), degree,
-            outer_degree=outer_deg)
-        params.template_profiles = profiles
-        return params
-
-    all_fits = []
-    freqs_all = []
-
-    for freq_block in data.measured_freqs:
-        for point in freq_block.cali_meas_points:
-            px, sline = sf.get_px_sline_from_image(point.frame)
-            fs = sf.fit(px, sline, is_reference_mode=True)
-            if fs.is_success:
-                all_fits.append(fs)
-                freqs_all.append(point.microwave_freq)
-
-    if not all_fits:
-        hint = ("" if int(sf.sline_config.n_peaks) != 4 else
-                " n_peaks=4 is set (global fitting config) but no frame "
-                "yielded a four-peak fit — this calibration was likely "
-                "recorded with a two-peak ROI (or the reference thresholds "
-                "miss the outer orders). Set n_peaks=2 for this data.")
-        raise ValueError("No successful fits found in calibration data." + hint)
-
-    freqs_all = np.asarray(freqs_all, dtype=float)
-    left_px = np.asarray([fs.left_peak_center_px for fs in all_fits], dtype=float)
-    right_px = np.asarray([fs.right_peak_center_px for fs in all_fits], dtype=float)
-    inter_px = np.asarray([fs.inter_peak_distance for fs in all_fits], dtype=float)
-    left_width = np.asarray([fs.left_peak_width_px for fs in all_fits], dtype=float)
-    right_width = np.asarray([fs.right_peak_width_px for fs in all_fits], dtype=float)
-
-    def safe_polyfit(x, y, deg):
-        if len(x) <= deg:
-            log.warning(f"[calibration] Not enough points for degree {deg} fit (got {len(x)} points).")
-            return np.full(deg + 1, np.nan)
-        return np.polyfit(x, y, deg)
-
-    # The measured points travel with the parameters (one entry per fitted
-    # frame, sorted by px) — for plots and residual diagnostics.
-    left_px_sorted, left_freq_sorted = sort_xy(left_px, freqs_all)
-    right_px_sorted, right_freq_sorted = sort_xy(right_px, freqs_all)
-    dist_px_sorted, dist_freq_sorted = sort_xy(inter_px, freqs_all)
-
-    params = CalibrationPolyfitParameters(
-        degree=degree,
-        outer_degree=outer_deg,
-        freq_left_peak=safe_polyfit(left_px, freqs_all, degree),
-        freq_right_peak=safe_polyfit(right_px, freqs_all, degree),
-        freq_peak_distance=safe_polyfit(inter_px, freqs_all, degree),
-        calibration_width_left_peak=safe_polyfit(left_px, left_width, degree),
-        calibration_width_right_peak=safe_polyfit(right_px, right_width, degree),
-        left_px_points=left_px_sorted,
-        left_freq_points=left_freq_sorted,
-        right_px_points=right_px_sorted,
-        right_freq_points=right_freq_sorted,
-        dist_px_points=dist_px_sorted,
-        dist_freq_points=dist_freq_sorted,
-    )
-
-    # Four-peak calibration (the standard where the ROI allows it): the SAME
-    # fits carry the outer-order sideband positions, so every order gets its
-    # own track from the one fitting pass — nothing is refitted.
-    if all(fs.outer_left_peak_center_px is not None for fs in all_fits):
-        outer_left_px = np.asarray(
-            [fs.outer_left_peak_center_px for fs in all_fits], dtype=float)
-        outer_right_px = np.asarray(
-            [fs.outer_right_peak_center_px for fs in all_fits], dtype=float)
-        outer_left_width = np.asarray(
-            [fs.outer_left_peak_width_px for fs in all_fits], dtype=float)
-        outer_right_width = np.asarray(
-            [fs.outer_right_peak_width_px for fs in all_fits], dtype=float)
-        params.freq_outer_left_peak = safe_polyfit(outer_left_px, freqs_all, outer_deg)
-        params.freq_outer_right_peak = safe_polyfit(outer_right_px, freqs_all, outer_deg)
-        params.calibration_width_outer_left_peak = safe_polyfit(
-            outer_left_px, outer_left_width, degree)
-        params.calibration_width_outer_right_peak = safe_polyfit(
-            outer_right_px, outer_right_width, degree)
-        (params.outer_left_px_points,
-         params.outer_left_freq_points) = sort_xy(outer_left_px, freqs_all)
-        (params.outer_right_px_points,
-         params.outer_right_freq_points) = sort_xy(outer_right_px, freqs_all)
-        # the outer pair's own distance track (2026-09-10)
-        outer_dist_px = outer_right_px - outer_left_px
-        params.freq_outer_peak_distance = safe_polyfit(outer_dist_px, freqs_all, outer_deg)
-        (params.outer_dist_px_points,
-         params.outer_dist_freq_points) = sort_xy(outer_dist_px, freqs_all)
-
+    # the template chain: centres from the measured profile itself
+    # (template_calibration.py); the profiles ride along on the parameters
+    # object for the sample kernels (not persisted).
+    from brillouin_system.spectrum_fitting.template_calibration import (
+        calibration_parameters_from_template)
+    params, profiles = calibration_parameters_from_template(
+        data, sf, int(sf.sline_config.n_peaks), degree,
+        outer_degree=outer_deg)
+    params.template_profiles = profiles
     return params

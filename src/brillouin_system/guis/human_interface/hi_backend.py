@@ -395,10 +395,9 @@ class HiBackend:
         loop catches it per frame and shows the unfitted sline until a
         calibration is taken.
 
-        With dho_kernel = "measured" the axes carry the instrument kernels
-        stacked from the live calibration's raw frames at the sample peaks
-        of `frame`; they are cached on (calibration, config) because the
-        stack costs ~41 reference fits, and rebuilt when either changes."""
+        The axes carry the measured instrument kernels of the live
+        calibration at the sample peaks of `frame`; they are cached on
+        (calibration, config) and rebuilt when either changes."""
         if self.is_reference_mode:
             return None
         if not config_requires_dho_axes(self.spectrum_fitter.sample_config):
@@ -409,8 +408,6 @@ class HiBackend:
                 "tracks and instrument widths, but no calibration is loaded."
             )
         cfg = self.spectrum_fitter.sample_config
-        if getattr(cfg, "dho_kernel", "parametric") != "measured":
-            return self.calibration_calculator.dho_axes()
         key = (id(self.calibration_calculator), id(cfg),
                id(self.spectrum_fitter.sline_config))
         cached = getattr(self, "_measured_dho_axes", None)
@@ -418,7 +415,7 @@ class HiBackend:
             return cached[1]
         if self.calibration_data is None or frame is None:
             raise ValueError(
-                "dho_kernel = 'measured' needs the live calibration's raw "
+                "Model 'dho_x_psf' needs the live calibration's raw "
                 "frames and a sample frame to build the instrument kernels."
             )
         from brillouin_system.analysis.fit_axial_scan import dho_axes_for_fit
@@ -567,8 +564,11 @@ class HiBackend:
         if reference == "outer_distance":
             return calc.outer_distance_shift(fitting)
         if reference == "weighted":
+            # reported value since 2026-09-10; without the outer pair the
+            # weighted value IS the inner distance (outer weight 0)
             weighted = calc.weighted_distance(fitting)
-            return weighted.combined_ghz if weighted is not None else None
+            if weighted is not None:
+                return weighted.combined_ghz
         return float(calc.freq_peak_distance(fitting.inter_peak_distance))
 
     def get_hwhm_shift(self, fitting: FittedSpectrum) -> tuple:

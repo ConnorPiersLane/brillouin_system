@@ -1,10 +1,15 @@
 """Tests for the ReflectionBackground template, its calibration-space mapper
-and the 'reflection' background / prmr preset in SpectrumFitter.
+and the 'reflection' background in SpectrumFitter.
 
 The synthetic geometry mimics the real 4pk ROI: elastic lines at px ~60/~133,
 the left(AS) order dispersing to higher px with offset g, the right(S) order
 to lower px, different dispersions per order.
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
 import numpy as np
 import pytest
 
@@ -13,7 +18,6 @@ from dataclasses import replace
 from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config import (
     FindPeaksConfig,
 )
-from brillouin_system.spectrum_fitting.psf import psf_profile
 from brillouin_system.spectrum_fitting.reflection_background import (
     ReflectionBackground,
     ReflectionBackgroundMapper,
@@ -23,9 +27,10 @@ from brillouin_system.spectrum_fitting.reflection_background import (
 from brillouin_system.spectrum_fitting.spectrum_fitter import (
     SpectrumFitter,
     config_requires_reflection_background,
-    normalize_model_name,
     resolved_background,
 )
+
+from synthetic_lines import asym_line
 
 FREQS = np.linspace(4.0, 8.0, 41)
 
@@ -212,7 +217,7 @@ def test_current_background_registry():
 SIGMA, TAU_L, TAU_R = 0.25, 0.4, 0.2
 
 
-def make_config(model: str) -> FindPeaksConfig:
+def make_config(model: str = "lorentzian", background: str = "flat") -> FindPeaksConfig:
     return FindPeaksConfig(
         prominence_fraction=0.05,
         min_peak_width=1,
@@ -220,17 +225,17 @@ def make_config(model: str) -> FindPeaksConfig:
         rel_height=0.5,
         wlen_pixels=20,
         fitting_model=model,
+        background=background,
+        use_window=True,
+        beta=3.0,
     )
 
 
-def make_fitter(sample_model="prmr", reference_model="lorentzian_x_psf"):
+def make_fitter(background="reflection"):
     fitter = SpectrumFitter()
-    fitter.update_sline_config(replace(
-        fitter.sline_config, n_peaks=2,
-        psf_sigma_left_px=SIGMA, psf_sigma_right_px=SIGMA,
-        psf_tau_left_px=TAU_L, psf_tau_right_px=TAU_R))
-    fitter.update_sample_config(make_config(sample_model))
-    fitter.update_reference_config(make_config(reference_model))
+    fitter.update_sline_config(replace(fitter.sline_config, n_peaks=2))
+    fitter.update_sample_config(make_config("lorentzian", background))
+    fitter.update_reference_config(make_config("lorentzian"))
     return fitter
 
 
@@ -238,8 +243,8 @@ def make_sample(R, s_true=0.05, seed=1):
     px = np.arange(0.0, 200.0)
     cen_l, cen_r = 78.0, 118.0
     truth = (
-        psf_profile(px, 3000.0, cen_l, 1.0, SIGMA, TAU_L)
-        + psf_profile(px, 3000.0, cen_r, 1.0, SIGMA, TAU_R)
+        asym_line(px, 3000.0, cen_l, 1.0, 0.0, 0.0)
+        + asym_line(px, 3000.0, cen_r, 1.0, 0.0, 0.0)
         + np.where(px <= 98.0, 90.0, 60.0)
         + s_true * R
     )
@@ -247,21 +252,12 @@ def make_sample(R, s_true=0.05, seed=1):
     return px, truth + rng.normal(0.0, 2.0, size=truth.shape), (cen_l, cen_r)
 
 
-def test_prmr_preset_expands():
-    cfg = make_config("prmr")
-    assert cfg.fitting_model == "lorentzian_x_psf"
-    assert cfg.background == "reflection"
-    assert cfg.use_window is True
-    assert cfg.beta == 3.0
-    assert normalize_model_name("prmr") == ("lorentzian_x_psf", True)
-
-
 def test_config_requires_reflection_background_helper():
-    assert config_requires_reflection_background(make_config("prmr"))
-    assert not config_requires_reflection_background(make_config("prm1"))
-    # Direct assignment bypassing __post_init__ still resolves the preset.
-    cfg = make_config("prm0")
-    cfg.fitting_model = "prmr"
+    assert config_requires_reflection_background(make_config(background="reflection"))
+    assert not config_requires_reflection_background(make_config(background="linear"))
+    # Direct assignment bypassing __post_init__ still resolves.
+    cfg = make_config()
+    cfg.background = "reflection"
     assert resolved_background(cfg) == "reflection"
     assert config_requires_reflection_background(cfg)
 
@@ -299,7 +295,7 @@ def test_reflection_fit_without_template_warns_and_degrades():
     # The recipe tag records the fit as it ran: windowed with the default
     # flat background (unnamed in the tag), NOT as a reflection fit.
     assert "reflection" not in result.model
-    assert result.model == "2lorentzian_x_psf_window"
+    assert result.model == "2lorentzian_window"
     # The unmodelled s*R structure is small; centres stay near truth.
     assert abs(result.left_peak_center_px - cen_l) < 0.5
     assert abs(result.right_peak_center_px - cen_r) < 0.5
