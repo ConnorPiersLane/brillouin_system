@@ -1,5 +1,12 @@
 
-from ctypes import WinDLL, byref, c_int, c_longlong
+import sys
+from ctypes import byref, c_int, c_longlong
+
+# WinDLL only exists on Windows. Import it lazily/guarded so this module (and
+# everything that imports it, e.g. the human-interface backend, which uses the
+# dummy shutters) still loads on macOS/Linux for development.
+if sys.platform == "win32":
+    from ctypes import WinDLL
 
 
 ERROR_CODE = {
@@ -38,6 +45,12 @@ class ShutterDummy:
 
 class Shutter:
     def __init__(self, usb_code):
+        if sys.platform != "win32":
+            raise RuntimeError(
+                "Shutter requires the Windows PiUsb driver (WinDLL). Use "
+                "ShutterManagerDummy / ShutterDummy for development on "
+                f"{sys.platform}."
+            )
         self.usb_code = usb_code
         self.dll = WinDLL(r'C:\Program Files\PiUsbSDK\bin\x64\PiUsb')
         self.dll.piConnectShutter.restype = c_longlong

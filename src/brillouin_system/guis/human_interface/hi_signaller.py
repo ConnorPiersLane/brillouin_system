@@ -47,6 +47,10 @@ class HiSignaller(QObject):
     calibration_finished = pyqtSignal()
     calibration_result_ready = pyqtSignal(object)
     send_update_stored_axial_scans = pyqtSignal(list)
+    # True only when a sweep scan actually completed and produced data; False
+    # if it failed to start / was cancelled (initial find failed, no
+    # calibration, cancelled mid-scan, no frames taken).
+    sweep_scan_finished = pyqtSignal(bool)
     axial_scan_data_ready = pyqtSignal(object)
     # Outcome of a Load/Take Ref. Bkg. request: a short status label, or
     # an "ERROR: ..." string the frontend shows in a message box.
@@ -78,6 +82,7 @@ class HiSignaller(QObject):
         self._thread_active = False
         self._camera_shutter_open = True
         self._is_cancel_operations = False
+        self._is_end_scan_early = False
 
         self._mb_lock = threading.Lock()
         self._mb_latest_display = None
@@ -89,7 +94,10 @@ class HiSignaller(QObject):
 
         self.system_state = SystemState.IDLE
 
-        self.backend.init_f2b_signals(cancel_callback=self.is_cancel_requested)
+        self.backend.init_f2b_signals(
+            cancel_callback=self.is_cancel_requested,
+            end_scan_early_callback=self.is_end_scan_early_requested,
+        )
         self.backend.init_b2f_emit_display_result(emit_display_result=self.emit_display_result)
 
 
@@ -345,6 +353,11 @@ class HiSignaller(QObject):
     def cancel_operations(self):
         self._is_cancel_operations = True
 
+    def end_scan_early(self):
+        """Request that the running scan stop early but SAVE what it has
+        collected and count as successful (see take_sweep_scan)."""
+        self._is_end_scan_early = True
+
     def update_stored_axial_scans(self):
         lines = self.backend.get_list_of_axial_scans()
         self.send_update_stored_axial_scans.emit(lines)
@@ -354,12 +367,18 @@ class HiSignaller(QObject):
     # in BrillouinSignaller
     #  cancel callback to pass down to the backend
     def is_cancel_requested(self) -> bool:
-        return self._is_cancel_operations
+        # Either stop request halts polling loops; the sweep checks
+        # end-scan-early first so it saves before the cancel path runs.
+        return self._is_cancel_operations or self._is_end_scan_early
+
+    def is_end_scan_early_requested(self) -> bool:
+        return self._is_end_scan_early
 
 
     @pyqtSlot()
     def reset_cancel(self):
         self._is_cancel_operations = False
+        self._is_end_scan_early = False
 
 
     @pyqtSlot()
@@ -417,6 +436,7 @@ class HiSignaller(QObject):
         """
         if self.backend.calibration_poly_fit_params is None:
             self.send_message_to_user('Warning', "No Calibration available. Run Calibration first.")
+            self.sweep_scan_finished.emit(False)
             return
 
         old_state = self.system_state
@@ -424,12 +444,14 @@ class HiSignaller(QObject):
         self.update_system_state(new_state=SystemState.BUSY)
         QCoreApplication.processEvents()
 
+        success = False
         try:
-            scan_procedures.take_sweep_scan(self.backend, request)
+            success = bool(scan_procedures.take_sweep_scan(self.backend, request))
             self.update_stored_axial_scans()
         finally:
             self.update_system_state(new_state=old_state)
             self.restart_live_view_when_ready()
+            self.sweep_scan_finished.emit(success)
 
     @pyqtSlot()
     def calibrate_laser_camera_position_delegate(self):

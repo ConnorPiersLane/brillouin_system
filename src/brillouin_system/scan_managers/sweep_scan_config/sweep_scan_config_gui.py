@@ -72,6 +72,13 @@ class SweepScanConfigDialog(QDialog):
         le_settle.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "Settle before snap [s]", "settle_s", le_settle)
 
+        le_max_time = QLineEdit()
+        le_max_time.setValidator(QDoubleValidator(0.0, 1e12, 6))
+        le_max_time.setToolTip(
+            "Stop the sweep once this many seconds have elapsed and save the "
+            "cycles completed so far. 0 = no limit.")
+        self._add_row(v, "Max time [s] (0 = no limit)", "max_time_s", le_max_time)
+
         le_gate = QLineEdit()
         le_gate.setValidator(QDoubleValidator(0.0, 1e12, 6))
         self._add_row(v, "In-crossing gate [µm]", "plausibility_gate_um", le_gate)
@@ -124,6 +131,7 @@ class SweepScanConfigDialog(QDialog):
             approach_um=float(_req("approach_um")),
             target_depth_um=float(_req("target_depth_um")),
             settle_s=float(_req("settle_s")),
+            max_time_s=float(_req("max_time_s")),
             plausibility_gate_um=float(_req("plausibility_gate_um")),
             out_gate_um=float(_req("out_gate_um")),
             min_peak_fraction=float(_req("min_peak_fraction")),

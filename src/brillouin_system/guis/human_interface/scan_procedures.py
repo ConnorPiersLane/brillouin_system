@@ -7,6 +7,7 @@ The backend itself stays device state + primitives (snap a frame, move
 the lens, find the reflection plane) — the same split as the analysis
 side, where fit_axial_scan drives the fitter instead of living in it.
 """
+import itertools
 import time
 
 from brillouin_system.calibration.calibration import (
@@ -185,9 +186,49 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
     sw = backend.sweep_scan_config
     lens_x0 = backend.zaber_eye_lens.get_position()
 
-    log.info(f"[Sweep Scan] Starting: {sw.n_repeats} cycles, "
-             f"target depth {sw.target_depth_um} µm, "
-             f"approach {sw.approach_um} µm, ID: {request.id}")
+    # --- Max-time budget (predictive) ---------------------------------------
+    # We never interrupt a find mid-motion, so instead of stopping when the
+    # limit is already blown we predict, at each checkpoint, whether the next
+    # segment can finish in time and stop first if it can't. The estimate is
+    # deliberately worst-case:
+    #   * a single find can travel the full search distance -> a "find" costs
+    #     up to max_distance_um / speed_um_s;
+    #   * one measured cycle is a round trip (in-find + out-find) plus one
+    #     frame acquisition (settle + camera exposure).
+    # 0 (or negative) max_time_s disables the budget.
+    max_time_s = getattr(sw, "max_time_s", 0.0) or 0.0
+    t_start = time.monotonic()
+    _speed = abs(getattr(backend.axial_scan_config, "speed_um_s", 0.0)) or 1.0
+    t_find_worst = backend.axial_scan_config.max_distance_um / _speed
+    try:
+        exposure_s = float(backend.sample_state_mode.andor_camera_info.exposure)
+    except Exception:
+        exposure_s = 0.0
+    t_acquire = sw.settle_s + exposure_s
+    t_cycle_worst = 2.0 * t_find_worst + t_acquire  # round trip + acquisition
+
+    def _time_left() -> float:
+        return max_time_s - (time.monotonic() - t_start)
+
+    timed = bool(getattr(request, "timed", False))
+    if timed and max_time_s <= 0:
+        log.warning("[Sweep Scan] Timed sweep requires max_time_s > 0 - "
+                    "aborting.")
+        backend.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
+        return False
+
+    if timed:
+        log.info(f"[Sweep Scan] Starting TIMED: budget {max_time_s:.1f} s, "
+                 f"target depth {sw.target_depth_um} µm, "
+                 f"approach {sw.approach_um} µm, ID: {request.id}")
+    else:
+        log.info(f"[Sweep Scan] Starting: {sw.n_repeats} cycles, "
+                 f"target depth {sw.target_depth_um} µm, "
+                 f"approach {sw.approach_um} µm, ID: {request.id}")
+    if max_time_s > 0:
+        log.info(f"[Sweep Scan] Max time {max_time_s:.1f} s; worst-case per "
+                 f"cycle ~{t_cycle_worst:.1f} s "
+                 f"(2 x find {t_find_worst:.1f} s + acquire {t_acquire:.2f} s).")
 
     # Initial full-distance find (normal finder settings) to bootstrap.
     r0: ReflectionResult = backend.find_reflection_plane(is_go_forwards=True)
@@ -206,15 +247,39 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
 
     measurements: list[MeasurementPoint] = []
     cycles: list[SweepCycle] = []
+    ended_early = False
 
-    for k in range(sw.n_repeats):
+    # Timed mode runs unbounded cycles; the max-time budget checks below stop
+    # it. A fixed-count sweep runs exactly n_repeats cycles.
+    cycle_indices = itertools.count() if timed else range(sw.n_repeats)
+
+    for k in cycle_indices:
+        # "End scan early": stop the remaining cycles but keep (save) the
+        # cycles already recorded, and count the scan as successful.
+        if backend.f2b_end_scan_early_callback():
+            log.info(f"[Sweep Scan] End-scan-early requested before cycle "
+                     f"{k + 1}. Stopping and saving {len(measurements)} "
+                     f"frame(s) collected so far.")
+            ended_early = True
+            break
+
+        # Predictive budget: don't start a cycle we can't finish in time.
+        if max_time_s > 0 and _time_left() < t_cycle_worst:
+            log.info(f"[Sweep Scan] Not enough time for another round trip + "
+                     f"frame before cycle {k + 1} (need ~{t_cycle_worst:.1f} s, "
+                     f"{_time_left():.1f} s left of {max_time_s:.1f} s). Ending "
+                     f"early with {len(measurements)} frame(s).")
+            ended_early = True
+            break
+
         if backend.f2b_cancel_callback():
             log.info(f"[Sweep Scan] Cancelled during cycle {k + 1}. "
                      f"Returning lens to starting position.")
             backend.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
             return False
 
-        log.info(f"[Sweep Scan] Cycle {k + 1}/{sw.n_repeats}")
+        log.info(f"[Sweep Scan] Cycle {k + 1}"
+                 f"{'' if timed else f'/{sw.n_repeats}'}")
 
         # Park outside the current plane estimate and search inward.
         backend.zaber_eye_lens.move_abs(plane_est - sw.approach_um)
@@ -253,29 +318,52 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
             )
             measurement_index = len(measurements) - 1
 
-            # Continue inward past the plane, then search outward. The
-            # out-crossing is judged against THIS cycle's in-crossing —
-            # only ~1 s old, so both gates can be tight.
-            backend.zaber_eye_lens.move_abs(plane_est + sw.approach_um)
-            r_out = backend.find_reflection_plane(is_go_forwards=False)
-            out_ok, out_why = _accept_crossing(
-                r_out,
-                reference_z_um=r_in.event_z_um,
-                gate_um=sw.out_gate_um,
-                reference_peak=r_in.peak_value,
-                min_peak_fraction=sw.min_peak_fraction,
-                reference_name="this cycle's in-crossing",
-            )
-            if r_out.found and not out_ok:
-                log.warning(f"[Sweep Scan] Cycle {k + 1}: out-crossing at "
-                            f"{r_out.event_z_um:.1f} µm rejected - {out_why}.")
-            if out_ok:
-                # Freshest estimate for aiming the next cycle. The
-                # bias-free (in+out)/2 label is computed in analysis.
-                plane_est = r_out.event_z_um
+            # Second checkpoint: the frame for this cycle is already saved, so
+            # bail here rather than pay for the long out-search if we're asked
+            # to end early, or if the budget can't cover one more find. The
+            # finder can't be interrupted mid-motion, so a single find is the
+            # smallest granularity here.
+            if backend.f2b_end_scan_early_callback():
+                log.info(f"[Sweep Scan] End-scan-early requested mid cycle "
+                         f"{k + 1} (frame taken). Skipping the out-search and "
+                         f"stopping.")
+                ended_early = True
+            elif max_time_s > 0 and _time_left() < t_find_worst:
+                log.info(f"[Sweep Scan] Not enough time for the out-search of "
+                         f"cycle {k + 1} (need ~{t_find_worst:.1f} s, "
+                         f"{_time_left():.1f} s left). Keeping this frame and "
+                         f"stopping.")
+                ended_early = True
             else:
-                log.info(f"[Sweep Scan] Cycle {k + 1}: no valid out-crossing - "
-                         f"frame keeps its single-crossing (in) reference.")
+                # Continue inward past the plane, then search outward. The
+                # out-crossing is judged against THIS cycle's in-crossing —
+                # only ~1 s old, so both gates can be tight.
+                backend.zaber_eye_lens.move_abs(plane_est + sw.approach_um)
+                r_out = backend.find_reflection_plane(is_go_forwards=False)
+                out_ok, out_why = _accept_crossing(
+                    r_out,
+                    reference_z_um=r_in.event_z_um,
+                    gate_um=sw.out_gate_um,
+                    reference_peak=r_in.peak_value,
+                    min_peak_fraction=sw.min_peak_fraction,
+                    reference_name="this cycle's in-crossing",
+                )
+                if r_out.found:
+                    delta_um = r_out.event_z_um - r_in.event_z_um
+                    log.info(f"[Sweep Scan] Cycle {k + 1}: front (in) "
+                             f"{r_in.event_z_um:.1f} µm, back (out) "
+                             f"{r_out.event_z_um:.1f} µm, delta "
+                             f"{delta_um:+.1f} µm.")
+                if r_out.found and not out_ok:
+                    log.warning(f"[Sweep Scan] Cycle {k + 1}: out-crossing at "
+                                f"{r_out.event_z_um:.1f} µm rejected - {out_why}.")
+                if out_ok:
+                    # Freshest estimate for aiming the next cycle. The
+                    # bias-free (in+out)/2 label is computed in analysis.
+                    plane_est = r_out.event_z_um
+                else:
+                    log.info(f"[Sweep Scan] Cycle {k + 1}: no valid out-crossing - "
+                             f"frame keeps its single-crossing (in) reference.")
         else:
             log.info(f"[Sweep Scan] Cycle {k + 1}: no valid in-crossing - "
                      f"skipping the frame this cycle.")
@@ -287,6 +375,10 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
             measurement_index=measurement_index,
         ))
 
+        # Mid-cycle end-scan-early: record this cycle (done above), then stop.
+        if ended_early:
+            break
+
     # Park outside the plane, then return the lens to its start position.
     backend.move_and_update_gui_zaber_eye_lens_abs(lens_x0)
 
@@ -294,7 +386,8 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
     n_pairs = sum(1 for c in cycles
                   if c.measurement_index is not None
                   and c.reflection_out is not None and c.reflection_out.found)
-    log.info(f"[Sweep Scan] Done: {n_frames}/{sw.n_repeats} frames taken, "
+    frames_taken = f"{n_frames}" if timed else f"{n_frames}/{sw.n_repeats}"
+    log.info(f"[Sweep Scan] Done: {frames_taken} frames taken, "
              f"{n_pairs} with a full in/out pair.")
 
     axial_scan = AxialScan(
@@ -312,6 +405,20 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
         scanning_config=backend.axial_scan_config,
     )
     backend.register_axial_scan(axial_scan)
+
+    if ended_early:
+        # Stopped before running every planned cycle - either a timed sweep
+        # reaching its budget (its normal end), or an "End Scan Early" / max
+        # time stop on a fixed-count sweep. Either way the data is saved above
+        # and the scan counts as successful (elapsed time recorded, predefined
+        # list advances).
+        if timed:
+            log.info(f"[Sweep Scan] Timed sweep complete; {n_frames} frame(s) "
+                     f"within the {max_time_s:.1f} s budget.")
+        else:
+            log.info(f"[Sweep Scan] Ended early; saved scan with {n_frames} "
+                     f"frame(s).")
+        return True
 
     return n_frames > 0
 

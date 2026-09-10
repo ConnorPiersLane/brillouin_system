@@ -157,6 +157,9 @@ class HiBackend:
         self.b2f_send_system_state_signal = None
         self.b2f_emit_display_result = None
         self.f2b_cancel_callback: Callable[[], bool] = lambda: False
+        # "End scan early": stop remaining work but save what's collected and
+        # treat the scan as successful. Polled by take_sweep_scan.
+        self.f2b_end_scan_early_callback: Callable[[], bool] = lambda: False
 
         # Init Zaber position Signals
         # Human Interface
@@ -209,8 +212,11 @@ class HiBackend:
     def update_calibration_config(self, config: CalibrationConfig):
         self.calibration_config = config
 
-    def init_f2b_signals(self, cancel_callback: Callable[[], bool]):
+    def init_f2b_signals(self, cancel_callback: Callable[[], bool],
+                         end_scan_early_callback: Callable[[], bool] | None = None):
         self.f2b_cancel_callback = cancel_callback
+        if end_scan_early_callback is not None:
+            self.f2b_end_scan_early_callback = end_scan_early_callback
 
     def init_b2f_emit_display_result(self, emit_display_result: Callable[[DisplayResults], None]):
         self.b2f_emit_display_result = emit_display_result

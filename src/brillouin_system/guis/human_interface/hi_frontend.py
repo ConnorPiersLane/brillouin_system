@@ -12,7 +12,8 @@ from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrac
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config_gui import \
     AxialScanningConfigDialog
-from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig, \
+    sweep_scan_config
 from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config_gui import \
     SweepScanConfigDialog
 
@@ -36,7 +37,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QMessageBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5 import QtCore
 
 from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
@@ -67,8 +68,8 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = False
-use_eye_tracker_dummy = False
+include_eye_tracking = True
+use_eye_tracker_dummy = True
 
 # put this near your imports (top of file)
 
@@ -229,6 +230,7 @@ class HiFrontend(QWidget):
 
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
+        self.brillouin_signaller.sweep_scan_finished.connect(self.on_sweep_scan_finished)
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
         self.brillouin_signaller.send_message_to_frontend.connect(self.message_handler)
@@ -307,6 +309,7 @@ class HiFrontend(QWidget):
 
         axial_column = QVBoxLayout()
         axial_column.addWidget(self.create_take_axial_scan_group())
+        axial_column.addWidget(self.create_predefined_measurement_group())
 
         zaber_movement_and_scan_layout.addLayout(axial_column)
         middle_column_layout.addLayout(zaber_movement_and_scan_layout)
@@ -654,21 +657,417 @@ class HiFrontend(QWidget):
 
         # --- In-out sweep scan (repeated find-measure-find cycles) ---
         self.sweep_scan_btn = QPushButton("Sweep Scan")
-        self.sweep_scan_btn.clicked.connect(self.take_sweep_scan)
+        # Wrap in a lambda: QPushButton.clicked passes a `checked` bool that
+        # would otherwise land in take_sweep_scan's max_time_s argument.
+        self.sweep_scan_btn.clicked.connect(lambda: self.take_sweep_scan())
+
+        self.timed_sweep_scan_btn = QPushButton("Timed Sweep")
+        self.timed_sweep_scan_btn.setToolTip(
+            "Run as many sweep cycles as fit in the Sweep Settings 'Max time' "
+            "budget, instead of a fixed number of cycles.")
+        self.timed_sweep_scan_btn.clicked.connect(lambda: self.take_timed_sweep_scan())
 
         self.sweep_scan_settings_btn = QPushButton("Sweep Settings")
         self.sweep_scan_settings_btn.clicked.connect(self.open_sweep_scan_settings_dialog)
 
+        self.end_scan_early_btn = QPushButton("End Scan Early")
+        self.end_scan_early_btn.setToolTip(
+            "Stop the running sweep scan after the current cycle, but keep and "
+            "save the cycles already recorded (counts as a successful scan).")
+        self.end_scan_early_btn.clicked.connect(self.on_end_scan_early_clicked)
+
         sweep_row = QHBoxLayout()
         sweep_row.addWidget(self.sweep_scan_btn)
+        sweep_row.addWidget(self.timed_sweep_scan_btn)
         sweep_row.addWidget(self.sweep_scan_settings_btn)
+        sweep_row.addWidget(self.end_scan_early_btn)
         sweep_row.addStretch()
 
         layout.addRow(sweep_row)
 
+        # --- Sweep timing: last + longest + mean-on-record (resettable) ---
+        self._sweep_longest_seconds = None
+        self._sweep_total_seconds = 0.0
+        self._sweep_count = 0
+
+        self.sweep_last_label = QLabel("Last sweep: —")
+        self.sweep_longest_label = QLabel("Longest sweep: —")
+        self.sweep_mean_label = QLabel("Mean sweep: —")
+
+        self.sweep_longest_reset_btn = QPushButton("Reset")
+        self.sweep_longest_reset_btn.setToolTip(
+            "Reset the longest and mean sweep scan duration records.")
+        self.sweep_longest_reset_btn.clicked.connect(self.reset_sweep_stats)
+
+        sweep_timing_row = QHBoxLayout()
+        sweep_timing_row.addWidget(self.sweep_last_label)
+        sweep_timing_row.addWidget(self.sweep_longest_label)
+        sweep_timing_row.addWidget(self.sweep_mean_label)
+        sweep_timing_row.addWidget(self.sweep_longest_reset_btn)
+        sweep_timing_row.addStretch()
+
+        layout.addRow(sweep_timing_row)
+
         group.setLayout(layout)
         return group
 
+    # ================================================================
+    # Predefined measurement (template-driven sweep-scan sequence)
+    # ----------------------------------------------------------------
+    # A template is a plain .txt file, one step-source per non-blank,
+    # non-comment (#) line. Two forms, chosen by whether a trailing maxTime
+    # is present:
+    #
+    #   Fixed cycles (7 cols):  x,cycles,z,R,phi,deltac,maxTime
+    #   Timed        (6 cols):  x,maxTime,z,R,phi,deltac
+    #
+    # i.e. with no trailing maxTime, the 2nd column IS the max time and the
+    # step runs as a timed sweep (as many cycles as fit) instead of a fixed
+    # cycle count.
+    #
+    #   x       target depth past the plane [µm]  -> SweepScanConfig.target_depth_um
+    #   cycles  number of in-out cycles           -> SweepScanConfig.n_repeats (fixed only)
+    #   maxTime max sweep time [s]                -> SweepScanConfig.max_time_s
+    #   z       number of sweep scans (replicates) at this depth
+    #   R       target laser radius [mm]          -> Move XY
+    #   phi     target laser angle  [deg]         -> Move XY
+    #   deltac  target Δc [mm]                     -> Move Z
+    #
+    # Each line expands to z steps for depth x, numbered 1..z. Running a
+    # step: set the R/phi/Δc fields, Move XYZ, push the parameters into the
+    # sweep config (preserving every other tuned field), name the ID
+    # "depth<x>num<k>", then take the (timed or fixed) sweep scan. All by
+    # reusing the existing single-purpose handlers.
+    # ================================================================
+
+    def create_predefined_measurement_group(self):
+        group = QGroupBox("Predefined Measurement")
+        layout = QVBoxLayout()
+
+        # Source template lines and the expanded (possibly scrambled) steps.
+        self._predef_entries: list[dict] = []
+        self._predef_steps: list[dict] = []
+        self._predef_index: int = 0
+        self._predef_combo_updating: bool = False
+        # True while a predefined step's sweep is in flight; gates re-entry and
+        # tells on_sweep_scan_finished whether to advance the list.
+        self._predef_run_active: bool = False
+
+        # Row: import + scramble
+        self.predef_import_btn = QPushButton("Import Template…")
+        self.predef_import_btn.setToolTip(
+            "Load a .txt template. One step-source per line:\n"
+            "  Fixed cycles:  x,cycles,z,R,phi,deltac,maxTime\n"
+            "  Timed:         x,maxTime,z,R,phi,deltac\n"
+            "(no trailing maxTime -> 2nd column is maxTime, timed sweep)\n"
+            "  x=target depth µm, z=replicates, R=mm, phi=deg, deltac=mm,\n"
+            "  maxTime=seconds")
+        self.predef_import_btn.clicked.connect(self.on_import_predefined_template)
+
+        self.predef_scramble_btn = QPushButton("Scramble")
+        self.predef_scramble_btn.setToolTip(
+            "Randomise the order of depths and replicates. Each depth's "
+            "replicate numbers still increase monotonically (num1 before "
+            "num2, …).")
+        self.predef_scramble_btn.clicked.connect(self.on_scramble_predefined)
+
+        io_row = QHBoxLayout()
+        io_row.addWidget(self.predef_import_btn)
+        io_row.addWidget(self.predef_scramble_btn)
+        io_row.addStretch()
+        layout.addLayout(io_row)
+
+        # Row: navigation (prev / dropdown / next)
+        self.predef_prev_btn = QPushButton("◀")
+        self.predef_prev_btn.setFixedWidth(34)
+        self.predef_prev_btn.setToolTip("Previous step")
+        self.predef_prev_btn.clicked.connect(self.on_predefined_prev)
+
+        self.predef_combo = QComboBox()
+        self.predef_combo.currentIndexChanged.connect(self.on_predefined_combo_changed)
+
+        self.predef_next_btn = QPushButton("▶")
+        self.predef_next_btn.setFixedWidth(34)
+        self.predef_next_btn.setToolTip("Next step")
+        self.predef_next_btn.clicked.connect(self.on_predefined_next)
+
+        nav_row = QHBoxLayout()
+        nav_row.addWidget(self.predef_prev_btn)
+        nav_row.addWidget(self.predef_combo, 1)
+        nav_row.addWidget(self.predef_next_btn)
+        layout.addLayout(nav_row)
+
+        # Row: current-step detail
+        self.predef_detail_label = QLabel("No template loaded.")
+        self.predef_detail_label.setWordWrap(True)
+        layout.addWidget(self.predef_detail_label)
+
+        # Row: take the current step
+        self.predef_take_btn = QPushButton("Take Predefined Measurement")
+        self.predef_take_btn.setToolTip(
+            "Run the selected step: Move XYZ, set the sweep X/Y, then take "
+            "the sweep scan. The selection then advances to the next step.")
+        self.predef_take_btn.clicked.connect(self.take_predefined_measurement)
+        layout.addWidget(self.predef_take_btn)
+
+        group.setLayout(layout)
+        self._refresh_predefined_ui()
+        return group
+
+    # ---- template parsing / step building ----
+
+    @staticmethod
+    def _parse_predefined_template(path: str) -> list[dict]:
+        """Parse a template file into a list of source-line entries.
+        Raises ValueError (with the offending line number) on bad input."""
+        entries: list[dict] = []
+        with open(path, "r") as f:
+            for lineno, raw in enumerate(f, start=1):
+                line = raw.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) not in (6, 7):
+                    raise ValueError(
+                        f"Line {lineno}: expected 6 or 7 comma-separated values, "
+                        f"got {len(parts)}: {raw.strip()!r}. Use "
+                        f"'x,maxTime,z,R,phi,deltac' (timed) or "
+                        f"'x,cycles,z,R,phi,deltac,maxTime' (fixed cycles).")
+                try:
+                    x = float(parts[0])
+                    z = int(float(parts[2]))
+                    R = float(parts[3])
+                    phi = float(parts[4])
+                    deltac = float(parts[5])
+                    if len(parts) == 7:
+                        # Fixed-cycle sweep: 2nd column = cycles, 7th = maxTime.
+                        timed = False
+                        cycles = int(float(parts[1]))
+                        max_time_s = float(parts[6])
+                    else:
+                        # No trailing maxTime -> timed sweep; the 2nd column is
+                        # the max time [s] and cycles are unbounded.
+                        timed = True
+                        cycles = None
+                        max_time_s = float(parts[1])
+                except ValueError as e:
+                    raise ValueError(f"Line {lineno}: {e}") from e
+                if z < 1:
+                    raise ValueError(
+                        f"Line {lineno}: replicates (z) must be >= 1, got z={z}")
+                if timed:
+                    if max_time_s <= 0:
+                        raise ValueError(
+                            f"Line {lineno}: timed step needs max time > 0, got "
+                            f"{max_time_s}")
+                elif cycles < 1:
+                    raise ValueError(
+                        f"Line {lineno}: cycles must be >= 1, got {cycles}")
+                entries.append(
+                    {"x": x, "cycles": cycles, "z": z, "R": R, "phi": phi,
+                     "deltac": deltac, "max_time_s": max_time_s, "timed": timed})
+        if not entries:
+            raise ValueError("Template contains no usable steps.")
+        return entries
+
+    @staticmethod
+    def _fmt_depth(x: float) -> str:
+        return str(int(x)) if float(x).is_integer() else f"{x:g}"
+
+    def _predef_step_id(self, step: dict) -> str:
+        return f"depth{self._fmt_depth(step['depth'])}num{step['num']}"
+
+    def _build_predefined_steps(self, entries: list[dict], scramble: bool) -> list[dict]:
+        """Expand source entries into individual steps. Steps are grouped by
+        depth (x); replicate numbers increase monotonically within a depth.
+        When scrambling, depths are interleaved randomly but each depth's
+        replicate order (and therefore its numbering) is preserved."""
+        from collections import OrderedDict
+
+        groups: "OrderedDict[float, list[dict]]" = OrderedDict()
+        for e in entries:
+            for _ in range(e["z"]):
+                groups.setdefault(e["x"], []).append({
+                    "depth": e["x"],
+                    "target_depth_um": e["x"],
+                    "cycles": e["cycles"],
+                    "R": e["R"],
+                    "phi": e["phi"],
+                    "deltac": e["deltac"],
+                    "max_time_s": e.get("max_time_s"),
+                    "timed": e.get("timed", False),
+                })
+
+        sequence: list[dict] = []
+        if not scramble:
+            for steps in groups.values():
+                for i, step in enumerate(steps, start=1):
+                    step["num"] = i
+                    sequence.append(step)
+            return sequence
+
+        import random
+        remaining = OrderedDict((x, list(steps)) for x, steps in groups.items())
+        counters = {x: 0 for x in groups}
+        while any(remaining.values()):
+            avail = [x for x, steps in remaining.items() if steps]
+            x = random.choice(avail)
+            step = remaining[x].pop(0)
+            counters[x] += 1
+            step["num"] = counters[x]
+            sequence.append(step)
+        return sequence
+
+    # ---- UI refresh / navigation ----
+
+    def _refresh_predefined_ui(self):
+        """Rebuild the dropdown and detail label from the current steps."""
+        has_steps = bool(self._predef_steps)
+        total = len(self._predef_steps)
+        if total:
+            self._predef_index = max(0, min(self._predef_index, total - 1))
+
+        self._predef_combo_updating = True
+        self.predef_combo.clear()
+        for i, step in enumerate(self._predef_steps):
+            self.predef_combo.addItem(f"{i + 1}. {self._predef_step_id(step)}")
+        if has_steps:
+            self.predef_combo.setCurrentIndex(self._predef_index)
+        self._predef_combo_updating = False
+
+        for w in (self.predef_combo, self.predef_prev_btn, self.predef_next_btn,
+                  self.predef_take_btn, self.predef_scramble_btn):
+            w.setEnabled(has_steps)
+
+        if not has_steps:
+            self.predef_detail_label.setText("No template loaded.")
+            return
+
+        step = self._predef_steps[self._predef_index]
+        max_time = step.get("max_time_s")
+        max_time_txt = "settings" if max_time is None else f"{max_time:g} s"
+        if step.get("timed", False):
+            mode_txt = f"TIMED (budget {max_time_txt})"
+        else:
+            mode_txt = f"cycles={step['cycles']}, max time={max_time_txt}"
+        self.predef_detail_label.setText(
+            f"Step {self._predef_index + 1}/{total} — "
+            f"{self._predef_step_id(step)}\n"
+            f"target depth={self._fmt_depth(step['target_depth_um'])} µm, "
+            f"{mode_txt} | "
+            f"R={step['R']:g} mm, phi={step['phi']:g}°, Δc={step['deltac']:g} mm")
+
+    def _set_predef_index(self, index: int):
+        if not self._predef_steps:
+            return
+        self._predef_index = max(0, min(index, len(self._predef_steps) - 1))
+        self._refresh_predefined_ui()
+
+    def on_predefined_combo_changed(self, index: int):
+        if self._predef_combo_updating or index < 0:
+            return
+        self._set_predef_index(index)
+
+    def on_predefined_prev(self):
+        self._set_predef_index(self._predef_index - 1)
+
+    def on_predefined_next(self):
+        self._set_predef_index(self._predef_index + 1)
+
+    @staticmethod
+    def _measurement_templates_dir() -> str:
+        """Default folder for measurement templates:
+        src/brillouin_system/measurement_templates."""
+        from pathlib import Path
+        d = Path(__file__).resolve().parents[2] / "measurement_templates"
+        return str(d) if d.is_dir() else ""
+
+    def on_import_predefined_template(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Measurement Template", self._measurement_templates_dir(),
+            "Template (*.txt);;All files (*)")
+        if not path:
+            return
+        try:
+            entries = self._parse_predefined_template(path)
+        except Exception as e:
+            log.exception("[Predefined] Failed to parse template.")
+            QMessageBox.critical(self, "Template Parse Error", str(e))
+            return
+
+        self._predef_entries = entries
+        self._predef_steps = self._build_predefined_steps(entries, scramble=False)
+        self._predef_index = 0
+        self._refresh_predefined_ui()
+        log.info(f"[Predefined] Loaded {len(entries)} depth(s) -> "
+                 f"{len(self._predef_steps)} step(s) from {path}")
+
+    def on_scramble_predefined(self):
+        if not self._predef_entries:
+            return
+        self._predef_steps = self._build_predefined_steps(
+            self._predef_entries, scramble=True)
+        self._predef_index = 0
+        self._refresh_predefined_ui()
+        order = ", ".join(self._predef_step_id(s) for s in self._predef_steps)
+        log.info(f"[Predefined] Scrambled order: {order}")
+
+    def take_predefined_measurement(self):
+        """Run the currently-selected step. The selection advances to the
+        next step only once the sweep actually completes (see
+        on_sweep_scan_finished); a sweep that fails to start or is cancelled
+        leaves the selection here so it can be retried."""
+        if not self._predef_steps:
+            log.warning("[Predefined] No template loaded.")
+            return
+
+        if getattr(self, "_predef_run_active", False):
+            log.warning("[Predefined] A step is already running; wait for it "
+                        "to finish before starting another.")
+            return
+
+        step = self._predef_steps[self._predef_index]
+        step_id = self._predef_step_id(step)
+        log.info(f"[Predefined] Running step {self._predef_index + 1}/"
+                 f"{len(self._predef_steps)} | ID: {step_id}")
+
+        # 1) Position: Move XYZ using this step's R / phi / Δc.
+        self.xy_r_input.setText(f"{step['R']:g}")
+        self.xy_phi_input.setText(f"{step['phi']:g}")
+        self.dc_input.setText(f"{step['deltac']:g}")
+        self.on_move_xyz_clicked()
+
+        # 2) Push this step's parameters into the sweep config, preserving
+        #    every other tuned field. Always set the target depth. A fixed
+        #    step also sets n_repeats; a timed step leaves n_repeats alone
+        #    (unused) and both kinds set max_time_s when the template gives one.
+        timed = bool(step.get("timed", False))
+        overrides = {"target_depth_um": float(step["target_depth_um"])}
+        if not timed:
+            overrides["n_repeats"] = int(step["cycles"])
+        if step.get("max_time_s") is not None:
+            overrides["max_time_s"] = float(step["max_time_s"])
+        try:
+            from dataclasses import replace
+            cfg = replace(sweep_scan_config.get(), **overrides)
+        except Exception:
+            log.exception("[Predefined] Could not clone current sweep config; "
+                          "falling back to defaults for this step.")
+            cfg = SweepScanConfig(**overrides)
+        self.update_sweep_scan_config_requested.emit(cfg)
+
+        # 3) Name the ID and take the sweep scan (reuses take_sweep_scan()).
+        #    Mark the run active so on_sweep_scan_finished advances the list
+        #    only if this sweep actually completes.
+        self._predef_run_active = True
+        self.axial_id_input.setText(step_id)
+        # Use this step's resolved max time (template value or Sweep Settings)
+        # for the budget/auto end-scan-early timer, and run timed or fixed as
+        # the template specified.
+        if not self.take_sweep_scan(max_time_s=cfg.max_time_s, timed=timed):
+            # The request never went out; clear the flag so it can be retried
+            # (no completion signal will arrive to clear it otherwise).
+            self._predef_run_active = False
 
     def update_axial_step_distance(self):
         """
@@ -1107,8 +1506,33 @@ class HiFrontend(QWidget):
 
         layout.addRow(dc_row)
 
+        # ----------------------------
+        # Move XYZ: run the XY (R, phi) move then the Z (Δc) move, back to
+        # back, reusing the existing single-axis handlers unchanged. The
+        # backend queues the emitted requests sequentially. This is the move
+        # invoked at the start of each predefined-measurement step.
+        # ----------------------------
+        self.xyz_move_btn = QPushButton("Move XYZ")
+        self.xyz_move_btn.setFixedWidth(90)
+        self.xyz_move_btn.setToolTip(
+            "Move XY to (R, phi) then move Z to Δc, using the fields above.")
+        self.xyz_move_btn.clicked.connect(self.on_move_xyz_clicked)
+
+        xyz_row = QHBoxLayout()
+        xyz_row.addWidget(self.xyz_move_btn)
+        xyz_row.addStretch()
+
+        layout.addRow(xyz_row)
+
         group.setLayout(layout)
         return group
+
+    def on_move_xyz_clicked(self):
+        """Move XY (R, phi) then Z (Δc), back to back. Reuses the existing
+        single-axis handlers so their behaviour is unchanged; the backend
+        queues the emitted move requests sequentially."""
+        self.on_move_xy_polar_clicked()
+        self.on_move_z_by_dc_clicked()
 
     # ---------------- GUI Update Loop ---------------- #
     def _on_andor_mailbox(self):
@@ -1496,16 +1920,72 @@ class HiFrontend(QWidget):
         except ValueError:
             log.exception("[Brillouin Viewer] [Reference] Invalid frequency input.")
 
-    def receive_axial_scan_list(self, scan_list: list):
+    @staticmethod
+    def _format_sweep_duration(prefix: str, elapsed: float) -> str:
+        return f"{prefix}: {elapsed:.1f} s ({elapsed / 60:.2f} min)"
 
-        # A just-finished sweep scan: report the elapsed wall-clock time.
+    def reset_sweep_stats(self):
+        """Clear the longest and mean sweep scan duration records."""
+        self._sweep_longest_seconds = None
+        self._sweep_total_seconds = 0.0
+        self._sweep_count = 0
+        self.sweep_longest_label.setText("Longest sweep: —")
+        self.sweep_mean_label.setText("Mean sweep: —")
+        log.info("[Brillouin Viewer] Longest and mean sweep records reset.")
+
+    def on_sweep_scan_finished(self, success: bool):
+        """Outcome of a sweep scan (any sweep, predefined or manual).
+
+        Only a genuinely completed sweep (success=True) records elapsed time
+        and advances the predefined-measurement list. A sweep that failed to
+        start or was cancelled (success=False) records nothing and leaves the
+        predefined selection where it is, so the same step can be retried."""
+        # The scan is over: cancel any pending auto end-scan-early timer.
+        self._cancel_sweep_max_time_timer()
+
+        # The stopwatch was started in take_sweep_scan(); clear it either way.
         sweep_start = getattr(self, "_sweep_start_monotonic", None)
-        if sweep_start is not None:
-            self._sweep_start_monotonic = None
+        self._sweep_start_monotonic = None
+
+        if success and sweep_start is not None:
             elapsed = time.monotonic() - sweep_start
             log.info(f"[Brillouin Viewer] Sweep Scan finished | "
                      f"elapsed {elapsed:.1f} s "
                      f"({elapsed / 60:.2f} min)")
+
+            self.sweep_last_label.setText(self._format_sweep_duration(
+                "Last sweep", elapsed))
+
+            # Track the longest sweep on record (until the user resets it).
+            longest = getattr(self, "_sweep_longest_seconds", None)
+            if longest is None or elapsed > longest:
+                self._sweep_longest_seconds = elapsed
+                self.sweep_longest_label.setText(self._format_sweep_duration(
+                    "Longest sweep", elapsed))
+
+            # Running mean over all sweeps since the last reset.
+            self._sweep_total_seconds += elapsed
+            self._sweep_count += 1
+            mean = self._sweep_total_seconds / self._sweep_count
+            self.sweep_mean_label.setText(self._format_sweep_duration(
+                f"Mean sweep (n={self._sweep_count})", mean))
+        elif not success:
+            log.info("[Brillouin Viewer] Sweep Scan did not complete "
+                     "(failed to start or cancelled); elapsed time not recorded.")
+
+        # Advance the predefined-measurement list only on a completed sweep.
+        if getattr(self, "_predef_run_active", False):
+            self._predef_run_active = False
+            if success:
+                if self._predef_index < len(self._predef_steps) - 1:
+                    self._set_predef_index(self._predef_index + 1)
+                else:
+                    log.info("[Predefined] Reached the last step.")
+            else:
+                log.info("[Predefined] Step did not complete; staying on "
+                         f"step {self._predef_index + 1} for retry.")
+
+    def receive_axial_scan_list(self, scan_list: list):
 
         # Update QListWidget
         self.axial_scans_list.clear()
@@ -1722,25 +2202,88 @@ class HiFrontend(QWidget):
             self.ref_bkg_label.setText(f"Ref. bkg: {status}")
             self.ref_bkg_label.setStyleSheet("color: green")
 
-    def take_sweep_scan(self):
+    def take_sweep_scan(self, max_time_s: float | None = None,
+                        timed: bool = False) -> bool:
+        """Emit a sweep-scan request. Returns True if the request was sent
+        (elapsed time is reported when the scan finishes via
+        on_sweep_scan_finished), False if it could not be initiated.
+
+        max_time_s: allotted time before the scan is auto-ended-early (and its
+        partial data saved). None -> use the current Sweep Settings value;
+        <= 0 -> no limit.
+        timed: if True, run as many cycles as fit in max_time_s instead of a
+        fixed number of cycles (requires max_time_s > 0)."""
         try:
             id_str = self.axial_id_input.text().strip()
 
-            log.info(f"[Brillouin Viewer] Sweep Scan Request | ID: {id_str}")
+            if max_time_s is None:
+                try:
+                    max_time_s = float(sweep_scan_config.get().max_time_s)
+                except Exception:
+                    max_time_s = 0.0
+
+            if timed and (not max_time_s or max_time_s <= 0):
+                log.warning("[Brillouin Viewer] Timed sweep needs a max time "
+                            "> 0 (set it in Sweep Settings). Aborting.")
+                return False
+
+            log.info(f"[Brillouin Viewer] {'Timed ' if timed else ''}Sweep "
+                     f"Scan Request | ID: {id_str}")
 
             request = RequestSweepScan(
                 id=id_str,
                 eye_tracker_results=self.lastest_eye_tracker_results,
+                timed=timed,
             )
 
             # Start the sweep stopwatch; elapsed time is reported when the
-            # scan finishes (see receive_axial_scan_list).
+            # scan finishes (see on_sweep_scan_finished).
             self._sweep_start_monotonic = time.monotonic()
 
             self.take_sweep_scan_requested.emit(request)
 
+            # Arm the auto "end scan early" timer for the allotted time.
+            self._arm_sweep_max_time_timer(max_time_s)
+            return True
+
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate sweep scan: {e}")
+            self._sweep_start_monotonic = None
+            return False
+
+    def take_timed_sweep_scan(self, max_time_s: float | None = None) -> bool:
+        """Run a timed sweep: as many cycles as fit in the max-time budget
+        (from Sweep Settings unless max_time_s is given)."""
+        return self.take_sweep_scan(max_time_s=max_time_s, timed=True)
+
+    def _arm_sweep_max_time_timer(self, max_time_s: float | None):
+        """Start a single-shot timer that ends the sweep early (saving data)
+        once max_time_s has elapsed. Any previous timer is cancelled first."""
+        self._cancel_sweep_max_time_timer()
+        if not max_time_s or max_time_s <= 0:
+            return
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._on_sweep_max_time_reached)
+        timer.start(int(max_time_s * 1000))
+        self._sweep_max_time_timer = timer
+        log.info(f"[Brillouin Viewer] Sweep max-time armed at {max_time_s:.1f} s.")
+
+    def _cancel_sweep_max_time_timer(self):
+        timer = getattr(self, "_sweep_max_time_timer", None)
+        if timer is not None:
+            timer.stop()
+            self._sweep_max_time_timer = None
+
+    def _on_sweep_max_time_reached(self):
+        self._sweep_max_time_timer = None
+        log.info("[Brillouin Viewer] Sweep max time reached - ending scan "
+                 "early and saving collected data.")
+        self.brillouin_signaller.end_scan_early()
+
+    def on_end_scan_early_clicked(self):
+        log.info("[Brillouin Viewer] End Scan Early clicked.")
+        self.brillouin_signaller.end_scan_early()
 
 
     def clear_measurements(self):

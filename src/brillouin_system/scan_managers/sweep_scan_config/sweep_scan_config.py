@@ -30,6 +30,11 @@ class SweepScanConfig:
     approach_um: float = 300.0        # run-up distance past the plane on each side
     target_depth_um: float = 50.0     # measure at in-crossing + this (positive = inward)
     settle_s: float = 0.05            # lens settle time before the camera snap
+    # Max allowable wall-clock time for one sweep scan [s]. When elapsed time
+    # reaches this, the scan stops before the next cycle (and once mid-cycle,
+    # before the long out-search), then saves whatever cycles were completed.
+    # 0 (or negative) disables the limit.
+    max_time_s: float = 0.0
     # In-crossing gate: |in - previous plane estimate|. Must exceed the real
     # eye motion between cycles (~1.5 s), so it stays loose.
     plausibility_gate_um: float = 750.0
@@ -59,6 +64,7 @@ def _dataclass_to_toml_dict(cfg: SweepScanConfig) -> dict[str, Any]:
         "approach_um": float(cfg.approach_um),
         "target_depth_um": float(cfg.target_depth_um),
         "settle_s": float(cfg.settle_s),
+        "max_time_s": float(cfg.max_time_s),
         "plausibility_gate_um": float(cfg.plausibility_gate_um),
         "out_gate_um": float(cfg.out_gate_um),
         "min_peak_fraction": float(cfg.min_peak_fraction),
