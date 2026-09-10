@@ -450,6 +450,7 @@ def perform_calibration(backend) -> bool:
                     return False
 
                 backend.microwave.set_frequency(freq)
+                # time.sleep(0.2) # testing for settling effects -Zuriel
                 i += 1
                 log.info(f"Freq {i}/{n}")
                 freq_points = []
