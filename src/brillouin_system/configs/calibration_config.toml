@@ -10,7 +10,11 @@ outer_degree = 3
 start = 4.0
 stop = 8.0
 step = 0.1
-reference = "distance"
+# "weighted" since 2026-09-10 (user decision): the reported shift is the
+# photon-weighted average of the inner and the outer pair distance (each
+# pair weighted by its photon number, ~0.7 / 0.3). Falls back to the inner
+# distance on frames without the outer pair (two-peak fits/calibrations).
+reference = "weighted"
 # NOTE: the save_calibration_frames toggle was REMOVED 2026-08-24 — raw
 # calibration frames ALWAYS travel with each scan (re-analysis + the
 # reflection-background frequency anchor both depend on them).

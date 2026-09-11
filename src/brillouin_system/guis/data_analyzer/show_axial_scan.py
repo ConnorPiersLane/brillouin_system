@@ -85,7 +85,11 @@ def reference_freq(shifts: AnalyzedFreqShifts, reference: str) -> float | None:
     if reference == "outer_distance":
         return shifts.freq_shift_outer_distance_ghz
     if reference == "weighted":
-        return shifts.freq_shift_weighted_distance_ghz
+        # the reported value since 2026-09-10; a frame without the outer
+        # pair (two-peak fit or calibration) falls back to the inner
+        # distance, which the weighted value reduces to at outer weight 0
+        w = shifts.freq_shift_weighted_distance_ghz
+        return w if w is not None else shifts.freq_shift_peak_distance_ghz
     raise ValueError(
         f"Unknown reference '{reference}'. Use 'left', 'right', 'distance', "
         f"'combined', 'outer_distance' or 'weighted'.")
@@ -104,7 +108,8 @@ def reference_theo_total_mhz(theo, reference: str) -> float | None:
     if reference == "outer_distance":
         return theo.outer_distance_total_mhz
     if reference == "weighted":
-        return theo.weighted_distance_total_mhz
+        w = theo.weighted_distance_total_mhz
+        return w if w is not None else theo.distance_total_mhz
     return None
 
 

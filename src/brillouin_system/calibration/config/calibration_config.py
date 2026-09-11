@@ -54,8 +54,11 @@ class CalibrationConfig:
     # inverse-variance combination of all four orders), "outer_distance"
     # (the outer pair through its own distance track) or "weighted" (inner
     # and outer distances averaged with photon-number weights, 2026-09-10).
-    # The last three need n_peaks = 4 in BOTH fitting sections and show
-    # N/A otherwise.
+    # "weighted" is the reported value since 2026-09-10 (user decision,
+    # after the 09-10 ladder: 5-15 % less frame scatter than the inner
+    # distance, same drift immunity); it falls back to the inner distance
+    # on frames without the outer pair. "combined" / "outer_distance"
+    # show N/A without four peaks.
     reference: str
     # Degree of the OUTER-order frequency tracks (outer_left / outer_right /
     # outer distance). 2026-09-10: the outer tracks are more curved than a
