@@ -179,6 +179,50 @@ def _n_summed_rows(fs: FittedSpectrum) -> int:
     return max(len(cfg.selected_rows), 1)
 
 
+def detected_hwhm_px(fs: FittedSpectrum, center_px: float, bg_counts: float,
+                     reach_px: float = 8.0) -> float | None:
+    """Half width at half maximum of ONE fitted peak as it lands on the
+    detector, measured on the refined fit curve (fs.x_fit_refined /
+    y_fit_refined) above that peak's flat background, in pixels.
+
+    This is the width Thompson's s needs for a kernel fit ('lorentzian_x_psf',
+    'dho_x_psf'): the fitted width parameter is the acoustic core alone and the
+    measured instrument profile sits in the kernel. Adding the calibration
+    line's HWHM to the core (the 2026-08 rule) treats both as Lorentzians;
+    the measured profile also carries the camera blur and the pixel box,
+    which do not add linearly, so the sum overstates the detected HWHM by
+    9-15 % (frame 0 of 2026-8-13 500ms_3 i19: sum / measured 1.09-1.15) and
+    the bound with it (2026-09-12). Measuring the curve makes no assumption.
+
+    None when the fit carries no refined curve or the half-maximum crossings
+    are not inside +-reach_px of the centre (the caller falls back).
+    """
+    xr, yr = getattr(fs, "x_fit_refined", None), getattr(fs, "y_fit_refined", None)
+    if xr is None or yr is None or center_px is None:
+        return None
+    xr = np.asarray(xr, dtype=float)
+    yr = np.asarray(yr, dtype=float) - float(bg_counts or 0.0)
+    m = np.isfinite(xr) & np.isfinite(yr) & (np.abs(xr - float(center_px)) <= reach_px)
+    if m.sum() < 5:
+        return None
+    x, y = xr[m], yr[m]
+    order = np.argsort(x)
+    x, y = x[order], y[order]
+    k = int(np.argmax(y))
+    half = 0.5 * y[k]
+    if half <= 0.0:
+        return None
+    below_l = np.flatnonzero(y[:k] < half)
+    below_r = np.flatnonzero(y[k:] < half)
+    if below_l.size == 0 or below_r.size == 0:
+        return None
+    i = below_l[-1]                     # last point below half on the left
+    j = k + below_r[0]                  # first point below half on the right
+    x_l = x[i] + (half - y[i]) / (y[i + 1] - y[i]) * (x[i + 1] - x[i])
+    x_r = x[j - 1] + (half - y[j - 1]) / (y[j] - y[j - 1]) * (x[j] - x[j - 1])
+    return 0.5 * float(x_r - x_l)
+
+
 def theoretical_precision(fs: FittedSpectrum,
                           photons: PixelCountsAndPhotons,
                           calibration_calculator: CalibrationCalculator,
@@ -239,11 +283,15 @@ def theoretical_precision(fs: FittedSpectrum,
     # fit ('lorentzian', 'dho') the fitted width already is it. A kernel
     # fit's width ('lorentzian_x_psf', 'dho_x_psf') is the SAMPLE core only
     # — the measured instrument profile (VIPA line, camera blur, tails,
-    # pixel) was folded into its kernel — so the profile's HWHM at the
-    # peak, from the calibration width track, is added back first
-    # (Lorentzian widths add). Without a width track (a stored tag analysed
-    # against an old calibration) the core width is used as-is (optimistic
-    # bound). The pixel top-hat stays OUT of s (the separate a^2/12 term).
+    # pixel) was folded into its kernel — so the detected HWHM is MEASURED
+    # on the fitted profile (detected_hwhm_px, 2026-09-13). Without a
+    # refined curve the older rule applies: the calibration line's HWHM
+    # from the width track is added to the core (Lorentzian widths add;
+    # 9-15 % wide for the measured, non-Lorentzian profile), and without a
+    # width track the core width is used as-is (optimistic bound).
+    # NOTE for the scan-mean bound (scan_summary): the refined curve is the
+    # reference frame's, the scalar parameters are scan means; the reference
+    # frame is chosen with widths nearest the means for that reason.
     if is_kernel_fit(fs.model):
         p = calc.p
 
@@ -253,14 +301,18 @@ def theoretical_precision(fs: FittedSpectrum,
                 return 0.0
             return abs(float(width_dpx(px)))
 
-        inst_l = vipa_hwhm(p.calibration_width_left_peak,
-                           calc.calibration_width_left_peak_dpx,
-                           fs.left_peak_center_px)
-        inst_r = vipa_hwhm(p.calibration_width_right_peak,
-                           calc.calibration_width_right_peak_dpx,
-                           fs.right_peak_center_px)
-        w_l = fs.left_peak_width_px + inst_l
-        w_r = fs.right_peak_width_px + inst_r
+        def detected_or_sum(center, core_width, bg, coeffs, width_dpx):
+            measured = detected_hwhm_px(fs, center, bg)
+            if measured is not None:
+                return measured
+            return core_width + vipa_hwhm(coeffs, width_dpx, center)
+
+        w_l = detected_or_sum(fs.left_peak_center_px, fs.left_peak_width_px,
+                              fs.left_peak_bg_counts, p.calibration_width_left_peak,
+                              calc.calibration_width_left_peak_dpx)
+        w_r = detected_or_sum(fs.right_peak_center_px, fs.right_peak_width_px,
+                              fs.right_peak_bg_counts, p.calibration_width_right_peak,
+                              calc.calibration_width_right_peak_dpx)
     else:
         w_l, w_r = fs.left_peak_width_px, fs.right_peak_width_px
     s_l = a_l * float(w_l)
@@ -305,11 +357,16 @@ def theoretical_precision(fs: FittedSpectrum,
         a_ol = abs(calc.df_outer_left_peak(px=fs.outer_left_peak_center_px, dpx=1))
         a_or = abs(calc.df_outer_right_peak(px=fs.outer_right_peak_center_px, dpx=1))
         if is_kernel_fit(fs.model):
-            # acoustic + measured outer profile, same rule as the inner pair
-            w_ol = fs.outer_left_peak_width_px + abs(float(
-                calc.calibration_width_outer_left_peak_dpx(fs.outer_left_peak_center_px)))
-            w_or = fs.outer_right_peak_width_px + abs(float(
-                calc.calibration_width_outer_right_peak_dpx(fs.outer_right_peak_center_px)))
+            # the detected HWHM measured on the fitted profile, same rule as
+            # the inner pair; fallback = acoustic + measured outer profile
+            w_ol = detected_hwhm_px(fs, fs.outer_left_peak_center_px, fs.outer_left_peak_bg_counts)
+            if w_ol is None:
+                w_ol = fs.outer_left_peak_width_px + abs(float(
+                    calc.calibration_width_outer_left_peak_dpx(fs.outer_left_peak_center_px)))
+            w_or = detected_hwhm_px(fs, fs.outer_right_peak_center_px, fs.outer_right_peak_bg_counts)
+            if w_or is None:
+                w_or = fs.outer_right_peak_width_px + abs(float(
+                    calc.calibration_width_outer_right_peak_dpx(fs.outer_right_peak_center_px)))
         else:
             w_ol = fs.outer_left_peak_width_px
             w_or = fs.outer_right_peak_width_px
