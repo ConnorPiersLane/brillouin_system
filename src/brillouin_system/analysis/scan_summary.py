@@ -217,21 +217,8 @@ def summarize_axial_scan(
             vals = vals[np.isfinite(vals)]
             return float(np.mean(vals)) if vals.size else None
 
-        # The reference frame supplies what replace() does not touch, above
-        # all the refined fit curve the kernel-fit bound measures its
-        # detected width on (thompson_shot_noise_limit.detected_hwhm_px):
-        # take the frame whose fitted widths lie nearest the scan means
-        # instead of frame 0 (2026-09-13).
-        width_attrs = [a for a in ("left_peak_width_px", "right_peak_width_px",
-                                   "outer_left_peak_width_px", "outer_right_peak_width_px")
-                       if mean_of(a)]
-        def width_distance(f):
-            return sum(abs(float(getattr(f, a) or np.nan) / mean_of(a) - 1.0)
-                       for a in width_attrs)
-        dists = [width_distance(f) for f in fits]
-        ref = fits[int(np.nanargmin(dists))] if np.isfinite(dists).any() else fits[0]
         mean_fs = replace(
-            ref,
+            fits[0],
             left_peak_center_px=mean_of("left_peak_center_px"),
             left_peak_width_px=mean_of("left_peak_width_px"),
             left_peak_amplitude=mean_of("left_peak_amplitude"),
