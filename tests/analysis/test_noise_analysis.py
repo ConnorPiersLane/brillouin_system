@@ -409,3 +409,54 @@ def test_em_mode_works_when_a_sensitivity_is_supplied():
 def test_invalid_preamp_multiplier_raises():
     with pytest.raises(ValueError, match="preamp multiplier"):
         electrons_per_count(preamp_gain=0, emccd_gain=0)
+
+
+def _lorentzian_curve(fs, hwhm_l, hwhm_r, bg=0.0, step=0.02):
+    """A refined fit curve: two pixel-sampled Lorentzians of KNOWN detected
+    HWHM at the fitted centres, above a flat background."""
+    x = np.arange(0.0, float(fs.x_pixels[-1]) + step, step)
+    y = bg + fs.left_peak_amplitude / (1 + ((x - fs.left_peak_center_px) / hwhm_l) ** 2)
+    y = y + fs.right_peak_amplitude / (1 + ((x - fs.right_peak_center_px) / hwhm_r) ** 2)
+    return x, y
+
+
+def test_detected_hwhm_is_read_off_the_fitted_profile():
+    """detected_hwhm_px returns the half width of the refined curve above the
+    peak's background, independent of the fitted core width."""
+    from dataclasses import replace
+    from brillouin_system.analysis.thompson_shot_noise_limit import detected_hwhm_px
+    fs = _fitted_two_peaks()
+    x, y = _lorentzian_curve(fs, hwhm_l=1.7, hwhm_r=1.3, bg=40.0)
+    fs = replace(fs, x_fit_refined=x, y_fit_refined=y,
+                 left_peak_bg_counts=40.0, right_peak_bg_counts=40.0)
+    assert detected_hwhm_px(fs, fs.left_peak_center_px, 40.0) == pytest.approx(1.7, abs=0.02)
+    assert detected_hwhm_px(fs, fs.right_peak_center_px, 40.0) == pytest.approx(1.3, abs=0.02)
+    # no curve -> None, so the bound can fall back
+    assert detected_hwhm_px(_fitted_two_peaks(), 27.0, 0.0) is None
+
+
+def test_kernel_fit_bound_uses_the_detected_width_of_the_profile():
+    """A kernel fit ('dho_x_psf') with a refined curve is bounded with the
+    curve's measured HWHM — exactly where a bare fit of that width lands —
+    NOT with acoustic + calibration width (the Lorentzian sum), which is
+    9-15 % too wide for the measured, non-Lorentzian profile."""
+    from dataclasses import replace
+    g_vipa = 0.4
+    calc = _linear_calculator()
+    calc.p = replace(calc.p,
+                     calibration_width_left_peak=np.array([g_vipa]),
+                     calibration_width_right_peak=np.array([g_vipa]))
+    fs_base = _fitted_two_peaks()
+    photons = PixelCountsAndPhotons.from_fit(fs_base, preamp_gain=1.0, emccd_gain=0)
+    # detected widths narrower than the Lorentzian sum (1.2 + 0.4, 1.0 + 0.4)
+    det_l, det_r = 1.45, 1.25
+    x, y = _lorentzian_curve(fs_base, det_l, det_r)
+    fs_dho = replace(fs_base, model="2dho_x_psf_window", x_fit_refined=x, y_fit_refined=y)
+    fs_bare = replace(fs_base, model="2lorentzian_window",
+                      left_peak_width_px=det_l, right_peak_width_px=det_r)
+    fs_sum = replace(fs_base, model="2lorentzian_window",
+                     left_peak_width_px=1.2 + g_vipa, right_peak_width_px=1.0 + g_vipa)
+    t_dho, t_bare, t_sum = (_bound(f, photons, calc) for f in (fs_dho, fs_bare, fs_sum))
+    assert t_dho.left_peak_photons_mhz == pytest.approx(t_bare.left_peak_photons_mhz, rel=0.02)
+    assert t_dho.right_peak_photons_mhz == pytest.approx(t_bare.right_peak_photons_mhz, rel=0.02)
+    assert t_dho.left_peak_photons_mhz < t_sum.left_peak_photons_mhz
