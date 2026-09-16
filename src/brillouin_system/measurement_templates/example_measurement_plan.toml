@@ -1,0 +1,51 @@
+# Predefined measurement plan.
+#
+# [defaults] applies to EVERY step; each [[step]] overrides only what differs,
+# so a typical plan is just a list of depths. Each step expands into
+# `replicates` sweep scans, with IDs "depth<depth_um>num<k>".
+#
+# Fields (all optional in a [[step]] except depth_um; unset ones inherit
+# [defaults], and unset defaults fall back to the built-in values shown here):
+#
+#   depth_um         target depth past the reflection plane [µm]   (Sweep depth)
+#   mode             "timed" -> as many in-out cycles as fit in max_time_s
+#                    "fixed" -> exactly `cycles` in-out cycles
+#   max_time_s       timed budget [s]; fixed-mode wall-clock cap (0 = uncapped)
+#   cycles           number of in-out cycles (fixed mode only)
+#   replicates       number of sweep scans taken at this depth
+#   R_mm             target laser radius [mm]   -> Move XY
+#   phi_deg          target laser angle  [deg]  -> Move XY
+#   delta_c_mm       target Δc [mm]             -> Move Z
+#   motion_limit_um  QUALITY GATE: keep the scan only if some in-out cycle has
+#                    |out-crossing z − in-crossing z| < this many µm. 0 = no
+#                    gate. A scan that fails is treated as a failed scan and is
+#                    NOT saved.
+
+[defaults]
+mode = "timed"
+max_time_s = 10.0
+replicates = 5
+R_mm = 0.0
+phi_deg = 0.0
+delta_c_mm = 0.0
+motion_limit_um = 30.0
+
+# Timed depth sweep at 5 depths, 5 replicates each, all inheriting defaults.
+[[step]]
+depth_um = 50
+
+[[step]]
+depth_um = 100
+
+[[step]]
+depth_um = 200
+
+[[step]]
+depth_um = 300
+motion_limit_um = 40   # looser motion gate deeper in
+
+[[step]]
+depth_um = 400
+mode = "fixed"         # fixed-cycle example: 8 cycles, no time cap
+cycles = 8
+max_time_s = 0

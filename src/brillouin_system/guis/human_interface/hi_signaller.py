@@ -10,6 +10,7 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import Ando
 from brillouin_system.eye_tracker.calibrate_camera_laser_position.calib_rig_laser_position import LaserOffset
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface import scan_procedures
+from brillouin_system.guis.human_interface.predefined_plan import build_progress
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.display_results import DisplayResults
@@ -59,6 +60,9 @@ class HiSignaller(QObject):
     # (excludes the Move XY / Move Z that ran as earlier requests).
     sweep_scan_finished = pyqtSignal(bool, float)
     axial_scan_data_ready = pyqtSignal(object)
+    # Result of a Check Progress request: a predefined_plan.ProgressReport
+    # joining the sent plan against the currently-saved scans.
+    predefined_progress_ready = pyqtSignal(object)
     # Outcome of a Load/Take Ref. Bkg. request: a short status label, or
     # an "ERROR: ..." string the frontend shows in a message box.
     ref_bkg_state = pyqtSignal(str)
@@ -368,6 +372,16 @@ class HiSignaller(QObject):
     def update_stored_axial_scans(self):
         lines = self.backend.get_list_of_axial_scans()
         self.send_update_stored_axial_scans.emit(lines)
+
+    def compute_predefined_progress(self, planned):
+        """Join the sent plan (list[PlanStep]) against the currently-saved
+        scans and emit a ProgressReport. Fast: only reads each scan's stored
+        reflection crossings and lens positions — no fitting, no VIPA images.
+        A scan the operator removed from the list is gone from
+        axial_scan_dict, so it correctly stops counting as taken."""
+        report = build_progress(
+            planned, list(self.backend.axial_scan_dict.values()))
+        self.predefined_progress_ready.emit(report)
 
     # ------- State control -------
     # SLOTS

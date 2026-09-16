@@ -1,0 +1,163 @@
+# Central axial scan: one fixed-cycle sweep per depth, 10..500 µm.
+# mode = "fixed": `cycles` sets the number of in-out cycles; max_time_s = 15 is
+# only a wall-clock cap.
+
+[defaults]
+mode = "fixed"
+cycles = 4
+max_time_s = 15
+replicates = 1
+R_mm = 0.0
+phi_deg = 0.0
+delta_c_mm = 1.0
+motion_limit_um = 60
+
+[[step]]
+depth_um = 10
+
+[[step]]
+depth_um = 20
+
+[[step]]
+depth_um = 30
+
+[[step]]
+depth_um = 40
+
+[[step]]
+depth_um = 50
+
+[[step]]
+depth_um = 60
+
+[[step]]
+depth_um = 70
+
+[[step]]
+depth_um = 80
+
+[[step]]
+depth_um = 90
+
+[[step]]
+depth_um = 100
+
+[[step]]
+depth_um = 110
+
+[[step]]
+depth_um = 120
+
+[[step]]
+depth_um = 130
+
+[[step]]
+depth_um = 140
+
+[[step]]
+depth_um = 150
+
+[[step]]
+depth_um = 160
+
+[[step]]
+depth_um = 170
+
+[[step]]
+depth_um = 180
+
+[[step]]
+depth_um = 190
+
+[[step]]
+depth_um = 200
+
+[[step]]
+depth_um = 210
+
+[[step]]
+depth_um = 220
+
+[[step]]
+depth_um = 230
+
+[[step]]
+depth_um = 240
+
+[[step]]
+depth_um = 250
+
+[[step]]
+depth_um = 260
+
+[[step]]
+depth_um = 270
+
+[[step]]
+depth_um = 280
+
+[[step]]
+depth_um = 290
+
+[[step]]
+depth_um = 300
+
+[[step]]
+depth_um = 310
+
+[[step]]
+depth_um = 320
+
+[[step]]
+depth_um = 330
+
+[[step]]
+depth_um = 340
+
+[[step]]
+depth_um = 350
+
+[[step]]
+depth_um = 360
+
+[[step]]
+depth_um = 370
+
+[[step]]
+depth_um = 380
+
+[[step]]
+depth_um = 390
+
+[[step]]
+depth_um = 400
+
+[[step]]
+depth_um = 410
+
+[[step]]
+depth_um = 420
+
+[[step]]
+depth_um = 430
+
+[[step]]
+depth_um = 440
+
+[[step]]
+depth_um = 450
+
+[[step]]
+depth_um = 460
+
+[[step]]
+depth_um = 470
+
+[[step]]
+depth_um = 480
+
+[[step]]
+depth_um = 490
+
+[[step]]
+depth_um = 500

@@ -1,4 +1,5 @@
 
+import time
 from contextlib import contextmanager
 from typing import Callable
 
@@ -43,6 +44,15 @@ from brillouin_system.spectrum_fitting.reflection_background import (
 
 log = get_logger(__name__)
 
+# Dummy mode only: how far below the simulated cornea the eye-lens focus should
+# sit when the eye-tracker Δc reads zero. The reflection find searches FORWARD
+# (increasing z), so it needs the lens parked below the plane with room to
+# approach; a Δc=0 that left the lens exactly on the plane makes the forward
+# find unreliable. 300 µm is comfortably inside the search range and gave 6/6
+# robust dummy sweeps in testing. Physically it stands in for the offset
+# between the eye tracker's corneal-corner reference and the detected plane.
+SIM_DELTAC_MARGIN_UM = 300.0
+
 
 class HiBackend:
 
@@ -85,8 +95,13 @@ class HiBackend:
             zaber_eye_lens = SimZaberLens(start_um=9000.0)
             ni = SimNI(zaber_eye_lens, sim_cornea)
             zaber_hi=ZaberHumanInterfaceDummy()
+            # Ground-truth cornea shared with the reflection finder, so the
+            # eye-tracker Δc can be made consistent with it in dummy mode
+            # (see simulated_delta_laser_corner_mm). None on real hardware.
+            self._sim_cornea = sim_cornea
 
         else:
+            self._sim_cornea = None
             try:
                 camera=IxonUltra(
                     index = 0,
@@ -680,6 +695,25 @@ class HiBackend:
             if was_sample_mode:
                 self.change_to_sample_mode()
 
+
+    def simulated_delta_laser_corner_mm(self) -> float | None:
+        """Dummy-only: the Δc [mm] the eye tracker WOULD report if it were
+        consistent with the simulated cornea the reflection finder tracks.
+
+        Returns None on real hardware (no simulated cornea), so callers can use
+        it as a "am I in dummy mode with a coupled plane?" test. Sign follows
+        EyeTrackerResults.delta_laser_corner: > 0 = laser in front of (below)
+        the plane. The SIM_DELTAC_MARGIN_UM offset means a Move Z that nulls Δc
+        parks the eye lens that many µm below the cornea, giving the forward
+        reflection find clean room to approach — without it the plan's Move Z
+        marches the lens onto/past the plane and the find fails."""
+        cornea = getattr(self, "_sim_cornea", None)
+        if cornea is None:
+            return None
+        t = time.perf_counter()
+        plane_um = cornea.z_at(t) - SIM_DELTAC_MARGIN_UM
+        lens_um = self.zaber_eye_lens.z_at(t)
+        return (plane_um - lens_um) / 1000.0
 
     def find_reflection_plane(self, is_go_forwards: bool=True) -> ReflectionResult:
         """

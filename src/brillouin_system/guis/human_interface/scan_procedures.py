@@ -19,6 +19,10 @@ from brillouin_system.calibration.config.calibration_config import (
     CalibrationConfig,
     calibration_config,
 )
+from brillouin_system.guis.human_interface.predefined_plan import (
+    cycle_motion_deltas,
+    passes_motion_limit,
+)
 from brillouin_system.logging_utils.logging_setup import get_logger
 from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.my_dataclasses.measurement_point import MeasurementPoint
@@ -404,6 +408,24 @@ def take_sweep_scan(backend, request: RequestSweepScan) -> bool:
         log.info("[Sweep Scan] No frames acquired - not saving; treating as a "
                  "failed scan.")
         return False
+
+    # Motion quality gate (predefined measurements). The eye must have held
+    # still for at least one measured cycle: |out-crossing z - in-crossing z|
+    # below the limit. If no cycle qualifies, the scan is dropped exactly like
+    # a failed scan - not saved, failure reported, predefined list stays put.
+    motion_limit_um = getattr(request, "motion_limit_um", None)
+    if motion_limit_um and motion_limit_um > 0:
+        deltas = cycle_motion_deltas(cycles)
+        if not passes_motion_limit(deltas, motion_limit_um):
+            best = min(deltas) if deltas else None
+            best_txt = f"{best:.1f} µm" if best is not None else "no in/out pair"
+            log.info(f"[Sweep Scan] Motion gate FAILED: no cycle under "
+                     f"{motion_limit_um:.1f} µm (best {best_txt} over "
+                     f"{len(deltas)} in/out pair(s)). Not saving; treating as a "
+                     f"failed scan.")
+            return False
+        log.info(f"[Sweep Scan] Motion gate passed: best "
+                 f"{min(deltas):.1f} µm < {motion_limit_um:.1f} µm.")
 
     axial_scan = AxialScan(
         i=backend.next_axial_scan_index(),
