@@ -262,6 +262,7 @@ class HiFrontend(QWidget):
     update_scanning_config_requested = pyqtSignal(object)
     take_bg_value_reflection_plane_request = pyqtSignal()
     find_reflection_plane_request = pyqtSignal()
+    find_reflection_plane_backwards_request = pyqtSignal()
     load_ref_bkg_from_file_requested = pyqtSignal(str)
     load_ref_bkg_from_scan_requested = pyqtSignal(int)
     calibrate_laser_camera_position_requested = pyqtSignal()
@@ -353,6 +354,7 @@ class HiFrontend(QWidget):
         self.request_axial_scan_data.connect(self.brillouin_signaller.handle_request_axial_scan_data)
         self.update_scanning_config_requested.connect(self.brillouin_signaller.update_scanning_config)
         self.find_reflection_plane_request.connect(self.brillouin_signaller.delegate_find_reflection_plane)
+        self.find_reflection_plane_backwards_request.connect(self.brillouin_signaller.delegate_find_reflection_plane_backwards)
         self.load_ref_bkg_from_file_requested.connect(
             self.brillouin_signaller.handle_load_ref_bkg_from_file)
         self.load_ref_bkg_from_scan_requested.connect(
@@ -745,11 +747,15 @@ class HiFrontend(QWidget):
         self.find_reflection_plane_btn = QPushButton("Find Reflection Plane")
         self.find_reflection_plane_btn.clicked.connect(self.find_reflection_plane)
 
+        self.find_reflection_plane_backwards_btn = QPushButton("Find Reflection Plane (Backwards)")
+        self.find_reflection_plane_backwards_btn.clicked.connect(self.find_reflection_plane_backwards)
+
 
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.axial_settings_btn)
         # btn_row.addWidget(self.take_bg_value_btn)
         btn_row.addWidget(self.find_reflection_plane_btn)
+        btn_row.addWidget(self.find_reflection_plane_backwards_btn)
 
         btn_row.addStretch()
 
@@ -2773,6 +2779,10 @@ class HiFrontend(QWidget):
 
     def find_reflection_plane(self):
         self.find_reflection_plane_request.emit()
+
+
+    def find_reflection_plane_backwards(self):
+        self.find_reflection_plane_backwards_request.emit()
 
 
     def closeEvent(self, event):

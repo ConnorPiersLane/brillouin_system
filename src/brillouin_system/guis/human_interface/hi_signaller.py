@@ -516,6 +516,13 @@ class HiSignaller(QObject):
 
     @pyqtSlot()
     def delegate_find_reflection_plane(self):
+        self._do_find_reflection_plane(is_go_forwards=True)
+
+    @pyqtSlot()
+    def delegate_find_reflection_plane_backwards(self):
+        self._do_find_reflection_plane(is_go_forwards=False)
+
+    def _do_find_reflection_plane(self, is_go_forwards: bool):
         old_state = self.system_state
         was_running = self._running  # remember if live view was on
 
@@ -525,7 +532,7 @@ class HiSignaller(QObject):
 
         try:
             z0 = self.backend.zaber_eye_lens.get_position()
-            result = self.backend.find_reflection_plane()
+            result = self.backend.find_reflection_plane(is_go_forwards=is_go_forwards)
             if result.found:
                 z = result.event_z_um + result.z_offset_um
             else:
