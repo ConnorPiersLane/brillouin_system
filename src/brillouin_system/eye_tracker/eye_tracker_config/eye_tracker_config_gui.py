@@ -72,6 +72,11 @@ class EyeTrackerConfigDialog(QDialog):
             h.addWidget(widget, 1)
             v.addLayout(h)
 
+        # Target polarity
+        wc = QCheckBox("Track white circle (off = dark pupil)")
+        inputs["track_white_circle"] = wc
+        add_row("Target", wc)
+
         # Thresholds
         le_left_thr = QLineEdit()
         le_left_thr.setValidator(QIntValidator(0, 255))
@@ -177,6 +182,9 @@ class EyeTrackerConfigDialog(QDialog):
     # ------------------------------------------------------------------ #
 
     def _set_fields(self, cfg: EyeTrackerConfig):
+        # Target polarity
+        self.inputs["track_white_circle"].setChecked(bool(cfg.track_white_circle))
+
         # Thresholds
         self.inputs["binary_threshold_left"].setText(str(cfg.binary_threshold_left))
         self.inputs["binary_threshold_right"].setText(str(cfg.binary_threshold_right))
@@ -219,6 +227,8 @@ class EyeTrackerConfigDialog(QDialog):
             return int(text) if text else default
 
         return {
+            "track_white_circle": bool(self.inputs["track_white_circle"].isChecked()),
+
             "binary_threshold_left": _intval("binary_threshold_left", 20),
             "binary_threshold_right": _intval("binary_threshold_right", 20),
 

@@ -19,6 +19,9 @@ class EyeTrackerConfig:
     Keep it small so you rarely need to touch it.
     """
 
+    # Target polarity: False = dark circle (pupil), True = white circle
+    track_white_circle: bool = False
+
     # Per-eye thresholds
     binary_threshold_left: int = 20
     binary_threshold_right: int = 20

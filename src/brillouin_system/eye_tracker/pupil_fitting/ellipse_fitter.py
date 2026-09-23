@@ -38,6 +38,7 @@ class EllipseFitter:
         self._masking_center_left: tuple[int, int] = (0, 0)
         self._masking_center_right: tuple[int, int] = (0, 0)
         self._frame_to_be_returned: PupilImgType = PupilImgType.ORIGINAL
+        self._track_white_circle: bool = False
 
     def set_config(
             self,
@@ -49,12 +50,14 @@ class EllipseFitter:
             masking_radius_right: int,
             masking_center_left: tuple[int, int],
             masking_center_right: tuple[int, int],
-            frame_to_be_returned: str
+            frame_to_be_returned: str,
+            track_white_circle: bool = False,
     ) -> None:
         """
         Directly sets all internal configuration fields.
         This does NOT pull values from the EyeTrackerConfig dataclass.
         frame_to_be_returned: "original", "binary", "floodfilled", "contour"
+        track_white_circle: False = dark target (pupil), True = white target
         """
 
         self._binary_threshold_left = binary_threshold_left
@@ -71,6 +74,8 @@ class EllipseFitter:
 
         self._frame_to_be_returned: PupilImgType = map_return_frame(frame_to_be_returned)
 
+        self._track_white_circle = bool(track_white_circle)
+
     # ---- Public API ----
 
 
@@ -85,7 +90,8 @@ class EllipseFitter:
         return find_pupil_ellipse_with_flooding(img=image,
                                                 threshold=self._binary_threshold_left,
                                                 fill_n_vetical_dark_pixels=self._fill_n_vetical_dark_pixels_left,
-                                                frame_to_be_returned=self._frame_to_be_returned)
+                                                frame_to_be_returned=self._frame_to_be_returned,
+                                                track_white_circle=self._track_white_circle)
 
 
 
@@ -100,5 +106,6 @@ class EllipseFitter:
         return find_pupil_ellipse_with_flooding(img=image,
                                                 threshold=self._binary_threshold_right,
                                                 fill_n_vetical_dark_pixels=self._fill_n_vetical_dark_pixels_right,
-                                                frame_to_be_returned=self._frame_to_be_returned)
+                                                frame_to_be_returned=self._frame_to_be_returned,
+                                                track_white_circle=self._track_white_circle)
 

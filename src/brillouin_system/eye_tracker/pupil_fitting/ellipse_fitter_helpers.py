@@ -194,18 +194,25 @@ def find_pupil_ellipse_with_flooding(
     img: np.ndarray,
     threshold: int = 20,
     fill_n_vetical_dark_pixels: int = 0,
-    frame_to_be_returned: PupilImgType = PupilImgType.ORIGINAL
+    frame_to_be_returned: PupilImgType = PupilImgType.ORIGINAL,
+    track_white_circle: bool = False,
 ) -> PupilEllipse:
     """
     Fast pupil ellipse detection via binary inversion, flood fill,
     largest component, and ellipse fit.
 
     Returns a PupilEllipse whose `pupil_img` is whichever stage you request.
+
+    track_white_circle=False: the target is dark (pupil), pixels below the
+    threshold become white. True: the target is bright, pixels above the
+    threshold become white and the image is not inverted.
     """
     img = _ensure_u8(img)
 
-    # Step 1: Binary inverse threshold — pupil dark → white
-    _, bw = cv2.threshold(img, threshold, 255, cv2.THRESH_BINARY_INV)
+    # Step 1: Binary threshold — target becomes white
+    # dark target (pupil) → inverse threshold, white target → plain threshold
+    thresh_type = cv2.THRESH_BINARY if track_white_circle else cv2.THRESH_BINARY_INV
+    _, bw = cv2.threshold(img, threshold, 255, thresh_type)
 
     # Only keep a copy of the binary if it's the requested output
     binary = bw.copy() if frame_to_be_returned == PupilImgType.BINARY else None

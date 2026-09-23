@@ -52,6 +52,7 @@ class EyeTracker:
             masking_center_left=config.masking_center_left,
             masking_center_right=config.masking_center_right,
             frame_to_be_returned=config.frame_returned,
+            track_white_circle=config.track_white_circle,
         )
 
     def _get_settings(self) -> EyeTrackerSettings:
