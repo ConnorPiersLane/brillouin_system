@@ -334,6 +334,7 @@ def perform_calibration(backend) -> bool:
                     return False
 
                 backend.microwave.set_frequency(freq)
+                #time.sleep(0.1)
                 i += 1
                 log.info(f"Freq {i}/{n}")
                 freq_points = []
