@@ -12,8 +12,7 @@ from brillouin_system.guis.human_interface.eye_tracker_controller import EyeTrac
 from brillouin_system.scan_managers.scanning_config.scanning_config import ScanningConfig
 from brillouin_system.scan_managers.scanning_config.scanning_config_gui import \
     AxialScanningConfigDialog
-from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig, \
-    sweep_scan_config
+from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config import SweepScanConfig
 from brillouin_system.scan_managers.sweep_scan_config.sweep_scan_config_gui import \
     SweepScanConfigDialog
 
@@ -37,7 +36,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QGroupBox, QLabel, QLineEdit,
     QFileDialog, QPushButton, QHBoxLayout, QFormLayout, QVBoxLayout, QCheckBox, QComboBox, QListWidget, QMessageBox
 )
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5 import QtCore
 
 from brillouin_system.logging_utils.qt_log_handler import QtLogBridge, QtTextEditHandler
@@ -53,13 +52,6 @@ from brillouin_system.devices.cameras.andor.andor_frame.andor_config import Ando
 from brillouin_system.devices.cameras.andor.andor_frame.andor_config_dialog import AndorConfigDialog
 from brillouin_system.guis.human_interface.hi_backend import HiBackend
 from brillouin_system.guis.human_interface.hi_signaller import HiSignaller
-from brillouin_system.guis.human_interface.predefined_plan import (
-    PlanStep,
-    ProgressReport,
-    build_progress,
-    expand_plan,
-    parse_plan_toml,
-)
 from brillouin_system.my_dataclasses.axial_scan import AxialScan
 from brillouin_system.my_dataclasses.request_axial_step_scan import RequestAxialStepScan
 from brillouin_system.my_dataclasses.request_sweep_scan import RequestSweepScan
@@ -75,8 +67,8 @@ from brillouin_system.spectrum_fitting.peak_fitting_config.find_peaks_config_gui
 
 use_backend_dummy = True
 # Eye Tracking
-include_eye_tracking = True
-use_eye_tracker_dummy = True
+include_eye_tracking = False
+use_eye_tracker_dummy = False
 
 # put this near your imports (top of file)
 
@@ -89,140 +81,6 @@ class NotifyingViewBox(pg.ViewBox):
         super().mouseDragEvent(ev, axis)
         if ev.isFinish():
             self.userScaled.emit()
-
-
-class PredefinedProgressDialog(QtWidgets.QDialog):
-    """Live QC view of a predefined plan against the currently-saved scans.
-
-    Purely a display of the ProgressReport the backend computed (no fitting,
-    no VIPA images): the taken/remaining split, the successful-scan count, and
-    a coverage plot of the real averaged positions so unfilled depths are
-    obvious. Non-modal, so the operator can keep it open and re-open to refresh.
-    """
-
-    _GREEN = (46, 160, 67)
-    _RED = (200, 60, 60)
-    _AMBER = (200, 150, 40)
-    _GREY = (140, 140, 140)
-
-    def __init__(self, report: ProgressReport, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Predefined Measurement Progress")
-        self.resize(720, 640)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(self._make_summary_label(report))
-        layout.addWidget(self._make_table(report), 1)
-        layout.addWidget(self._make_plot(report), 2)
-
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        layout.addWidget(buttons)
-
-    def _make_summary_label(self, report: ProgressReport) -> QLabel:
-        taken, total = report.taken_count, report.planned_total
-        fp, ft = report.frames_pass, report.frames_total
-        remaining = report.remaining_ids()
-        parts = [
-            f"<b>Taken:</b> {taken}/{total} planned steps",
-            f"<b>Frames within motion limit:</b> {fp}/{ft}",
-        ]
-        if remaining:
-            shown = ", ".join(remaining[:12])
-            more = "" if len(remaining) <= 12 else f" (+{len(remaining) - 12} more)"
-            parts.append(f"<b>Still to take:</b> {shown}{more}")
-        else:
-            parts.append("<b>Still to take:</b> none — every planned step is taken.")
-        if report.unmatched_scan_ids:
-            parts.append(
-                f"<i>Saved scans not in this plan (ignored): "
-                f"{len(report.unmatched_scan_ids)}</i>")
-        label = QLabel("<br>".join(parts))
-        label.setWordWrap(True)
-        label.setTextFormat(Qt.RichText)
-        return label
-
-    def _make_table(self, report: ProgressReport) -> QtWidgets.QTableWidget:
-        headers = ["Step", "Depth µm", "R mm", "φ°", "Limit µm",
-                   "Frames in limit", "Avg depth µm", "min|Δ| µm"]
-        table = QtWidgets.QTableWidget(len(report.rows), len(headers))
-        table.setHorizontalHeaderLabels(headers)
-        table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
-        table.setSelectionBehavior(QtWidgets.QTableWidget.SelectRows)
-        table.verticalHeader().setVisible(False)
-
-        for r, row in enumerate(report.rows):
-            # Per-frame status: green if every frame is within the limit, red if
-            # none are, amber if partial, grey if the step has no data yet.
-            if not row.taken or row.n_frames == 0:
-                status = "not taken" if not row.taken else "no in/out frames"
-                color = self._GREY
-            else:
-                status = f"{row.n_pass_frames}/{row.n_frames} frames"
-                if row.n_pass_frames == row.n_frames:
-                    color = self._GREEN
-                elif row.n_pass_frames == 0:
-                    color = self._RED
-                else:
-                    color = self._AMBER
-            avg = "—" if row.avg_actual_depth_um is None else f"{row.avg_actual_depth_um:.1f}"
-            mind = "—" if row.min_delta_um is None else f"{row.min_delta_um:.1f}"
-            limit = "off" if row.motion_limit_um <= 0 else f"{row.motion_limit_um:g}"
-            values = [row.id, f"{row.depth_um:g}", f"{row.R_mm:g}",
-                      f"{row.phi_deg:g}", limit, status, avg, mind]
-            for c, text in enumerate(values):
-                item = QtWidgets.QTableWidgetItem(text)
-                if c == 5:  # status column
-                    item.setForeground(pg.mkColor(color))
-                table.setItem(r, c, item)
-        table.resizeColumnsToContents()
-        return table
-
-    def _make_plot(self, report: ProgressReport) -> pg.PlotWidget:
-        plot = pg.PlotWidget()
-        plot.setLabel("bottom", "Prescribed depth", units="µm")
-        plot.setLabel("left", "Measured depth (fwd/bwd averaged)", units="µm")
-        plot.showGrid(x=True, y=True, alpha=0.2)
-        plot.addLegend(offset=(-10, 10))
-
-        # y = x identity line: a well-behaved measurement lands here. Spans the
-        # union of every prescribed depth and every plotted value.
-        vals = [p.prescribed_depth_um for p in report.points]
-        vals += [p.actual_depth_um for p in report.points]
-        vals += [r.depth_um for r in report.rows]
-        if vals:
-            lo, hi = min(vals), max(vals)
-            pad = 0.03 * (hi - lo or 1.0)
-            plot.plot([lo - pad, hi + pad], [lo - pad, hi + pad],
-                      pen=pg.mkPen((150, 150, 150), width=1,
-                                   style=Qt.DashLine),
-                      name="y = x (ideal)")
-
-        # One point per measured cycle: green pass, faint red fail.
-        passed = [p for p in report.points if p.passed]
-        failed = [p for p in report.points if not p.passed]
-        if passed:
-            plot.plot([p.prescribed_depth_um for p in passed],
-                      [p.actual_depth_um for p in passed],
-                      pen=None, symbol="o", symbolSize=8,
-                      symbolBrush=self._GREEN, symbolPen=None,
-                      name=f"pass ({len(passed)})")
-        if failed:
-            plot.plot([p.prescribed_depth_um for p in failed],
-                      [p.actual_depth_um for p in failed],
-                      pen=None, symbol="o", symbolSize=8,
-                      symbolBrush=(*self._RED, 90), symbolPen=None,
-                      name=f"fail ({len(failed)})")
-
-        # Prescribed depths with no data yet: a faint tick on the identity line
-        # marks where points still need to land.
-        untaken = sorted({r.depth_um for r in report.rows if not r.taken})
-        if untaken:
-            plot.plot(untaken, untaken, pen=None, symbol="x", symbolSize=8,
-                      symbolBrush=(*self._GREY, 90), symbolPen=(*self._GREY, 90),
-                      name="still to fill")
-        return plot
 
 
 class HiFrontend(QWidget):
@@ -246,10 +104,6 @@ class HiFrontend(QWidget):
     update_calibration_config_requested = pyqtSignal(object)
     take_axial_step_scan_requested = pyqtSignal(object)
     take_sweep_scan_requested = pyqtSignal(object)
-    # Predefined-measurement progress: send the current plan (list[PlanStep])
-    # to the backend thread, which joins it against the saved scans and emits
-    # predefined_progress_ready.
-    check_predefined_progress_requested = pyqtSignal(object)
     update_sweep_scan_config_requested = pyqtSignal(object)
     shutdown_requested = pyqtSignal()
     get_calibration_results_requested = pyqtSignal()
@@ -337,8 +191,6 @@ class HiFrontend(QWidget):
         self.update_calibration_config_requested.connect(self.brillouin_signaller.update_calibration_config_backend)
         self.take_axial_step_scan_requested.connect(self.brillouin_signaller.take_axial_step_scan)
         self.take_sweep_scan_requested.connect(self.brillouin_signaller.take_sweep_scan)
-        self.check_predefined_progress_requested.connect(
-            self.brillouin_signaller.compute_predefined_progress)
         self.update_sweep_scan_config_requested.connect(self.brillouin_signaller.update_sweep_scan_config)
         self.shutdown_requested.connect(self.brillouin_signaller.close)
         self.get_calibration_results_requested.connect(self.brillouin_signaller.get_calibration_results)
@@ -377,10 +229,6 @@ class HiFrontend(QWidget):
 
         self.brillouin_signaller.update_system_state_in_frontend.connect(self.update_system_state_label)
         self.brillouin_signaller.send_update_stored_axial_scans.connect(self.receive_axial_scan_list)
-        self.brillouin_signaller.sweep_scan_started.connect(self.on_sweep_scan_started)
-        self.brillouin_signaller.sweep_scan_finished.connect(self.on_sweep_scan_finished)
-        self.brillouin_signaller.predefined_progress_ready.connect(
-            self.show_predefined_progress)
         self.brillouin_signaller.axial_scan_data_ready.connect(self.handle_received_axial_scan_data)
         self.brillouin_signaller.send_axial_scans_to_save.connect(self.save_axial_scan_list_to_file)
         self.brillouin_signaller.send_message_to_frontend.connect(self.message_handler)
@@ -459,7 +307,6 @@ class HiFrontend(QWidget):
 
         axial_column = QVBoxLayout()
         axial_column.addWidget(self.create_take_axial_scan_group())
-        axial_column.addWidget(self.create_predefined_measurement_group())
 
         zaber_movement_and_scan_layout.addLayout(axial_column)
         middle_column_layout.addLayout(zaber_movement_and_scan_layout)
@@ -807,334 +654,21 @@ class HiFrontend(QWidget):
 
         # --- In-out sweep scan (repeated find-measure-find cycles) ---
         self.sweep_scan_btn = QPushButton("Sweep Scan")
-        # Wrap in a lambda: QPushButton.clicked passes a `checked` bool that
-        # would otherwise land in take_sweep_scan's max_time_s argument.
-        self.sweep_scan_btn.clicked.connect(lambda: self.take_sweep_scan())
-
-        self.timed_sweep_scan_btn = QPushButton("Timed Sweep")
-        self.timed_sweep_scan_btn.setToolTip(
-            "Run as many sweep cycles as fit in the Sweep Settings 'Max time' "
-            "budget, instead of a fixed number of cycles.")
-        self.timed_sweep_scan_btn.clicked.connect(lambda: self.take_timed_sweep_scan())
+        self.sweep_scan_btn.clicked.connect(self.take_sweep_scan)
 
         self.sweep_scan_settings_btn = QPushButton("Sweep Settings")
         self.sweep_scan_settings_btn.clicked.connect(self.open_sweep_scan_settings_dialog)
 
-        self.end_scan_early_btn = QPushButton("End Scan Early")
-        self.end_scan_early_btn.setToolTip(
-            "Stop the running sweep scan after the current cycle, but keep and "
-            "save the cycles already recorded (counts as a successful scan).")
-        self.end_scan_early_btn.clicked.connect(self.on_end_scan_early_clicked)
-
         sweep_row = QHBoxLayout()
         sweep_row.addWidget(self.sweep_scan_btn)
-        sweep_row.addWidget(self.timed_sweep_scan_btn)
         sweep_row.addWidget(self.sweep_scan_settings_btn)
-        sweep_row.addWidget(self.end_scan_early_btn)
         sweep_row.addStretch()
 
         layout.addRow(sweep_row)
 
-        # --- Sweep timing: last + longest + mean-on-record (resettable) ---
-        self._sweep_longest_seconds = None
-        self._sweep_total_seconds = 0.0
-        self._sweep_count = 0
-
-        self.sweep_last_label = QLabel("Last sweep: —")
-        self.sweep_longest_label = QLabel("Longest sweep: —")
-        self.sweep_mean_label = QLabel("Mean sweep: —")
-
-        self.sweep_longest_reset_btn = QPushButton("Reset")
-        self.sweep_longest_reset_btn.setToolTip(
-            "Reset the longest and mean sweep scan duration records.")
-        self.sweep_longest_reset_btn.clicked.connect(self.reset_sweep_stats)
-
-        sweep_timing_row = QHBoxLayout()
-        sweep_timing_row.addWidget(self.sweep_last_label)
-        sweep_timing_row.addWidget(self.sweep_longest_label)
-        sweep_timing_row.addWidget(self.sweep_mean_label)
-        sweep_timing_row.addWidget(self.sweep_longest_reset_btn)
-        sweep_timing_row.addStretch()
-
-        layout.addRow(sweep_timing_row)
-
         group.setLayout(layout)
         return group
 
-    # ================================================================
-    # Predefined measurement (TOML plan -> sweep-scan sequence)
-    # ----------------------------------------------------------------
-    # A plan is a TOML file: one [defaults] table applied to every step, plus
-    # an array of [[step]] tables that override only what differs (see
-    # measurement_templates/example_measurement_plan.toml and predefined_plan.py
-    # for the full schema). Each step carries:
-    #
-    #   depth_um         target depth past the plane [µm] -> SweepScanConfig.target_depth_um
-    #   mode             "timed" (cycles bounded by max_time_s) or "fixed"
-    #   cycles           number of in-out cycles          -> n_repeats (fixed only)
-    #   max_time_s       max sweep time [s]               -> SweepScanConfig.max_time_s
-    #   replicates       number of sweep scans at this depth
-    #   R_mm             target laser radius [mm]         -> Move XY
-    #   phi_deg          target laser angle  [deg]        -> Move XY
-    #   delta_c_mm       target Δc [mm]                    -> Move Z
-    #   motion_limit_um  motion quality gate [µm] (0 = off)
-    #
-    # Each step expands into `replicates` sweep scans, IDs "depth<depth_um>num<k>".
-    # Running a step: set the R/phi/Δc fields, Move XYZ, push the parameters
-    # into the sweep config (preserving every other tuned field), name the ID,
-    # then take the (timed or fixed) sweep scan carrying the motion limit — a
-    # scan that fails the limit is dropped like any failed scan (see
-    # scan_procedures.take_sweep_scan). All by reusing the existing handlers.
-    # ================================================================
-
-    def create_predefined_measurement_group(self):
-        group = QGroupBox("Predefined Measurement")
-        layout = QVBoxLayout()
-
-        # Source plan entries and the expanded (possibly scrambled) steps.
-        self._predef_entries: list = []
-        self._predef_steps: list[PlanStep] = []
-        self._predef_index: int = 0
-        self._predef_combo_updating: bool = False
-        # True while a predefined step's sweep is in flight; gates re-entry and
-        # tells on_sweep_scan_finished whether to advance the list.
-        self._predef_run_active: bool = False
-
-        # Row: import + scramble
-        self.predef_import_btn = QPushButton("Import Plan…")
-        self.predef_import_btn.setToolTip(
-            "Load a .toml measurement plan. A [defaults] table applies to every\n"
-            "step; each [[step]] overrides only what differs. Fields:\n"
-            "  depth_um, mode(\"timed\"/\"fixed\"), cycles, max_time_s,\n"
-            "  replicates, R_mm, phi_deg, delta_c_mm, motion_limit_um\n"
-            "See measurement_templates/example_measurement_plan.toml.")
-        self.predef_import_btn.clicked.connect(self.on_import_predefined_template)
-
-        self.predef_scramble_btn = QPushButton("Scramble")
-        self.predef_scramble_btn.setToolTip(
-            "Randomise the order of depths and replicates. Each depth's "
-            "replicate numbers still increase monotonically (num1 before "
-            "num2, …).")
-        self.predef_scramble_btn.clicked.connect(self.on_scramble_predefined)
-
-        io_row = QHBoxLayout()
-        io_row.addWidget(self.predef_import_btn)
-        io_row.addWidget(self.predef_scramble_btn)
-        io_row.addStretch()
-        layout.addLayout(io_row)
-
-        # Row: navigation (prev / dropdown / next)
-        self.predef_prev_btn = QPushButton("◀")
-        self.predef_prev_btn.setFixedWidth(34)
-        self.predef_prev_btn.setToolTip("Previous step")
-        self.predef_prev_btn.clicked.connect(self.on_predefined_prev)
-
-        self.predef_combo = QComboBox()
-        self.predef_combo.currentIndexChanged.connect(self.on_predefined_combo_changed)
-
-        self.predef_next_btn = QPushButton("▶")
-        self.predef_next_btn.setFixedWidth(34)
-        self.predef_next_btn.setToolTip("Next step")
-        self.predef_next_btn.clicked.connect(self.on_predefined_next)
-
-        nav_row = QHBoxLayout()
-        nav_row.addWidget(self.predef_prev_btn)
-        nav_row.addWidget(self.predef_combo, 1)
-        nav_row.addWidget(self.predef_next_btn)
-        layout.addLayout(nav_row)
-
-        # Row: current-step detail
-        self.predef_detail_label = QLabel("No plan loaded.")
-        self.predef_detail_label.setWordWrap(True)
-        layout.addWidget(self.predef_detail_label)
-
-        # Row: take the current step
-        self.predef_take_btn = QPushButton("Take Predefined Measurement")
-        self.predef_take_btn.setToolTip(
-            "Run the selected step: Move XYZ, set the sweep X/Y, then take "
-            "the sweep scan. The selection then advances to the next step.")
-        self.predef_take_btn.clicked.connect(self.take_predefined_measurement)
-        layout.addWidget(self.predef_take_btn)
-
-        # Row: quality-control progress
-        self.predef_progress_btn = QPushButton("Check Progress")
-        self.predef_progress_btn.setToolTip(
-            "Fast QC pass over the saved scans (no VIPA images, no spectrum "
-            "fitting): which planned steps are done vs still to take, how many "
-            "cleared the motion limit, and a coverage plot of the real "
-            "averaged positions.")
-        self.predef_progress_btn.clicked.connect(self.on_check_predefined_progress)
-        layout.addWidget(self.predef_progress_btn)
-
-        group.setLayout(layout)
-        self._refresh_predefined_ui()
-        return group
-
-    # ---- plan parsing / step building (see predefined_plan.py) ----
-
-    # ---- UI refresh / navigation ----
-
-    def _refresh_predefined_ui(self):
-        """Rebuild the dropdown and detail label from the current steps."""
-        has_steps = bool(self._predef_steps)
-        total = len(self._predef_steps)
-        if total:
-            self._predef_index = max(0, min(self._predef_index, total - 1))
-
-        self._predef_combo_updating = True
-        self.predef_combo.clear()
-        for i, step in enumerate(self._predef_steps):
-            self.predef_combo.addItem(f"{i + 1}. {step.id}")
-        if has_steps:
-            self.predef_combo.setCurrentIndex(self._predef_index)
-        self._predef_combo_updating = False
-
-        for w in (self.predef_combo, self.predef_prev_btn, self.predef_next_btn,
-                  self.predef_take_btn, self.predef_scramble_btn):
-            w.setEnabled(has_steps)
-
-        if not has_steps:
-            self.predef_detail_label.setText("No plan loaded.")
-            return
-
-        step = self._predef_steps[self._predef_index]
-        limit_txt = (f"{step.motion_limit_um:g} µm"
-                     if step.motion_limit_um > 0 else "off")
-        self.predef_detail_label.setText(
-            f"Step {self._predef_index + 1}/{total} — {step.id}\n"
-            f"depth={step.depth_um:g} µm, {step.mode_str()} | "
-            f"R={step.R_mm:g} mm, phi={step.phi_deg:g}°, "
-            f"Δc={step.delta_c_mm:g} mm | motion limit={limit_txt}")
-
-    def _set_predef_index(self, index: int):
-        if not self._predef_steps:
-            return
-        self._predef_index = max(0, min(index, len(self._predef_steps) - 1))
-        self._refresh_predefined_ui()
-
-    def on_predefined_combo_changed(self, index: int):
-        if self._predef_combo_updating or index < 0:
-            return
-        self._set_predef_index(index)
-
-    def on_predefined_prev(self):
-        self._set_predef_index(self._predef_index - 1)
-
-    def on_predefined_next(self):
-        self._set_predef_index(self._predef_index + 1)
-
-    @staticmethod
-    def _measurement_templates_dir() -> str:
-        """Default folder for measurement templates:
-        src/brillouin_system/measurement_templates."""
-        from pathlib import Path
-        d = Path(__file__).resolve().parents[2] / "measurement_templates"
-        return str(d) if d.is_dir() else ""
-
-    def on_import_predefined_template(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import Measurement Plan", self._measurement_templates_dir(),
-            "Measurement plan (*.toml);;All files (*)")
-        if not path:
-            return
-        try:
-            entries = parse_plan_toml(path)
-        except Exception as e:
-            log.exception("[Predefined] Failed to parse plan.")
-            QMessageBox.critical(self, "Plan Parse Error", str(e))
-            return
-
-        self._predef_entries = entries
-        self._predef_steps = expand_plan(entries, scramble=False)
-        self._predef_index = 0
-        self._refresh_predefined_ui()
-        log.info(f"[Predefined] Loaded {len(entries)} depth(s) -> "
-                 f"{len(self._predef_steps)} step(s) from {path}")
-
-    def on_scramble_predefined(self):
-        if not self._predef_entries:
-            return
-        self._predef_steps = expand_plan(self._predef_entries, scramble=True)
-        self._predef_index = 0
-        self._refresh_predefined_ui()
-        order = ", ".join(s.id for s in self._predef_steps)
-        log.info(f"[Predefined] Scrambled order: {order}")
-
-    def take_predefined_measurement(self):
-        """Run the currently-selected step. The selection advances to the
-        next step only once the sweep actually completes (see
-        on_sweep_scan_finished); a sweep that fails to start or is cancelled
-        leaves the selection here so it can be retried."""
-        if not self._predef_steps:
-            log.warning("[Predefined] No plan loaded.")
-            return
-
-        if getattr(self, "_predef_run_active", False):
-            log.warning("[Predefined] A step is already running; wait for it "
-                        "to finish before starting another.")
-            return
-
-        step = self._predef_steps[self._predef_index]
-        step_id = step.id
-        log.info(f"[Predefined] Running step {self._predef_index + 1}/"
-                 f"{len(self._predef_steps)} | ID: {step_id}")
-
-        # 1) Position: Move XYZ using this step's R / phi / Δc.
-        self.xy_r_input.setText(f"{step.R_mm:g}")
-        self.xy_phi_input.setText(f"{step.phi_deg:g}")
-        self.dc_input.setText(f"{step.delta_c_mm:g}")
-        self.on_move_xyz_clicked()
-
-        # 2) Push this step's parameters into the sweep config, preserving
-        #    every other tuned field. Always set the target depth. A fixed
-        #    step also sets n_repeats; a timed step leaves n_repeats alone
-        #    (unused). Both kinds set max_time_s from the plan.
-        timed = bool(step.timed)
-        overrides = {"target_depth_um": float(step.depth_um),
-                     "max_time_s": float(step.max_time_s)}
-        if not timed:
-            overrides["n_repeats"] = int(step.cycles)
-        try:
-            from dataclasses import replace
-            cfg = replace(sweep_scan_config.get(), **overrides)
-        except Exception:
-            log.exception("[Predefined] Could not clone current sweep config; "
-                          "falling back to defaults for this step.")
-            cfg = SweepScanConfig(**overrides)
-        self.update_sweep_scan_config_requested.emit(cfg)
-
-        # 3) Name the ID and take the sweep scan (reuses take_sweep_scan()).
-        #    Mark the run active so on_sweep_scan_finished advances the list
-        #    only if this sweep actually completes.
-        self._predef_run_active = True
-        self.axial_id_input.setText(step_id)
-        # Use this step's resolved max time for the budget / auto end-scan-early
-        # timer, run timed or fixed as the plan specified, and carry the motion
-        # limit so the backend drops the scan if the eye moved too much.
-        if not self.take_sweep_scan(max_time_s=cfg.max_time_s, timed=timed,
-                                    motion_limit_um=step.motion_limit_um):
-            # The request never went out; clear the flag so it can be retried
-            # (no completion signal will arrive to clear it otherwise).
-            self._predef_run_active = False
-
-    def on_check_predefined_progress(self):
-        """Ask the backend to score the current plan against the saved scans.
-
-        Fast by design: it reads only each scan's stored reflection crossings
-        and lens positions (no VIPA images, no spectrum fitting). The result
-        comes back via predefined_progress_ready -> show_predefined_progress."""
-        if not self._predef_steps:
-            QMessageBox.information(
-                self, "Check Progress",
-                "No plan loaded. Import a measurement plan first.")
-            return
-        self.check_predefined_progress_requested.emit(list(self._predef_steps))
-
-    def show_predefined_progress(self, report: ProgressReport):
-        """Display the progress report (non-modal so it can stay open)."""
-        dialog = PredefinedProgressDialog(report, parent=self)
-        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
-        dialog.show()
 
     def update_axial_step_distance(self):
         """
@@ -1573,33 +1107,8 @@ class HiFrontend(QWidget):
 
         layout.addRow(dc_row)
 
-        # ----------------------------
-        # Move XYZ: run the XY (R, phi) move then the Z (Δc) move, back to
-        # back, reusing the existing single-axis handlers unchanged. The
-        # backend queues the emitted requests sequentially. This is the move
-        # invoked at the start of each predefined-measurement step.
-        # ----------------------------
-        self.xyz_move_btn = QPushButton("Move XYZ")
-        self.xyz_move_btn.setFixedWidth(90)
-        self.xyz_move_btn.setToolTip(
-            "Move XY to (R, phi) then move Z to Δc, using the fields above.")
-        self.xyz_move_btn.clicked.connect(self.on_move_xyz_clicked)
-
-        xyz_row = QHBoxLayout()
-        xyz_row.addWidget(self.xyz_move_btn)
-        xyz_row.addStretch()
-
-        layout.addRow(xyz_row)
-
         group.setLayout(layout)
         return group
-
-    def on_move_xyz_clicked(self):
-        """Move XY (R, phi) then Z (Δc), back to back. Reuses the existing
-        single-axis handlers so their behaviour is unchanged; the backend
-        queues the emitted move requests sequentially."""
-        self.on_move_xy_polar_clicked()
-        self.on_move_z_by_dc_clicked()
 
     # ---------------- GUI Update Loop ---------------- #
     def _on_andor_mailbox(self):
@@ -1987,68 +1496,6 @@ class HiFrontend(QWidget):
         except ValueError:
             log.exception("[Brillouin Viewer] [Reference] Invalid frequency input.")
 
-    @staticmethod
-    def _format_sweep_duration(prefix: str, elapsed: float) -> str:
-        return f"{prefix}: {elapsed:.1f} s ({elapsed / 60:.2f} min)"
-
-    def reset_sweep_stats(self):
-        """Clear the longest and mean sweep scan duration records."""
-        self._sweep_longest_seconds = None
-        self._sweep_total_seconds = 0.0
-        self._sweep_count = 0
-        self.sweep_longest_label.setText("Longest sweep: —")
-        self.sweep_mean_label.setText("Mean sweep: —")
-        log.info("[Brillouin Viewer] Longest and mean sweep records reset.")
-
-    def on_sweep_scan_finished(self, success: bool, elapsed: float = 0.0):
-        """Outcome of a sweep scan (any sweep, predefined or manual).
-
-        elapsed is the sweep duration measured backend-side from the START of
-        the sweep scan (it excludes the Move XY / Move Z that position the eye
-        beforehand). Only a genuinely completed sweep (success=True) records
-        that time and advances the predefined-measurement list; a sweep that
-        failed to start or was cancelled (success=False) records nothing and
-        leaves the predefined selection where it is, so it can be retried."""
-        # The scan is over: cancel the hard max-time backstop if still pending.
-        self._cancel_sweep_max_time_timer()
-
-        if success:
-            log.info(f"[Brillouin Viewer] Sweep Scan finished | "
-                     f"elapsed {elapsed:.1f} s "
-                     f"({elapsed / 60:.2f} min)")
-
-            self.sweep_last_label.setText(self._format_sweep_duration(
-                "Last sweep", elapsed))
-
-            # Track the longest sweep on record (until the user resets it).
-            longest = getattr(self, "_sweep_longest_seconds", None)
-            if longest is None or elapsed > longest:
-                self._sweep_longest_seconds = elapsed
-                self.sweep_longest_label.setText(self._format_sweep_duration(
-                    "Longest sweep", elapsed))
-
-            # Running mean over all sweeps since the last reset.
-            self._sweep_total_seconds += elapsed
-            self._sweep_count += 1
-            mean = self._sweep_total_seconds / self._sweep_count
-            self.sweep_mean_label.setText(self._format_sweep_duration(
-                f"Mean sweep (n={self._sweep_count})", mean))
-        else:
-            log.info("[Brillouin Viewer] Sweep Scan did not complete "
-                     "(failed to start or cancelled); elapsed time not recorded.")
-
-        # Advance the predefined-measurement list only on a completed sweep.
-        if getattr(self, "_predef_run_active", False):
-            self._predef_run_active = False
-            if success:
-                if self._predef_index < len(self._predef_steps) - 1:
-                    self._set_predef_index(self._predef_index + 1)
-                else:
-                    log.info("[Predefined] Reached the last step.")
-            else:
-                log.info("[Predefined] Step did not complete; staying on "
-                         f"step {self._predef_index + 1} for retry.")
-
     def receive_axial_scan_list(self, scan_list: list):
 
         # Update QListWidget
@@ -2266,92 +1713,21 @@ class HiFrontend(QWidget):
             self.ref_bkg_label.setText(f"Ref. bkg: {status}")
             self.ref_bkg_label.setStyleSheet("color: green")
 
-    def take_sweep_scan(self, max_time_s: float | None = None,
-                        timed: bool = False,
-                        motion_limit_um: float | None = None) -> bool:
-        """Emit a sweep-scan request. Returns True if the request was sent
-        (elapsed time is reported when the scan finishes via
-        on_sweep_scan_finished), False if it could not be initiated.
-
-        The max-time budget is enforced backend-side, measured from the START
-        of the sweep scan (the Move XY / Move Z that position the eye run as
-        earlier requests and are not counted). It is read there from
-        SweepScanConfig.max_time_s; max_time_s here is only used to validate a
-        timed request up front. timed: run as many cycles as fit in the budget
-        instead of a fixed number of cycles (requires max_time_s > 0)."""
+    def take_sweep_scan(self):
         try:
             id_str = self.axial_id_input.text().strip()
 
-            if max_time_s is None:
-                try:
-                    max_time_s = float(sweep_scan_config.get().max_time_s)
-                except Exception:
-                    max_time_s = 0.0
-
-            if timed and (not max_time_s or max_time_s <= 0):
-                log.warning("[Brillouin Viewer] Timed sweep needs a max time "
-                            "> 0 (set it in Sweep Settings). Aborting.")
-                return False
-
-            log.info(f"[Brillouin Viewer] {'Timed ' if timed else ''}Sweep "
-                     f"Scan Request | ID: {id_str}")
+            log.info(f"[Brillouin Viewer] Sweep Scan Request | ID: {id_str}")
 
             request = RequestSweepScan(
                 id=id_str,
                 eye_tracker_results=self.lastest_eye_tracker_results,
-                timed=timed,
-                motion_limit_um=motion_limit_um,
             )
+
             self.take_sweep_scan_requested.emit(request)
-            return True
 
         except Exception as e:
             log.exception(f"[Brillouin Viewer] Failed to initiate sweep scan: {e}")
-            return False
-
-    def take_timed_sweep_scan(self, max_time_s: float | None = None) -> bool:
-        """Run a timed sweep: as many cycles as fit in the max-time budget
-        (from Sweep Settings unless max_time_s is given)."""
-        return self.take_sweep_scan(max_time_s=max_time_s, timed=True)
-
-    def on_sweep_scan_started(self, max_time_s: float):
-        """The backend has begun a sweep scan (after any Move XY / Move Z).
-        Arm a hard max-time backstop from this moment: the backend's own
-        predictive budget should stop first, but if a cycle overruns the
-        estimate this timer guarantees the sweep is ended (and its data saved)
-        at the limit. Measured from the sweep start, so the positioning moves
-        are not counted."""
-        self._arm_sweep_max_time_timer(max_time_s)
-
-    def _arm_sweep_max_time_timer(self, max_time_s: float | None):
-        """Start a single-shot timer that ends the sweep early (saving data)
-        once max_time_s has elapsed. Any previous timer is cancelled first."""
-        self._cancel_sweep_max_time_timer()
-        if not max_time_s or max_time_s <= 0:
-            return
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(self._on_sweep_max_time_reached)
-        timer.start(int(max_time_s * 1000))
-        self._sweep_max_time_timer = timer
-        log.info(f"[Brillouin Viewer] Sweep max-time backstop armed at "
-                 f"{max_time_s:.1f} s.")
-
-    def _cancel_sweep_max_time_timer(self):
-        timer = getattr(self, "_sweep_max_time_timer", None)
-        if timer is not None:
-            timer.stop()
-            self._sweep_max_time_timer = None
-
-    def _on_sweep_max_time_reached(self):
-        self._sweep_max_time_timer = None
-        log.info("[Brillouin Viewer] Sweep max-time backstop reached - ending "
-                 "scan early and saving collected data.")
-        self.brillouin_signaller.end_scan_early()
-
-    def on_end_scan_early_clicked(self):
-        log.info("[Brillouin Viewer] End Scan Early clicked.")
-        self.brillouin_signaller.end_scan_early()
 
 
     def clear_measurements(self):
@@ -2608,21 +1984,6 @@ class HiFrontend(QWidget):
         self.lastest_eye_tracker_results = get_eye_tracker_results(
             left=left, right=right, meta=meta, laser_focus_position=self.laser_focus_position
         )
-
-        # Dummy mode: the eye-tracker (dummy stereo cameras) and the reflection
-        # finder (simulated cornea) are otherwise independent simulations, so
-        # the eye-tracker Δc is unrelated to where the finder's cornea actually
-        # is. Left alone, a plan's Move Z chases that bogus Δc and marches the
-        # eye lens out of the cornea's search range, so every sweep's initial
-        # find fails. Override Δc with the value consistent with the simulated
-        # cornea (None on real hardware -> no change) so the whole predefined
-        # flow — Move Z, then find, then sweep — stays self-consistent.
-        if self.lastest_eye_tracker_results is not None:
-            sim_dc = self.brillouin_signaller.backend.simulated_delta_laser_corner_mm()
-            if sim_dc is not None:
-                from dataclasses import replace
-                self.lastest_eye_tracker_results = replace(
-                    self.lastest_eye_tracker_results, delta_laser_corner=sim_dc)
 
         laser_position = self.lastest_eye_tracker_results.laser_position
         if laser_position is not None:
